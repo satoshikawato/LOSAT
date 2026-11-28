@@ -575,11 +575,14 @@ fn database_lookup_files_hold_the_volume_and_gi_mask_files() {
     assert_eq!(split.looked_up.len() + split.found.len(), got.len());
 }
 
-// Line WQA D26 round 1: the files of a database that a run can open follow its program and its
-// options (`DbUse`): a search of the sequences opens the volume's index, header, sequence and
-// string-index files and the LMDB file; the id-lookup files only with an id list or a taxonomy
-// filter, the column files and GI-mask files only with a mask option, the RPS files only for the
-// RPS searches; a name that none of these can open is not a file the run reads.
+// Line WQA D26 rounds 1 and 2: the files of a database that a run can open follow its program and
+// its options (`DbUse`): a search of the sequences opens the volume's index, header and sequence
+// files, the LMDB file and the id indexes (string, GI and trace ids: which of them it opens depends
+// on the ids that the database holds); the LMDB lookup files of an id list or a taxonomy filter
+// only with that option, the IPG index only with an IPG list, the column files and GI-mask files
+// only with a mask option, the RPS files only for the RPS searches; a name that none of these can
+// open is not a file the run reads. The volumes here are no real volumes: their index files do
+// not read, so the LMDB names beside them are counted (`SeqDb::volume_lmdb_file`).
 #[test]
 fn database_files_follow_what_the_run_asks_for() {
     use super::database_lookup_files;
@@ -616,13 +619,14 @@ fn database_files_follow_what_the_run_asks_for() {
     // The plain search.
     let plain = files(b"m", SeqType::Nucleotide, DbUse::of_program("blastn"));
     for name in [
-        "m.nal", "v.nin", "v.nhr", "v.nsq", "v.nsd", "v.nsi", "v.ndb",
+        "m.nal", "v.nin", "v.nhr", "v.nsq", "v.nsd", "v.nsi", "v.ndb", "v.nni", "v.nnd", "v.nti",
+        "v.ntd",
     ] {
         assert!(has(&plain, name), "{name} in {plain:?}");
     }
     for name in [
-        "mk.gni", "mk.gno", "v.nog", "v.naa", "v.nba", "v.nnd", "v.nni", "v.nos", "v.nto", "v.njs",
-        "v.nhd", "v.pin", "v.rps", "m.njs",
+        "mk.gni", "mk.gno", "v.nog", "v.naa", "v.nba", "v.npi", "v.nos", "v.nto", "v.njs", "v.nhd",
+        "v.pin", "v.rps", "m.njs", "m.ndb",
     ] {
         assert!(!has(&plain, name), "{name} in {plain:?}");
     }
@@ -635,7 +639,7 @@ fn database_files_follow_what_the_run_asks_for() {
         ] {
             assert!(has(&masked, name), "{option}: {name} in {masked:?}");
         }
-        for name in ["v.nbb", "v.nbc", "v.nnd", "v.nos"] {
+        for name in ["v.nbb", "v.nbc", "v.npi", "v.nos"] {
             assert!(!has(&masked, name), "{option}: {name} in {masked:?}");
         }
     }
@@ -652,43 +656,27 @@ fn database_files_follow_what_the_run_asks_for() {
         (
             "gilist",
             &["v.nni", "v.nnd"][..],
-            &["v.nos", "v.nto", "v.nti", "v.npi"][..],
+            &["v.nos", "v.nto", "v.npi"][..],
         ),
-        (
-            "negative_gilist",
-            &["v.nni", "v.nnd"],
-            &["v.nos", "v.nto", "v.nti"],
-        ),
-        ("ipglist", &["v.npi", "v.npd"], &["v.nni", "v.nos", "v.nto"]),
+        ("negative_gilist", &["v.nni", "v.nnd"], &["v.nos", "v.nto"]),
+        ("ipglist", &["v.npi", "v.npd"], &["v.nos", "v.nto"]),
         (
             "seqidlist",
             &["v.nos", "v.nti", "v.ntd"],
-            &["v.nni", "v.nnd", "v.nto", "v.ntf"],
+            &["v.nto", "v.ntf"],
         ),
         (
             "negative_seqidlist",
             &["v.nos", "v.nti", "v.ntd"],
-            &["v.nni", "v.nto"],
+            &["v.nto"],
         ),
-        (
-            "taxids",
-            &["v.not", "v.ntf", "v.nto"],
-            &["v.nni", "v.nos", "v.nti"],
-        ),
-        (
-            "negative_taxids",
-            &["v.not", "v.ntf", "v.nto"],
-            &["v.nni", "v.nos"],
-        ),
-        (
-            "taxidlist",
-            &["v.not", "v.ntf", "v.nto"],
-            &["v.nni", "v.nos"],
-        ),
+        ("taxids", &["v.not", "v.ntf", "v.nto"], &["v.nos", "v.npi"]),
+        ("negative_taxids", &["v.not", "v.ntf", "v.nto"], &["v.nos"]),
+        ("taxidlist", &["v.not", "v.ntf", "v.nto"], &["v.nos"]),
         (
             "negative_taxidlist",
             &["v.not", "v.ntf", "v.nto"],
-            &["v.nni", "v.nos"],
+            &["v.nos"],
         ),
     ] {
         let filtered = files(b"m", SeqType::Nucleotide, with(option));
@@ -712,6 +700,17 @@ fn database_files_follow_what_the_run_asks_for() {
         assert!(!has(&blastp, name), "{name} in {blastp:?}");
         assert!(has(&rps, name), "{name} in {rps:?}");
     }
+    // blastdbcheck's `-cdd_delta` reads the RPS files and the two files of the CDD delta search
+    // (dev's #1660); without it, no RPS file.
+    let mut cdd_delta = DbUse::of_program("blastdbcheck");
+    cdd_delta.note_option("cdd_delta");
+    let checked = files(b"w", SeqType::Protein, cdd_delta);
+    let unchecked = files(b"w", SeqType::Protein, DbUse::of_program("blastdbcheck"));
+    for name in ["w.rps", "w.loo", "w.aux", "w.freq", "w.wcounts", "w.obsr"] {
+        assert!(has(&checked, name), "{name} in {checked:?}");
+        assert!(!has(&unchecked, name), "{name} in {unchecked:?}");
+    }
+    assert!(!has(&rps, "w.wcounts") && !has(&rps, "w.obsr"), "{rps:?}");
     // A tool that reads the sequences in OID order opens the alias files and each volume's
     // index, header, sequence and LMDB files only (dev's WW4c runs dustmasker and segmasker in
     // LOSAT Web); makeblastdb's copy and makembindex's `-db_mask` also open the masks.
@@ -721,8 +720,8 @@ fn database_files_follow_what_the_run_asks_for() {
             assert!(has(&reader, name), "{program}: {name} in {reader:?}");
         }
         for name in [
-            "v.nsi", "v.nsd", "v.nog", "v.naa", "mk.gni", "mk.gno", "v.nnd", "v.nos", "v.nto",
-            "v.nhd", "v.njs", "m.njs",
+            "v.nsi", "v.nsd", "v.nog", "v.naa", "mk.gni", "mk.gno", "v.nnd", "v.nti", "v.nos",
+            "v.nto", "v.nhd", "v.njs", "m.njs",
         ] {
             assert!(!has(&reader, name), "{program}: {name} in {reader:?}");
         }

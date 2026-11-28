@@ -118,21 +118,33 @@ pub(crate) fn check_in(
     )
 }
 
+pub(crate) use archive::archive_databases;
+
 // No NCBI counterpart: LOSAT Web checks `-logfile` against the input names the run opens for
-// reading, so a `-logfile` naming `-archive` (even when missing) is refused instead of creating
-// the file before `-archive` reads it. `-out` is opened only after `-archive` is read, so
-// `for_out` is empty (existing files in the run directory are still refused by `OpenFiles`).
+// reading, so a `-logfile` naming `-archive` (even when missing) or a file of a database that the
+// archive names is refused instead of creating the file before the run reads it. `-out` is
+// opened only after `-archive` is read, so `for_out` is empty (existing files in the run
+// directory are still refused by `OpenFiles`).
 /// The input file names that a `blast_formatter` run with `words` opens for reading:
-/// `(for_logfile, for_out)`.
-pub(crate) fn read_files<S: AsRef<OsStr>>(words: &[S]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+/// `(for_logfile, for_out)`: `-archive` and the files of the databases of its objects
+/// ([`archive_databases`], `log_inputs::tool_database_files`), as the command line's check
+/// (`log_inputs::check_disk_logfile`).
+pub(crate) fn read_files<S: AsRef<OsStr> + Clone>(words: &[S]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
     let mut for_logfile = Vec::new();
+    let mut databases = Vec::new();
     crate::ncbi_app::args::scan_argv(TOOL.program, words, |name, value| {
         if name == "archive" {
             if let Some(path) = value.filter(|v| !v.is_empty() && *v != OsStr::new("-")) {
                 for_logfile.push(path.as_encoded_bytes().to_vec());
+                databases.extend(archive_databases(path));
             }
         }
     });
+    for_logfile.extend(crate::report::log_inputs::tool_database_files(
+        TOOL.program,
+        words,
+        &databases,
+    ));
     (for_logfile, Vec::new())
 }
 

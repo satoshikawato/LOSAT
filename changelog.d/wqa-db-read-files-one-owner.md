@@ -7,9 +7,14 @@
   `OIDLIST` file beside the first volume when the file the alias names exists, or GI-mask data files
   that the run does not read. A database's files that a run cannot open are no longer refused on the
   command line either: the GI-mask files, the GI index and the mask columns of a search without
-  `-db_soft_mask` / `-db_hard_mask`, the id-lookup files of a search without an id list or taxonomy
-  option, the RPS files of every search but `rpsblast` and `rpstblastn`; for `dustmasker`,
+  `-db_soft_mask` / `-db_hard_mask` (and of `-filtering_db`), the LMDB lookup files of a search
+  without a seqid list or taxonomy option, the IPG index without `-ipglist`, the RPS files of every
+  search but `rpsblast` and `rpstblastn`, the LMDB names of a version 4 volume; for `dustmasker`,
   `segmasker`, `windowmasker`, `makembindex` and a `makeblastdb -input_type blastdb` copy, which
-  read the sequences in order, a volume's string index, id-lookup and metadata files, and the mask
-  files except for `makeblastdb` and `makembindex -db_mask`, which read them. LOSAT Web now refuses
-  the same files as the command line, from the same function, and a volume's component files.
+  read the sequences in order, a volume's id-lookup files other than those that the database's alias
+  files' id lists read, its metadata files, and the mask files except for `makeblastdb` and
+  `makembindex -db_mask`, which read them. Now refused: the LMDB file that a version 5 volume's index
+  file names (`big.ndb` for `-db big.00` of a database split by `-max_file_sz`), the files of the
+  database that an `-import_search_strategy` file or a `blast_formatter -archive` file names, and
+  the RPS and CDD delta files with `blastdbcheck -cdd_delta`. LOSAT Web now refuses the same files
+  as the command line, from the same function, and a volume's component files.

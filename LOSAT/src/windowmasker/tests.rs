@@ -760,11 +760,11 @@ fn read_files_collects_falist_entries_and_blastdb_lookup_files() {
 
 #[test]
 fn out_counts_only_the_files_that_a_database_looks_up() {
-    // `-out` naming a missing component, GI-mask or alias LMDB file of an `-infmt blastdb` input
-    // leaves the command line's counts unchanged (the reading of the sequences never opens it),
-    // so LOSAT Web takes it as a new file; `-logfile` refuses the files that the reading opens
-    // as the command line does, and takes the others (the string index, the GI index, the GI
-    // masks, the metadata) as the run's log (line WQA D26).
+    // `-out` naming a missing component or GI-mask file of an `-infmt blastdb` input leaves the
+    // command line's counts unchanged (the reading of the sequences never opens it), so LOSAT Web
+    // takes it as a new file; `-logfile` refuses the files that the reading opens as the command
+    // line does, and takes the others (the id indexes, the GI masks, the metadata, an LMDB file
+    // named after the alias file, which no volume's index names) as the run's log (line WQA D26).
     let dir = crate::utils::test_dir::TempDir::unique("losat-d26-wm-out");
     for ext in ["nin", "nhr", "nsq"] {
         std::fs::write(dir.join(format!("v.{ext}")), b"x").unwrap();
@@ -791,12 +791,12 @@ fn out_counts_only_the_files_that_a_database_looks_up() {
     for name in ["m.nal", "index.alx"] {
         assert!(has(&for_log, name) && has(&for_out, name), "{name}");
     }
-    for name in ["v.nin", "v.nhr", "v.nsq", "v.ndb", "m.ndb"] {
+    for name in ["v.nin", "v.nhr", "v.nsq", "v.ndb"] {
         assert!(has(&for_log, name), "{name} in {for_log:?}");
         assert!(!has(&for_out, name), "{name} in {for_out:?}");
     }
     for name in [
-        "v.nsi", "v.nsd", "v.nog", "v.naa", "m.njs", "mk.gni", "mk.gno",
+        "v.nsi", "v.nsd", "v.nni", "v.nnd", "v.nog", "v.naa", "m.njs", "m.ndb", "mk.gni", "mk.gno",
     ] {
         assert!(!has(&for_log, name), "{name} in {for_log:?}");
         assert!(!has(&for_out, name), "{name} in {for_out:?}");

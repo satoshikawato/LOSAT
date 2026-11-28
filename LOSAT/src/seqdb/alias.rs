@@ -1247,6 +1247,17 @@ pub(super) fn resolve_one_name(
     Ok(volumes_in_order(root))
 }
 
+/// Calls `visit` with the kind of each id list of the alias files of the tree `node`
+/// (`AliasNode::lists`, as `ComputeMasks` read them).
+pub(super) fn for_each_list_kind(node: &AliasNode, visit: &mut dyn FnMut(IdListKind)) {
+    for list in &node.lists {
+        visit(list.kind);
+    }
+    for subnode in &node.subnodes {
+        for_each_list_kind(subnode, visit);
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:970-984
 pub(super) fn collect_alias_files(node: &AliasNode, out: &mut std::collections::BTreeSet<Vec<u8>>) {
     if let Some(name) = &node.this_name {

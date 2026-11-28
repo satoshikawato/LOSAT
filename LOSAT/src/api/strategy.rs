@@ -157,6 +157,46 @@ fn database_of(command: &Commands) -> Option<String> {
     db.map(|name| name.to_string_lossy().into_owned())
 }
 
+/// The databases that the search of the applied arguments `command` (`apply`) opens: the
+/// database of `-db` with the strategy's program, whose molecule is that database's, BLASTN's
+/// `-filtering_db` and BLASTN's MegaBLAST index (`BlastnArgs::megablast_index_name`: the name and
+/// whether the index is old-style). The names are the arguments' bytes.
+#[derive(Debug, Default)]
+pub struct SearchDatabases {
+    /// `-db` and the program that searches it.
+    pub db: Option<(std::ffi::OsString, Program)>,
+    /// BLASTN's `-filtering_db`.
+    pub filtering_db: Option<std::ffi::OsString>,
+    /// BLASTN's MegaBLAST index.
+    pub mb_index: Option<(Vec<u8>, bool)>,
+}
+
+/// The databases of the applied arguments `command` ([`SearchDatabases`]): the strategy's
+/// database, or the command line's where it gives one, as the search opens them (line WQA D26:
+/// the files of `-logfile` that the run reads).
+pub fn search_databases(command: &Commands) -> SearchDatabases {
+    let db = match command {
+        Commands::Blastp(args) => args.db.clone(),
+        Commands::Tblastn(args) => args.db.clone(),
+        Commands::Blastn(args) => args.db.clone(),
+        Commands::Tblastx(args) => args.db.clone(),
+        Commands::Blastx(args) => args.db.clone(),
+        _ => None,
+    }
+    .zip(program_of(command));
+    match command {
+        Commands::Blastn(args) => SearchDatabases {
+            db,
+            filtering_db: args.filtering_db.clone(),
+            mb_index: args.megablast_index_name(),
+        },
+        _ => SearchDatabases {
+            db,
+            ..SearchDatabases::default()
+        },
+    }
+}
+
 /// Sets the arguments' `-out` (the file of `run_to_file`).
 fn set_out(command: &mut Commands, path: &Path) {
     let path = Some(path.to_path_buf());

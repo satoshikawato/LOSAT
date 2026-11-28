@@ -104,6 +104,66 @@ pub(crate) fn format_archive(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:796-818
+/// The objects of the archive `archive` as `Run::objects` reads them, each given to `visit` with
+/// the messages that the reader posted while it read it, until the end of the data or the first
+/// error (`visit`'s, or that of an archive whose encoding is none that NCBI reads).
+fn each_object(
+    archive: &mut dyn Read,
+    visit: &mut dyn FnMut(
+        Result<Archive, ReadError>,
+        Vec<crate::report::serial::asn_types::Post>,
+    ) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    let guessed = guess_encoding(archive);
+    let mut reader = match guessed.encoding {
+        Ok(Encoding::Text) => ArchiveReader::new(guessed.into_text(Names::BLAST_ARCHIVE)),
+        Ok(Encoding::Binary) => ArchiveReader::binary(guessed.into_binary(Names::BLAST_ARCHIVE)),
+        Ok(Encoding::Xml) => {
+            ArchiveReader::xml(guessed.into_xml(XmlStyle::Asn, Names::BLAST_ARCHIVE))
+        }
+        Ok(Encoding::Other) => return Err(invalid_archive()),
+        Err(GuessStop::Exception(exception)) => return Err(exception_error(&exception)),
+        Err(GuessStop::Undecided(what)) => return Err(Refusal::Undecided(what).into()),
+    };
+    while let Some((read, posts)) = reader.next_archive() {
+        visit(read, posts)?;
+    }
+    Ok(())
+}
+
+/// The databases that a blast_formatter run of the archive file `path` opens (no NCBI
+/// counterpart; line WQA D26, the files of `-logfile` that the run reads): the database of each
+/// database search object (`Subject::Database`, with its molecule, `db_is_protein`), as
+/// `Run::object` takes it, each once, up to the first object that the run stops at. None for a
+/// file that does not open.
+pub(crate) fn archive_databases(path: &OsStr) -> Vec<(Vec<u8>, SeqType)> {
+    let Ok(mut archive) = files::open_text_file(path) else {
+        return Vec::new();
+    };
+    let mut databases: Vec<(Vec<u8>, SeqType)> = Vec::new();
+    let _ = each_object(&mut archive, &mut |read, _| {
+        let Some(search) = read.map_err(read_error)?.search.map_err(stop_error)? else {
+            return Ok(());
+        };
+        if let Subject::Database(name) = &search.request.subject {
+            let seqtype = if search.request.db_is_protein() {
+                SeqType::Protein
+            } else {
+                SeqType::Nucleotide
+            };
+            if !databases
+                .iter()
+                .any(|(known, known_type)| known == name && *known_type == seqtype)
+            {
+                databases.push((name.clone(), seqtype));
+            }
+        }
+        Ok(())
+    });
+    databases
+}
+
 /// What the loop keeps from one archive object to the next (`CRemoteBlast`'s members, and the
 /// `-out` stream of `CArgs`).
 struct Run<'r, 'o> {
@@ -424,27 +484,13 @@ impl<'r, 'o> Run<'r, 'o> {
     /// (`CFormatGuess`, accepting ASN.1 text, ASN.1 binary and ASN.1-style XML), then each object
     /// read, its messages posted and, unless it is the error archive, formatted.
     fn objects(&mut self, archive: &mut dyn Read, diag: &mut Diag) -> anyhow::Result<()> {
-        let guessed = guess_encoding(archive);
-        let mut reader = match guessed.encoding {
-            Ok(Encoding::Text) => ArchiveReader::new(guessed.into_text(Names::BLAST_ARCHIVE)),
-            Ok(Encoding::Binary) => {
-                ArchiveReader::binary(guessed.into_binary(Names::BLAST_ARCHIVE))
-            }
-            Ok(Encoding::Xml) => {
-                ArchiveReader::xml(guessed.into_xml(XmlStyle::Asn, Names::BLAST_ARCHIVE))
-            }
-            Ok(Encoding::Other) => return Err(invalid_archive()),
-            Err(GuessStop::Exception(exception)) => return Err(exception_error(&exception)),
-            Err(GuessStop::Undecided(what)) => return Err(Refusal::Undecided(what).into()),
-        };
-        while let Some((read, posts)) = reader.next_archive() {
+        each_object(archive, &mut |read, posts| {
             for post in &posts {
                 post_line(&mut self.output, diag, &post.line(None));
             }
             let archive = read.map_err(read_error)?;
-            self.object(archive, diag)?;
-        }
-        Ok(())
+            self.object(archive, diag)
+        })
     }
 
     /// One object as `LoadFromArchive` reads it (its messages, then the request: `CImportStrategy`

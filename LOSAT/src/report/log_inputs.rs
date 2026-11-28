@@ -39,9 +39,13 @@ pub(crate) struct RunInputs {
     /// Direct file paths read by the run (command-line input files, list files, WindowMasker
     /// counts, registry files, and `rpsbproc` data files).
     pub(crate) files: Vec<PathBuf>,
-    /// BLAST database arguments read by the run (`-db`, `-filtering_db`, `-dblist`, `-seqid_db`,
-    /// or `-in`/`-input` with `blastdb` format), passed verbatim to `SeqDb::read_paths`.
+    /// BLAST database arguments read by the run with the program's sequence types and
+    /// [`RunInputs::db_use`] (`-db`, `-dblist`, `-seqid_db`, or `-in`/`-input` with `blastdb`
+    /// format), passed verbatim to `SeqDb::read_paths`.
     pub(crate) databases: Vec<OsString>,
+    /// The databases whose sequence type and use come from where the run finds their names
+    /// ([`NamedDatabase`]).
+    pub(crate) named_databases: Vec<NamedDatabase>,
     /// The MegaBLAST index that a BLASTN run's loader looks for (`None`: the run reads no index).
     pub(crate) mb_index: Option<MbIndexNames>,
     /// Explicit `-dbtype` (`prot` or `nucl`) for tools whose database type is not fixed by program.
@@ -50,11 +54,24 @@ pub(crate) struct RunInputs {
     pub(crate) db_use: DbUse,
 }
 
+/// A database that the run reads with a sequence type and a use of its own: BLASTN's
+/// `-filtering_db` (nucleotide, the program's use without the options, which filter `-db` alone),
+/// the databases of an imported search strategy (the strategy's program's molecule) and those of
+/// blast_formatter's archive (each request's).
+#[derive(Debug)]
+pub(crate) struct NamedDatabase {
+    pub(crate) name: OsString,
+    /// The sequence types tried, in order (one: the molecule is known).
+    pub(crate) seqtypes: &'static [SeqType],
+    pub(crate) db_use: DbUse,
+}
+
 impl RunInputs {
     fn new(db_use: DbUse) -> Self {
         Self {
             files: Vec::new(),
             databases: Vec::new(),
+            named_databases: Vec::new(),
             mb_index: None,
             dbtype: None,
             db_use,
@@ -64,12 +81,13 @@ impl RunInputs {
 
 /// What the run of `program` with `words` can open of the files of its databases: what the
 /// program opens ([`DbUse::of_program`]: a search, a tool that reads the sequences in OID order,
-/// makeblastdb's copy, any other tool) and what its options ask for ([`DbUse::note_option`]). The
-/// one reader of the options, for the command line and for LOSAT Web.
+/// makeblastdb's copy, any other tool) and what its options and flags ask for
+/// ([`DbUse::note_option`]). The one reader of the options, for the command line and for LOSAT
+/// Web.
 pub(crate) fn db_use<S: AsRef<OsStr>>(program: &str, words: &[S]) -> DbUse {
     let mut db_use = DbUse::of_program(program);
-    scan_argv_kinds(program, words, |name, _, value| {
-        if value.is_some() {
+    scan_argv_kinds(program, words, |name, kind, value| {
+        if value.is_some() || kind == Kind::Flag {
             db_use.note_option(name);
         }
     });
@@ -481,10 +499,7 @@ pub(crate) fn tool_read_files<S: AsRef<OsStr> + Clone>(
     let mut for_log = encode(log_paths);
     let mut for_out = encode(out_paths);
     if !databases.is_empty() {
-        let blastdb = ApplicationStart::of_process(program, words)
-            .settings()
-            .ok()
-            .and_then(|s| s.blastdb);
+        let blastdb = run_blastdb(program, words);
         let use_of_run = db_use(program, words);
         for db in databases {
             let files = crate::seqdb::alias::database_files(
@@ -505,6 +520,43 @@ pub(crate) fn tool_read_files<S: AsRef<OsStr> + Clone>(
     (for_log, for_out)
 }
 
+/// The `BLASTDB` setting of the run of `program` with `words` (its registry), along which its
+/// databases are looked for.
+fn run_blastdb<S: AsRef<OsStr> + Clone>(program: &str, words: &[S]) -> Option<Vec<u8>> {
+    ApplicationStart::of_process(program, words)
+        .settings()
+        .ok()
+        .and_then(|s| s.blastdb)
+}
+
+/// The files that reading each of `databases` (a name and its molecule) checks or opens for a
+/// tool's run of `program` with `words` in LOSAT Web, for the run's use ([`db_use`],
+/// `seqdb::alias::database_lookup_files`, in the search path of the run's `BLASTDB` setting): the
+/// command line's files of `-logfile` ([`check_disk_logfile`], `RunInputs::named_databases`).
+pub(crate) fn tool_database_files<S: AsRef<OsStr> + Clone>(
+    program: &str,
+    words: &[S],
+    databases: &[(Vec<u8>, SeqType)],
+) -> Vec<Vec<u8>> {
+    if databases.is_empty() {
+        return Vec::new();
+    }
+    let blastdb = run_blastdb(program, words);
+    let use_of_run = db_use(program, words);
+    databases
+        .iter()
+        .flat_map(|(name, seqtype)| {
+            crate::seqdb::alias::database_lookup_files(
+                name,
+                *seqtype,
+                blastdb.as_deref(),
+                use_of_run,
+            )
+        })
+        .filter(|path| !path.is_empty())
+        .collect()
+}
+
 /// Collects input files for search programs (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`,
 /// `psiblast`, `rpsblast`, `rpstblastn`) and all remaining tools (`blastdbcmd`,
 /// `blastdb_aliastool`, `blastdbcheck`, `convert2blastmask`, `makeprofiledb`, and any future
@@ -519,6 +571,7 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
     let mut reads_formatter_rc = false;
     let mut blastn_dbs: Vec<OsString> = Vec::new();
     let mut index_args = IndexArgs::default();
+    let mut strategy: Option<OsString> = None;
     scan_argv_kinds(program, words, |name, kind, value| {
         if is_blastn {
             index_args.note(name, value);
@@ -541,15 +594,30 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
             }
             return;
         }
+        if name == "import_search_strategy" {
+            strategy = Some(value.to_os_string());
+        }
         if kind == Kind::InputFile {
             push_non_stdin_file(&mut inputs.files, value);
             return;
         }
         match name {
             "gilist" | "negative_gilist" | "ipglist" | "negative_ipglist" | "seqidlist"
-            | "negative_seqidlist" | "taxidlist" | "negative_taxidlist" | "seqid_file_info"
-            | "archive" => {
+            | "negative_seqidlist" | "taxidlist" | "negative_taxidlist" | "seqid_file_info" => {
                 inputs.add_file(value);
+            }
+            "archive" => {
+                inputs.add_file(value);
+                if program == "blast_formatter" && !value.is_empty() && value != "-" {
+                    let archive_use = inputs.db_use;
+                    for (name, seqtype) in crate::blast_formatter::archive_databases(value) {
+                        inputs.named_databases.push(NamedDatabase {
+                            name: crate::utils::os_bytes::os_string_from_bytes(name),
+                            seqtypes: seqtype_slice(seqtype),
+                            db_use: archive_use,
+                        });
+                    }
+                }
             }
             "window_masker_db" if is_blastn => {
                 inputs.add_file(value);
@@ -584,13 +652,21 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
                 }
             }
             "filtering_db" if is_blastn => {
-                inputs.add_db(value);
+                push_named_database(
+                    &mut inputs.named_databases,
+                    value,
+                    &[SeqType::Nucleotide],
+                    DbUse::of_program(program),
+                );
             }
             _ => {}
         }
     });
     if is_blastn {
         inputs.mb_index = index_args.names(blastn_dbs);
+    }
+    if let Some(path) = strategy.filter(|path| !path.is_empty() && path.as_os_str() != "-") {
+        collect_strategy_databases(program, words, &path, inputs);
     }
     if reads_formatter_rc {
         push_file(&mut inputs.files, PathBuf::from(".ncbirc"));
@@ -600,6 +676,94 @@ fn collect_general_inputs<S: AsRef<OsStr>>(
                 push_file(&mut inputs.files, PathBuf::from(ncbi).join(&fmtcfg));
             }
         }
+    }
+}
+
+/// The databases of a search that imports the strategy file `path` (`-import_search_strategy`,
+/// not the standard input, which the check cannot read before the run): the run's own reading of
+/// the arguments and its import of the file (`report::archive::read::import::apply`), whose
+/// arguments name the database that the search opens, the strategy's or the command line's,
+/// with the strategy's program's molecule, BLASTN's `-filtering_db` and MegaBLAST index
+/// (`api::strategy::search_databases`). They take the place of the command line's `-db` and
+/// `-filtering_db`; where the arguments or the import fail, the run ends before it opens a
+/// database.
+fn collect_strategy_databases<S: AsRef<OsStr>>(
+    program: &str,
+    words: &[S],
+    path: &OsStr,
+    inputs: &mut RunInputs,
+) {
+    inputs.databases.clear();
+    inputs.named_databases.clear();
+    inputs.mb_index = None;
+    let argv = [OsStr::new("losat"), OsStr::new(program)]
+        .into_iter()
+        .chain(words.iter().map(AsRef::as_ref))
+        .map(OsStr::to_os_string);
+    let Ok(cli) = crate::cli::try_parse_with_own_start(
+        argv,
+        &crate::blastinput::ncbi_environment::DiagTarget::Discard,
+    ) else {
+        return;
+    };
+    let Ok(bytes) = std::fs::read(path) else {
+        return;
+    };
+    let Ok(applied) = crate::report::archive::read::import::apply(
+        cli.command,
+        Some(&bytes),
+        &mut std::io::sink(),
+    ) else {
+        return;
+    };
+    let found = crate::api::strategy::search_databases(&applied);
+    if let Some((db, searched_by)) = found.db {
+        push_named_database(
+            &mut inputs.named_databases,
+            &db,
+            db_seqtypes(searched_by.name(), None),
+            inputs.db_use,
+        );
+    }
+    if let Some(filtering_db) = found.filtering_db {
+        push_named_database(
+            &mut inputs.named_databases,
+            &filtering_db,
+            &[SeqType::Nucleotide],
+            DbUse::of_program("blastn"),
+        );
+    }
+    inputs.mb_index = found.mb_index.map(|(name, old_style)| {
+        let name = vec![crate::utils::os_bytes::os_string_from_bytes(name)];
+        if old_style {
+            MbIndexNames::OldStyle(name)
+        } else {
+            MbIndexNames::NewStyle(name)
+        }
+    });
+}
+
+/// The sequence types of a database of `seqtype`.
+fn seqtype_slice(seqtype: SeqType) -> &'static [SeqType] {
+    match seqtype {
+        SeqType::Protein => &[SeqType::Protein],
+        SeqType::Nucleotide => &[SeqType::Nucleotide],
+    }
+}
+
+/// Adds the database `name` (not empty, not `-`) of `seqtypes` and `db_use` to `out`.
+fn push_named_database(
+    out: &mut Vec<NamedDatabase>,
+    name: &OsStr,
+    seqtypes: &'static [SeqType],
+    db_use: DbUse,
+) {
+    if !name.is_empty() && name != "-" {
+        out.push(NamedDatabase {
+            name: name.to_os_string(),
+            seqtypes,
+            db_use,
+        });
     }
 }
 
@@ -620,22 +784,33 @@ fn matches_any_input(
             return true;
         }
     }
-    if inputs.databases.is_empty() && inputs.mb_index.is_none() {
+    if inputs.databases.is_empty() && inputs.named_databases.is_empty() && inputs.mb_index.is_none()
+    {
         return false;
     }
     let registry_blastdb = start.settings().ok().and_then(|s| s.blastdb);
     let search_path = SearchPath::from_environment(registry_blastdb.as_deref());
     let seqtypes = db_seqtypes(program, inputs.dbtype);
-    let mut volumes_of: Vec<(&OsStr, Vec<Vec<u8>>)> = Vec::with_capacity(inputs.databases.len());
-    for db in &inputs.databases {
-        let (files, volumes) = database_read_paths(db, seqtypes, &search_path, inputs.db_use);
+    let databases = inputs
+        .databases
+        .iter()
+        .map(|db| (db.as_os_str(), seqtypes, inputs.db_use))
+        .chain(
+            inputs
+                .named_databases
+                .iter()
+                .map(|db| (db.name.as_os_str(), db.seqtypes, db.db_use)),
+        );
+    let mut volumes_of: Vec<(&OsStr, Vec<Vec<u8>>)> = Vec::new();
+    for (db, seqtypes, db_use) in databases {
+        let (files, volumes) = database_read_paths(db, seqtypes, &search_path, db_use);
         if files
             .iter()
             .any(|file| matches_bytes_path(candidates, file))
         {
             return true;
         }
-        volumes_of.push((db.as_os_str(), volumes));
+        volumes_of.push((db, volumes));
     }
     inputs
         .mb_index

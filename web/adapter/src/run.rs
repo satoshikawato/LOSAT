@@ -684,11 +684,13 @@ struct SearchRunFiles {
 /// - `read`: with `-db`, the list files of its filters (`-gilist`, `-negative_gilist`,
 ///   `-ipglist`, `-negative_ipglist`, `-seqidlist`, `-negative_seqidlist`, `-taxidlist`,
 ///   `-negative_taxidlist`), the database lookup files (`search_database_read_files`, including
-///   BLASTN's `-filtering_db` even with `-subject`) and taxonomy lookup files, kept apart from
+///   BLASTN's `-filtering_db` even with `-subject`, and with `-import_search_strategy` the
+///   databases that the import's arguments name) and taxonomy lookup files, kept apart from
 ///   `registered` so a missing file does not make its parent folders present.
 fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry) -> SearchRunFiles {
     use losat::web_adapter::{
         preparse, scan_program_argv, search_database_read_files, Preparsed, RegistryFiles as _,
+        SearchDatabaseNames,
     };
     use std::path::Path;
 
@@ -731,6 +733,7 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
     let mut outfmt: Option<String> = None;
     let mut has_taxids = false;
     let mut no_taxid_expansion = false;
+    let mut imports_strategy = false;
     let is_blastn = program == Program::Blastn;
     scan_program_argv(program_name, arguments, |name, value| {
         if name == "no_taxid_expansion" && value.is_none() {
@@ -747,6 +750,7 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
             "window_masker_taxid" if is_blastn => push_taxid(&mut registered, value),
             "db" => dbs.push(value.to_string()),
             "filtering_db" if is_blastn => filtering_dbs.push(value.to_string()),
+            "import_search_strategy" => imports_strategy = true,
             "outfmt" => outfmt = Some(value.to_string()),
             "taxids" | "negative_taxids" => has_taxids = true,
             "taxidlist" | "negative_taxidlist" => {
@@ -786,14 +790,40 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
     if !dbs.is_empty() {
         read.extend(list_files);
     }
+    // With `-import_search_strategy` the run searches the database that its import's arguments
+    // name (the strategy's, or the argv's where it gives one), with the strategy's program, and
+    // BLASTN's `-filtering_db` of those arguments (`search_databases`, the command line's
+    // `log_inputs::collect_strategy_databases`); where the import fails, the run opens none.
+    let mut searched_by = program.api();
+    if imports_strategy {
+        dbs.clear();
+        filtering_dbs.clear();
+        if let Ok((_, command, _)) = parse_imported(words) {
+            let found = losat::web_adapter::search_databases(&command);
+            if let Some((db, by)) = found.db {
+                dbs.extend(db.to_str().map(str::to_string));
+                searched_by = by;
+            }
+            filtering_dbs.extend(
+                found
+                    .filtering_db
+                    .as_deref()
+                    .and_then(std::ffi::OsStr::to_str)
+                    .map(str::to_string),
+            );
+        }
+    }
     let db_refs: Vec<&str> = dbs.iter().map(String::as_str).collect();
     let filtering_db_refs: Vec<&str> = filtering_dbs.iter().map(String::as_str).collect();
     read.extend(search_database_read_files(
         program.api(),
         arguments,
         registry,
-        &db_refs,
-        &filtering_db_refs,
+        &SearchDatabaseNames {
+            searched_by,
+            dbs: &db_refs,
+            filtering_dbs: &filtering_db_refs,
+        },
         outfmt.as_deref().unwrap_or("0"),
         has_taxids && !no_taxid_expansion,
     ));

@@ -1439,9 +1439,9 @@ pub(crate) struct DbReadPaths {
     /// missing ones included, the group alias files, the alias files and their `DBLIST` targets,
     /// the `OIDLIST` path, and its fallback beside the first volume only where the primary path
     /// is not a file, and the id lists); then the files of what they found that the run can open:
-    /// each volume's index, header and sequence files, the string index and LMDB file, and as
-    /// the run's options ask the id-lookup files, the column files and `MASKLIST` GI-mask files
-    /// of the masks, and the RPS files (`DbUse`).
+    /// each volume's index, header and sequence files and the LMDB file that its index names, and
+    /// as the run's program, its options and the alias files' id lists ask the id-lookup files,
+    /// the column files and `MASKLIST` GI-mask files of the masks, and the RPS files (`DbUse`).
     pub(crate) files: Vec<Vec<u8>>,
     /// How many of the first `files` the resolution and `ComputeMasks` check or open: the files
     /// whose presence decides what the opening reads, so a file made there changes the run. The
@@ -1744,16 +1744,22 @@ impl SeqDb {
     }
 
     /// The files of the resolved alias tree `tree` that [`SeqDb::read_paths`] adds to what the
-    /// resolution recorded and that a run of `db_use` can open: the LMDB files of each alias
-    /// file, the `MASKLIST` GI-mask files, and the component files of each of `volumes`.
+    /// resolution recorded and that a run of `db_use` can open: the alias files' metadata, the
+    /// `MASKLIST` GI-mask files, and the component files of each of `volumes`. The id lists of
+    /// the alias files (`GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`) add the files that look
+    /// their ids up ([`DbUse::note_list`]), for every volume of the tree. The LMDB file of a
+    /// version 5 volume is the one that its index file names ([`SeqDb::volume_lmdb_file`]), with
+    /// the files beside it; a version 4 volume has none; where the index does not read, the run
+    /// stops at it and the names beside the volume are counted.
     fn found_files(
         tree: &alias::AliasTree,
         volumes: &[Vec<u8>],
         seqtype: SeqType,
         path: &SearchPath,
-        db_use: DbUse,
+        mut db_use: DbUse,
     ) -> std::collections::BTreeSet<Vec<u8>> {
         use crate::writedb::build_db::{LMDB_EXTENSIONS, VOLUME_EXTENSIONS};
+        alias::for_each_list_kind(&tree.root, &mut |kind| db_use.note_list(kind));
         let mut alias_files = std::collections::BTreeSet::new();
         alias::collect_alias_files(&tree.root, &mut alias_files);
         let mut files = std::collections::BTreeSet::new();
@@ -1771,9 +1777,8 @@ impl SeqDb {
         };
         for alias in &alias_files {
             files.insert(alias.clone());
-            if let Some(stem) = strip_ascii_suffix(alias, alias_suffix) {
-                push_mol_extensions(&mut files, stem, mol, &read(&LMDB_EXTENSIONS));
-                if db_use.reads_alias_metadata() {
+            if db_use.reads_alias_metadata() {
+                if let Some(stem) = strip_ascii_suffix(alias, alias_suffix) {
                     files.insert([stem, b".", mol, b"js"].concat());
                 }
             }
@@ -1786,7 +1791,15 @@ impl SeqDb {
         let (volume_read, lmdb_read) = (read(&VOLUME_EXTENSIONS), read(&LMDB_EXTENSIONS));
         for volume in volumes {
             push_mol_extensions(&mut files, volume, mol, &volume_read);
-            push_mol_extensions(&mut files, volume, mol, &lmdb_read);
+            match Self::volume_lmdb_file(volume, seqtype) {
+                Ok(Some(lmdb)) => {
+                    for ext in &lmdb_read {
+                        files.insert(filter::lmdb_file_beside(&lmdb, ext));
+                    }
+                }
+                Ok(None) => {}
+                Err(_) => push_mol_extensions(&mut files, volume, mol, &lmdb_read),
+            }
             if db_use.reads_masks() {
                 column::read_paths(&path_of_bytes(volume), seqtype, &mut files);
             }
@@ -1795,8 +1808,32 @@ impl SeqDb {
                     files.insert([volume.as_slice(), b".", ext.as_bytes()].concat());
                 }
             }
+            if db_use.reads_cdd_delta() {
+                for kind in [rps::CddFreqsKind::Wcounts, rps::CddFreqsKind::Obsr] {
+                    files.insert([volume.as_slice(), kind.ext().as_bytes()].concat());
+                }
+            }
         }
         files
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:217-233
+    /// The LMDB file that the index file of the volume `volume` (its path without extension, as
+    /// bytes) names, as the opening of the database finds it (`check_lmdb_names`: the name in the
+    /// volume's directory): `None` for a version 4 volume, whose index names none. The error of
+    /// an index file that does not read.
+    fn volume_lmdb_file(volume: &[u8], seqtype: SeqType) -> Result<Option<Vec<u8>>, SeqDbError> {
+        let base = path_of_bytes(volume);
+        let index_path = volume::with_extension(&base, seqtype, "in");
+        let header =
+            index::IndexFile::read_mapped_header(&file::DbFile::open(&index_path)?, seqtype)?;
+        Ok(header
+            .lmdb_file
+            .filter(|name| !name.is_empty())
+            .map(|name| {
+                let lmdb = base.with_file_name(path_from_bytes(name.as_slice()));
+                crate::utils::os_bytes::path_bytes(&lmdb).into_owned()
+            }))
     }
 
     fn sort_volume_set(set: std::collections::BTreeSet<Vec<u8>>) -> Vec<Vec<u8>> {

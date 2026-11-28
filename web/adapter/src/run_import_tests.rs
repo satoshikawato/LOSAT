@@ -275,6 +275,41 @@ fn a_strategy_of_a_database_is_a_run_of_db() {
     files::release(handle).unwrap();
 }
 
+/// The database that a strategy names is read by the run (line WQA D26 review r2, M4): its files
+/// are the run's read files, which `-logfile` and `-out` may not name, as the command line's check
+/// counts them (`log_inputs::collect_strategy_databases`); the argv's `-db` overrides it.
+#[test]
+fn a_strategys_database_files_are_read_by_the_run() {
+    let text = std::fs::read_to_string(format!("{}/ss/blastn.db.ss", fixtures())).unwrap();
+    let database = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../LOSAT/tests/db_search/arch_snucl"
+    );
+    let text = text.replace("\"tests/db_search/arch_snucl\"", &format!("\"{database}\""));
+    let handle = register_strategy("blastn.db.read.ss", text.as_bytes());
+    let registry = crate::files::registry_files();
+    let reads = |words: &[&str], name: &str| {
+        search_run_files(words, &registry)
+            .read
+            .iter()
+            .any(|file| file.ends_with(name.as_bytes()))
+    };
+    let words = ["blastn", "-import_search_strategy", "blastn.db.read.ss"];
+    for name in ["/arch_snucl.nin", "/arch_snucl.nsq", "/arch_snucl.nni"] {
+        assert!(reads(&words, name), "{name}");
+    }
+    let overridden = [
+        "blastn",
+        "-import_search_strategy",
+        "blastn.db.read.ss",
+        "-db",
+        "other",
+    ];
+    assert!(reads(&overridden, "other.nin"));
+    assert!(!reads(&overridden, "/arch_snucl.nsq"));
+    files::release(handle).unwrap();
+}
+
 /// A run imports its strategy once (R2-N3 of review 2): the host's calls for it (`start`,
 /// `validate`, `register_inputs`, `run`) and the readings of the argv in each of them (the
 /// start's `inputs_together`, `searches_database` and `prints`, the checks of the handles, the

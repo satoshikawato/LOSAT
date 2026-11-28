@@ -92,8 +92,21 @@ pub fn blast_formatter_read_files(words: &[&str]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>
     crate::blast_formatter::read_files(words)
 }
 
-/// File names that `seqdb` checks or opens for a search's `-db` (`dbs`) and BLASTN's
-/// `-filtering_db` (`filtering_dbs`), plus the taxonomy lookup files
+/// The databases of a search (`search_database_read_files`): those of `-db` (`dbs`), searched by
+/// `searched_by` (the argv's program, or an imported strategy's, whose database it is:
+/// `search_databases`), and BLASTN's `-filtering_db` (`filtering_dbs`).
+pub struct SearchDatabaseNames<'a> {
+    /// The program whose search opens the databases of `-db`.
+    pub searched_by: crate::api::Program,
+    /// The values of `-db`.
+    pub dbs: &'a [&'a str],
+    /// The values of BLASTN's `-filtering_db`.
+    pub filtering_dbs: &'a [&'a str],
+}
+
+/// File names that `seqdb` checks or opens for the databases `databases` of a search of
+/// `program` with `arguments` (`-db` with the molecule of the program that searches it, BLASTN's
+/// `-filtering_db` with the program's use alone), plus the taxonomy lookup files
 /// (`seqdb::taxdb::lookup_files_for_use`) when `outfmt` consults `taxdb`
 /// (`algorithm::common::database::outfmt_taxdb_use`) and `taxonomy4blast.sqlite3` when
 /// `expands_taxids` is true and a taxonomy file exists on the search path (line WQA D19b).
@@ -101,8 +114,7 @@ pub fn search_database_read_files(
     program: crate::api::Program,
     arguments: &[&str],
     registry: &dyn RegistryFiles,
-    dbs: &[&str],
-    filtering_dbs: &[&str],
+    databases: &SearchDatabaseNames<'_>,
     outfmt: &str,
     expands_taxids: bool,
 ) -> Vec<Vec<u8>> {
@@ -110,7 +122,12 @@ pub fn search_database_read_files(
         outfmt_prefetches_taxdb, outfmt_taxdb_use, OutfmtTaxdbUse,
     };
     use crate::report::archive::options::RequestKind;
-    let request_kind = match program {
+    let SearchDatabaseNames {
+        searched_by,
+        dbs,
+        filtering_dbs,
+    } = *databases;
+    let request_kind = match searched_by {
         crate::api::Program::Blastp => RequestKind::Blastp,
         crate::api::Program::Blastn => RequestKind::Blastn,
         crate::api::Program::Blastx => RequestKind::Blastx,
@@ -132,7 +149,7 @@ pub fn search_database_read_files(
     .settings()
     .ok()
     .and_then(|settings| settings.blastdb);
-    let seqtype = match program {
+    let seqtype = match searched_by {
         crate::api::Program::Blastp
         | crate::api::Program::Blastx
         | crate::api::Program::Psiblast => crate::seqdb::SeqType::Protein,
@@ -142,7 +159,10 @@ pub fn search_database_read_files(
     };
     let db_use = crate::report::log_inputs::db_use(program.name(), arguments);
     let mut out = Vec::new();
-    let push_db = |out: &mut Vec<Vec<u8>>, db: &str, db_type: crate::seqdb::SeqType| {
+    let push_db = |out: &mut Vec<Vec<u8>>,
+                   db: &str,
+                   db_type: crate::seqdb::SeqType,
+                   db_use: crate::seqdb::DbUse| {
         let trimmed = crate::seqdb::db_argument_name_bytes(db.as_bytes());
         out.extend(crate::seqdb::alias::database_lookup_files(
             trimmed,
@@ -152,7 +172,7 @@ pub fn search_database_read_files(
         ));
     };
     for db in dbs {
-        push_db(&mut out, db, seqtype);
+        push_db(&mut out, db, seqtype, db_use);
     }
     let prefetches = has_db && outfmt_prefetches_taxdb(outfmt);
     out.extend(crate::seqdb::taxdb::lookup_files_for_use(
@@ -167,8 +187,16 @@ pub fn search_database_read_files(
             out.push(tax_file.to_vec());
         }
     }
+    // The repeat search opens `-filtering_db` with the program's use alone: the options that
+    // filter or mask a database are `-db`'s (`log_inputs::NamedDatabase`).
+    let filtering_use = crate::seqdb::DbUse::of_program(program.name());
     for fdb in filtering_dbs {
-        push_db(&mut out, fdb, crate::seqdb::SeqType::Nucleotide);
+        push_db(
+            &mut out,
+            fdb,
+            crate::seqdb::SeqType::Nucleotide,
+            filtering_use,
+        );
     }
     out
 }
@@ -863,8 +891,8 @@ pub fn records_refused_options(program: crate::api::Program) -> &'static [&'stat
 // (`api::strategy`; the same path as the command line's and the library's
 // `Search::read_strategy`).
 pub use crate::api::strategy::{
-    apply as import_strategy, import_name as strategy_file_name, program_of,
-    take_warnings as take_strategy_warnings,
+    apply as import_strategy, import_name as strategy_file_name, program_of, search_databases,
+    take_warnings as take_strategy_warnings, SearchDatabases,
 };
 
 // The WindowMasker unit counts of `-window_masker_db` that the adapter holds in memory under their

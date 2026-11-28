@@ -781,6 +781,278 @@ fn tools_refuse_the_database_files_that_they_read() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The databases of `tests/db_search/idlist` (version 4 and 5 protein volumes with GIs, trace ids
+/// and taxids, and alias files with each kind of id list).
+fn idlist_fixtures() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/idlist")
+}
+
+// Line WQA D26 review r2 (H1, M1): a search looks its hits up in the id indexes of the volumes,
+// which it opens on a database that holds such ids whatever its options, so `-logfile` refuses
+// them for every search; the id lists of an alias file add the files that look their ids up, also
+// for a tool that reads the sequences in order. A version 4 volume has no LMDB file.
+#[test]
+fn searches_and_alias_lists_refuse_the_id_indexes() {
+    let dir = idlist_fixtures();
+    let db = |name: &str| dir.join(name);
+    let search = db_words(&db("g4"), &["-query", "q.fa"]);
+    for name in ["g4.pni", "g4.pnd", "g4.psi", "g4.psd", "g4.pti", "g4.ptd"] {
+        assert!(refused("blastp", &search, &db(name)), "blastp {name}");
+    }
+    for name in ["g4.ppi", "g4.pdb", "g4.pog", "g4.ptf"] {
+        assert!(!refused("blastp", &search, &db(name)), "blastp {name}");
+    }
+    let v5 = db_words(&db("g"), &["-query", "q.fa"]);
+    for name in ["g.pdb", "g.pni", "g.pnd"] {
+        assert!(refused("blastp", &v5, &db(name)), "blastp v5 {name}");
+    }
+    for name in ["g.ptf", "g.pto", "g.pot", "g.pos"] {
+        assert!(!refused("blastp", &v5, &db(name)), "blastp v5 {name}");
+    }
+    let taxids = db_words(&db("g"), &["-query", "q.fa", "-taxids", "9606"]);
+    for name in ["g.ptf", "g.pto", "g.pot"] {
+        assert!(
+            refused("blastp", &taxids, &db(name)),
+            "blastp -taxids {name}"
+        );
+    }
+    let segmasker = |name: &str| -> Vec<OsString> {
+        vec![
+            "-in".into(),
+            db(name).into_os_string(),
+            "-infmt".into(),
+            "blastdb".into(),
+        ]
+    };
+    for (alias, read, unread) in [
+        ("g4", &[][..], &["g4.pni", "g4.psi", "g4.pti", "g4.pdb"][..]),
+        ("g4_gi", &["g4.pni", "g4.pnd"], &["g4.psi", "g4.pti"]),
+        ("g4_sq", &["g4.psi", "g4.psd", "g4.pni"], &["g4.ptf"]),
+        ("gt_ti", &["gt.pti", "gt.ptd"], &["gt.psi", "gt.pni"]),
+        ("g", &["g.pdb"], &["g.pni", "g.ptf", "g.pos"]),
+        (
+            "g_tx",
+            &["g.pdb", "g.ptf", "g.pto", "g.pot"],
+            &["g.pos", "g.pni"],
+        ),
+        ("g_sq", &["g.pdb", "g.pos"], &["g.ptf"]),
+    ] {
+        let words = segmasker(alias);
+        for name in read {
+            assert!(refused("segmasker", &words, &db(name)), "{alias}: {name}");
+        }
+        for name in unread {
+            assert!(!refused("segmasker", &words, &db(name)), "{alias}: {name}");
+        }
+        // LOSAT Web's segmasker run reads the same files.
+        let (for_log, _) = crate::segmasker::read_files(&words);
+        let has = |name: &str| {
+            for_log
+                .iter()
+                .any(|file| file.as_slice() == db(name).as_os_str().as_encoded_bytes())
+        };
+        for name in read {
+            assert!(has(name), "Web {alias}: {name} in {for_log:?}");
+        }
+        for name in unread {
+            assert!(!has(name), "Web {alias}: {name} in {for_log:?}");
+        }
+    }
+}
+
+// Line WQA D26 review r2 (M3): a version 5 volume opens the LMDB file that its index file names,
+// which is the database's for a volume of a database that makeblastdb split (`-max_file_sz`):
+// `-db big.00` opens `big.ndb`, not `big.00.ndb`.
+#[test]
+fn a_version_5_volume_refuses_the_lmdb_file_that_its_index_names() {
+    let dir = fresh_dir("d26-v5-lmdb");
+    let fixtures = idlist_fixtures();
+    for ext in ["pin", "phr", "psq"] {
+        std::fs::copy(
+            fixtures.join(format!("g.{ext}")),
+            dir.join(format!("big.00.{ext}")),
+        )
+        .unwrap();
+    }
+    for ext in ["pdb", "pos", "pot", "ptf", "pto"] {
+        std::fs::copy(
+            fixtures.join(format!("g.{ext}")),
+            dir.join(format!("g.{ext}")),
+        )
+        .unwrap();
+    }
+    let volume = dir.join("big.00");
+    let search = db_words(&volume, &["-query", "q.fa"]);
+    assert!(refused("blastp", &search, &dir.join("g.pdb")));
+    assert!(!refused("blastp", &search, &dir.join("big.00.pdb")));
+    assert!(!refused("blastp", &search, &dir.join("g.ptf")));
+    let taxids = db_words(&volume, &["-query", "q.fa", "-taxids", "9606"]);
+    for name in ["g.pdb", "g.ptf", "g.pto", "g.pot"] {
+        assert!(refused("blastp", &taxids, &dir.join(name)), "{name}");
+    }
+    let copy: Vec<OsString> = vec![
+        "-in".into(),
+        volume.clone().into_os_string(),
+        "-input_type".into(),
+        "blastdb".into(),
+        "-dbtype".into(),
+        "prot".into(),
+        "-out".into(),
+        dir.join("copy").into_os_string(),
+    ];
+    assert!(refused("makeblastdb", &copy, &dir.join("g.pdb")));
+    assert!(!refused("makeblastdb", &copy, &dir.join("big.00.pdb")));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// Line WQA D26 review r2 (M2, L1): blastdbcheck's `-cdd_delta` (a flag) reads the RPS files and the
+// two files of the CDD delta search; BLASTN's `-filtering_db` is read with the search's own use,
+// without the options that filter or mask `-db`.
+#[test]
+fn cdd_delta_and_filtering_db_refuse_what_they_read() {
+    let dir = fresh_dir("d26-cdd-fdb");
+    for ext in ["pin", "phr", "psq"] {
+        std::fs::write(dir.join(format!("w.{ext}")), b"x").unwrap();
+    }
+    for base in ["v", "f"] {
+        for ext in ["nin", "nhr", "nsq", "naa"] {
+            std::fs::write(dir.join(format!("{base}.{ext}")), b"x").unwrap();
+        }
+    }
+    let check = |extra: &[&str]| -> Vec<OsString> {
+        let mut words = db_words(&dir.join("w"), &["-dbtype", "prot"]);
+        words.extend(extra.iter().map(OsString::from));
+        words
+    };
+    for name in ["w.rps", "w.loo", "w.aux", "w.freq", "w.wcounts", "w.obsr"] {
+        assert!(
+            refused("blastdbcheck", &check(&["-cdd_delta"]), &dir.join(name)),
+            "{name}"
+        );
+        assert!(
+            !refused("blastdbcheck", &check(&[]), &dir.join(name)),
+            "{name}"
+        );
+    }
+    let masked = db_words(
+        &dir.join("v"),
+        &[
+            "-query",
+            "q.fa",
+            "-filtering_db",
+            dir.join("f").to_str().unwrap(),
+            "-db_soft_mask",
+            "11",
+            "-gilist",
+            "gis.txt",
+        ],
+    );
+    for name in ["v.naa", "v.nni", "f.nin", "f.nsq", "f.nni", "f.nsi"] {
+        assert!(refused("blastn", &masked, &dir.join(name)), "{name}");
+    }
+    for name in ["f.naa", "f.nab", "f.nog"] {
+        assert!(!refused("blastn", &masked, &dir.join(name)), "{name}");
+    }
+    // LOSAT Web's search reads the same files of `-filtering_db`.
+    let arguments: Vec<&str> = masked.iter().map(|word| word.to_str().unwrap()).collect();
+    let read = crate::web_adapter::search_database_read_files(
+        crate::api::Program::Blastn,
+        &arguments,
+        &crate::blastinput::ncbi_environment::FileSystem,
+        &crate::web_adapter::SearchDatabaseNames {
+            searched_by: crate::api::Program::Blastn,
+            dbs: &[dir.join("v").to_str().unwrap()],
+            filtering_dbs: &[dir.join("f").to_str().unwrap()],
+        },
+        "0",
+        false,
+    );
+    let has = |name: &str| {
+        read.iter()
+            .any(|file| file.as_slice() == dir.join(name).as_os_str().as_encoded_bytes())
+    };
+    for name in ["v.naa", "f.nin", "f.nni"] {
+        assert!(has(name), "Web {name} in {read:?}");
+    }
+    for name in ["f.naa", "f.nog"] {
+        assert!(!has(name), "Web {name} in {read:?}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// Line WQA D26 review r2 (M4): the database that a search strategy names, and those of the
+// objects of blast_formatter's archive, are read by the run: the run's own import of the strategy
+// and reading of the archive give their names.
+#[test]
+fn strategy_and_archive_databases_are_refused() {
+    let dir = fresh_dir("d26-strategy-archive");
+    for base in ["s", "o", "bn"] {
+        for ext in ["nin", "nhr", "nsq"] {
+            std::fs::write(dir.join(format!("{base}.{ext}")), b"x").unwrap();
+        }
+    }
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let strategy =
+        std::fs::read_to_string(manifest.join("tests/fixtures/strategy/import/ss/blastn.db.ss"))
+            .unwrap()
+            .replace(
+                "\"tests/db_search/arch_snucl\"",
+                &format!("\"{}\"", dir.join("s").display()),
+            );
+    let strategy_path = dir.join("s.ss");
+    std::fs::write(&strategy_path, strategy).unwrap();
+    let imported: Vec<OsString> = vec![
+        "-import_search_strategy".into(),
+        strategy_path.clone().into_os_string(),
+    ];
+    for name in ["s.nin", "s.nsq", "s.nni"] {
+        assert!(refused("blastn", &imported, &dir.join(name)), "{name}");
+    }
+    assert!(!refused("blastn", &imported, &dir.join("o.nsq")));
+    // The command line's `-db` overrides the strategy's database.
+    let mut overridden = imported.clone();
+    overridden.extend(["-db".into(), dir.join("o").into_os_string()]);
+    assert!(refused("blastn", &overridden, &dir.join("o.nsq")));
+    assert!(!refused("blastn", &overridden, &dir.join("s.nsq")));
+    // A strategy that does not import opens no database.
+    std::fs::write(dir.join("bad.ss"), b"not a strategy").unwrap();
+    let bad: Vec<OsString> = vec![
+        "-import_search_strategy".into(),
+        dir.join("bad.ss").into_os_string(),
+    ];
+    assert!(!refused("blastn", &bad, &dir.join("s.nsq")));
+    let archive =
+        std::fs::read_to_string(manifest.join("tests/fixtures/archive_read/blastn_multi.asn"))
+            .unwrap()
+            .replace("\"db/bn\"", &format!("\"{}\"", dir.join("bn").display()));
+    let archive_path = dir.join("a.asn");
+    std::fs::write(&archive_path, archive).unwrap();
+    let formatter: Vec<OsString> = vec![
+        "-archive".into(),
+        archive_path.into_os_string(),
+        "-outfmt".into(),
+        "8".into(),
+    ];
+    for name in ["bn.nin", "bn.nsq", "bn.nhr", "bn.nni"] {
+        assert!(
+            refused("blast_formatter", &formatter, &dir.join(name)),
+            "{name}"
+        );
+    }
+    assert!(!refused("blast_formatter", &formatter, &dir.join("bn.pin")));
+    // LOSAT Web's blast_formatter run reads the same files.
+    let (for_log, _) = crate::blast_formatter::read_files(&formatter);
+    for name in ["a.asn", "bn.nin", "bn.nsq"] {
+        assert!(
+            for_log
+                .iter()
+                .any(|file| file.as_slice() == dir.join(name).as_os_str().as_encoded_bytes()),
+            "Web {name} in {for_log:?}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn version_request_does_not_collect_argv_inputs() {
     let dir = fresh_dir("version-run");

@@ -618,6 +618,17 @@ impl DeflineList for DeflineSet {
     }
 }
 
+/// The file beside the LMDB file `lmdb` (the path's bytes) whose name has `letters` in place of
+/// the last two letters of the LMDB file's extension (`GetFileNameFromExistingLMDBFile`,
+/// seqdb_lmdb.cpp:763-790): the lookup files `tf`, `to`, `ot` and `os` of [`LmdbEntry`], and
+/// the files of the `-logfile` check (`SeqDb::read_paths`).
+pub(super) fn lmdb_file_beside(lmdb: &[u8], letters: &str) -> Vec<u8> {
+    let mut name = lmdb.to_vec();
+    name.truncate(name.len().saturating_sub(2));
+    name.extend_from_slice(letters.as_bytes());
+    name
+}
+
 /// The volumes of a database that share one LMDB file (`CSeqDBLMDBEntry`).
 pub(super) struct LmdbEntry {
     /// The LMDB file (`.pdb`, `.ndb`).
@@ -636,13 +647,11 @@ pub(super) struct LmdbEntry {
 
 impl LmdbEntry {
     /// The file beside the LMDB file with the last two letters of its extension replaced
-    /// (`GetFileNameFromExistingLMDBFile`, seqdb_lmdb.cpp:763-790): `tf`, `to`, `ot`.
-    /// The name's bytes are the volume's header's (line LIB-B).
+    /// ([`lmdb_file_beside`]): `tf`, `to`, `ot`, `os`. The name's bytes are the volume's
+    /// header's (line LIB-B).
     fn lookup_file(&self, letters: &str) -> PathBuf {
-        let mut name = crate::utils::os_bytes::path_bytes(&self.lmdb).into_owned();
-        name.truncate(name.len().saturating_sub(2));
-        name.extend_from_slice(letters.as_bytes());
-        crate::utils::os_bytes::path_from_bytes(name)
+        let name = crate::utils::os_bytes::path_bytes(&self.lmdb);
+        crate::utils::os_bytes::path_from_bytes(lmdb_file_beside(&name, letters))
     }
 
     /// The name NCBI's messages give the entry: the LMDB file's name without directory and

@@ -1,0 +1,1504 @@
+PHIBLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: tfp
+           23 sequences; 3,263 total letters
+
+Results from round 1
+
+
+Query= hba
+
+Length=142
+1 occurrence(s) of pattern: 
+G-K-V-G at position(s) 16 of query sequence
+pattern probability=2.01339e-05
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     2e-81
+
+
+
+Significant alignments for pattern occurrence 1 at position 16
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 2e-81
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                      ****                                         
+Query    1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+              MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+              KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    121  AVHASLDKFLASVSTVLTSKYR  142
+              AVHASLDKFLASVSTVLTSKYR
+Sbjct    121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Lambda      K        H        a         alpha
+   0.270   0.0470     1.00     0.00     0.00 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.270   0.0470     1.00     0.00     0.00     0.00 
+
+Effective search space used: 36028797018963876
+Results from round 1
+
+
+Query= long
+
+Length=4970
+35 occurrence(s) of pattern: 
+G-K-V-G at position(s) 16, 158, 300, 442, 584, 726, 868, 1010, 1152, 1294, 1436, 1578, 1720, 1862, 2004, 2146, 2288, 2430, 2572, 2714, 2856, 2998, 3140, 3282, 3424, 3566, 3708, 3850, 3992, 4134, 4276, 4418, 4560, 4702, 4844 of query sequence
+pattern probability=2.01339e-05
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Al...  270     8e-80
+
+
+
+Significant alignments for pattern occurrence 1 at position 16
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                      ****                                         
+Query    1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+              MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+              KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    121  AVHASLDKFLASVSTVLTSKYR  142
+              AVHASLDKFLASVSTVLTSKYR
+Sbjct    121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 2 at position 158
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                      ****                                         
+Query    143  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  202
+              MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    203  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  262
+              KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    263  AVHASLDKFLASVSTVLTSKYR  284
+              AVHASLDKFLASVSTVLTSKYR
+Sbjct    121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 3 at position 300
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                      ****                                         
+Query    285  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  344
+              MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    345  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  404
+              KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    405  AVHASLDKFLASVSTVLTSKYR  426
+              AVHASLDKFLASVSTVLTSKYR
+Sbjct    121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 4 at position 442
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                      ****                                         
+Query    427  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  486
+              MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    487  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  546
+              KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    547  AVHASLDKFLASVSTVLTSKYR  568
+              AVHASLDKFLASVSTVLTSKYR
+Sbjct    121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 5 at position 584
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                      ****                                         
+Query    569  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  628
+              MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    629  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  688
+              KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    689  AVHASLDKFLASVSTVLTSKYR  710
+              AVHASLDKFLASVSTVLTSKYR
+Sbjct    121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 6 at position 726
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                      ****                                         
+Query    711  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  770
+              MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    771  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  830
+              KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    831  AVHASLDKFLASVSTVLTSKYR  852
+              AVHASLDKFLASVSTVLTSKYR
+Sbjct    121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 7 at position 868
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                      ****                                         
+Query    853  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  912
+              MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    913  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  972
+              KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    973  AVHASLDKFLASVSTVLTSKYR  994
+              AVHASLDKFLASVSTVLTSKYR
+Sbjct    121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 8 at position 1010
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    995   MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  1054
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    1055  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  1114
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    1115  AVHASLDKFLASVSTVLTSKYR  1136
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 9 at position 1152
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    1137  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  1196
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    1197  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  1256
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    1257  AVHASLDKFLASVSTVLTSKYR  1278
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 10 at position 1294
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    1279  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  1338
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    1339  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  1398
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    1399  AVHASLDKFLASVSTVLTSKYR  1420
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 11 at position 1436
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    1421  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  1480
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    1481  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  1540
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    1541  AVHASLDKFLASVSTVLTSKYR  1562
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 12 at position 1578
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    1563  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  1622
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    1623  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  1682
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    1683  AVHASLDKFLASVSTVLTSKYR  1704
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 13 at position 1720
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    1705  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  1764
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    1765  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  1824
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    1825  AVHASLDKFLASVSTVLTSKYR  1846
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 14 at position 1862
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    1847  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  1906
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    1907  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  1966
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    1967  AVHASLDKFLASVSTVLTSKYR  1988
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 15 at position 2004
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    1989  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  2048
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    2049  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  2108
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    2109  AVHASLDKFLASVSTVLTSKYR  2130
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 16 at position 2146
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    2131  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  2190
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    2191  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  2250
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    2251  AVHASLDKFLASVSTVLTSKYR  2272
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 17 at position 2288
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    2273  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  2332
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    2333  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  2392
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    2393  AVHASLDKFLASVSTVLTSKYR  2414
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 18 at position 2430
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    2415  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  2474
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    2475  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  2534
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    2535  AVHASLDKFLASVSTVLTSKYR  2556
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 19 at position 2572
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    2557  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  2616
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    2617  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  2676
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    2677  AVHASLDKFLASVSTVLTSKYR  2698
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 20 at position 2714
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    2699  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  2758
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    2759  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  2818
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    2819  AVHASLDKFLASVSTVLTSKYR  2840
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 21 at position 2856
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    2841  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  2900
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    2901  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  2960
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    2961  AVHASLDKFLASVSTVLTSKYR  2982
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 22 at position 2998
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    2983  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  3042
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    3043  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  3102
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    3103  AVHASLDKFLASVSTVLTSKYR  3124
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 23 at position 3140
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    3125  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  3184
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    3185  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  3244
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    3245  AVHASLDKFLASVSTVLTSKYR  3266
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 24 at position 3282
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    3267  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  3326
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    3327  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  3386
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    3387  AVHASLDKFLASVSTVLTSKYR  3408
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 25 at position 3424
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    3409  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  3468
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    3469  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  3528
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    3529  AVHASLDKFLASVSTVLTSKYR  3550
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 26 at position 3566
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    3551  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  3610
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    3611  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  3670
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    3671  AVHASLDKFLASVSTVLTSKYR  3692
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 27 at position 3708
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    3693  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  3752
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    3753  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  3812
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    3813  AVHASLDKFLASVSTVLTSKYR  3834
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 28 at position 3850
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    3835  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  3894
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    3895  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  3954
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    3955  AVHASLDKFLASVSTVLTSKYR  3976
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 29 at position 3992
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    3977  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  4036
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    4037  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  4096
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    4097  AVHASLDKFLASVSTVLTSKYR  4118
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 30 at position 4134
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    4119  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  4178
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    4179  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  4238
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    4239  AVHASLDKFLASVSTVLTSKYR  4260
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 31 at position 4276
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    4261  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  4320
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    4321  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  4380
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    4381  AVHASLDKFLASVSTVLTSKYR  4402
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 32 at position 4418
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    4403  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  4462
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    4463  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  4522
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    4523  AVHASLDKFLASVSTVLTSKYR  4544
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 33 at position 4560
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    4545  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  4604
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    4605  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  4664
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    4665  AVHASLDKFLASVSTVLTSKYR  4686
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 34 at position 4702
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    4687  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  4746
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    4747  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  4806
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    4807  AVHASLDKFLASVSTVLTSKYR  4828
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Significant alignments for pattern occurrence 35 at position 4844
+
+>P69905.2 RecName: Full=Hemoglobin subunit alpha; AltName: Full=Alpha-globin; 
+AltName: Full=Hemoglobin alpha chain; Contains: RecName: 
+Full=Hemopressin [Homo sapiens] >sp|P69906.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: 
+Full=Hemoglobin alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan paniscus] >sp|P69907.2| RecName: Full=Hemoglobin 
+subunit alpha; AltName: Full=Alpha-globin; AltName: Full=Hemoglobin 
+alpha chain; Contains: RecName: Full=Hemopressin 
+[Pan troglodytes]
+ P01972.1 RecName: Full=Hemoglobin subunit alpha-1/2; AltName: Full=Alpha-1/2-globin; 
+AltName: Full=Hemoglobin alpha-1/2 chain [Odocoileus 
+virginianus virginianus]
+Length=142
+
+ Score = 270 bits (712),  Expect = 8e-80
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+pattern                       ****                                         
+Query    4829  MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  4888
+               MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct    1     MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query    4889  KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  4948
+               KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct    61    KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query    4949  AVHASLDKFLASVSTVLTSKYR  4970
+               AVHASLDKFLASVSTVLTSKYR
+Sbjct    121   AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+
+Lambda      K        H        a         alpha
+   0.270   0.0470     1.00     0.00     0.00 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.270   0.0470     1.00     0.00     0.00     0.00 
+
+Effective search space used: 36028797018963876
+
+
+  Database: tfp
+    Posted date:  Oct 30, 2026  12:55 PM
+  Number of letters in database: 3,263
+  Number of sequences in database:  23
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

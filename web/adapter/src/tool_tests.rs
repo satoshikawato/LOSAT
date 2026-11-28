@@ -1941,7 +1941,8 @@ fn a_makeblastdb_database_outside_the_run_s_directory_comes_on_stream_12() {
     // The folder as the tool's words name it, as stream 12 names its files and as the report shows
     // it; the input and the other words; whether a log goes beside the database.
     let nosub_folder = format!("{nosub}/");
-    let cases: [(&str, &str, &str, &str, &[&str], bool); 4] = [
+    type Case<'a> = (&'a str, &'a str, &'a str, &'a str, &'a [&'a str], bool);
+    let cases: [Case<'_>; 4] = [
         ("../", "../", &above, &prot, &["-dbtype", "prot"], false),
         (
             "src/../../",

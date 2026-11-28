@@ -1886,9 +1886,8 @@ fn a_run_answers_for_its_database_s_folder_and_places_its_files_outside() {
     assert_eq!(directory.place(b"../db").unwrap(), None, "no host's folder");
     assert_eq!(OpenFiles::disk().place(b"../db").unwrap(), None);
 
-    let host = std::env::temp_dir().join(format!("ww4i-run-files-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&host);
-    std::fs::create_dir_all(&host).unwrap();
+    let tmp = crate::utils::test_dir::TempDir::unique("run-files-outside");
+    let host = tmp.to_path_buf();
     let receiver = PlacesOutside(Streamed::default(), host.clone());
     let events = receiver.0 .0.clone();
     let files = OpenFiles::new(&RunFiles::Receiver(Arc::new(receiver)));
@@ -1941,5 +1940,4 @@ fn a_run_answers_for_its_database_s_folder_and_places_its_files_outside() {
             "/tmp/ww4i-x/v/x @0 x"
         ]
     );
-    std::fs::remove_dir_all(&host).unwrap();
 }

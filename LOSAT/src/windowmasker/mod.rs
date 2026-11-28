@@ -145,38 +145,12 @@ pub(crate) fn check_in(
 ///   (comma-separated or read from `-fa_list true`, FASTA or `-infmt blastdb`), and `-ustat` of
 ///   masking.
 pub(crate) fn read_files<S: AsRef<OsStr> + Clone>(words: &[S]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
-    let (log_paths, out_paths, databases, databases_for_out) =
-        crate::report::log_inputs::windowmasker_read_parts(words);
-    let encode = |paths: Vec<std::path::PathBuf>| -> Vec<Vec<u8>> {
-        paths
-            .into_iter()
-            .map(|p| p.into_os_string().into_encoded_bytes())
-            .collect()
-    };
-    let mut for_log = encode(log_paths);
-    let mut for_out = encode(out_paths);
-    if !databases.is_empty() {
-        let blastdb =
-            crate::blastinput::ncbi_environment::ApplicationStart::of_process(PROGRAM, words)
-                .settings()
-                .ok()
-                .and_then(|s| s.blastdb);
-        for db in databases {
-            for path in crate::seqdb::alias::database_lookup_files(
-                &crate::utils::os_bytes::os_str_bytes(&db),
-                crate::seqdb::SeqType::Nucleotide,
-                blastdb.as_deref(),
-            ) {
-                if !path.is_empty() {
-                    if databases_for_out {
-                        for_out.push(path.clone());
-                    }
-                    for_log.push(path);
-                }
-            }
-        }
-    }
-    (for_log, for_out)
+    crate::report::log_inputs::tool_read_files(
+        TOOL.program,
+        crate::seqdb::SeqType::Nucleotide,
+        words,
+        crate::report::log_inputs::windowmasker_read_parts(words),
+    )
 }
 
 #[cfg(test)]

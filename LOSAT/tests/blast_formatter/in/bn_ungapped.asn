@@ -1,0 +1,359 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q1 query one"
+                  }
+                }
+              },
+              title "q1 query one"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 120,
+              seq-data ncbi2na '64BEACFB5890D6735F0B211ADDB9510CC7BCE213E8FE52
+43BC26594FDC88'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q2 query two"
+                  }
+                }
+              },
+              title "q2 query two"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 100,
+              seq-data ncbi2na '2BAEB6187BAF2DBA67A4543E9BEF4757019A012375D115
+6C50'H
+            }
+          }
+        }
+      },
+      subject database "in/db/s3",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        },
+        {
+          name "MaskAtHash",
+          value boolean TRUE
+        },
+        {
+          name "UngappedMode",
+          value boolean TRUE
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 108003
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type diags,
+        segs dendiag {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "BL_ORD_ID",
+                tag id 0
+              }
+            },
+            starts {
+              0,
+              100
+            },
+            len 120,
+            strands {
+              plus,
+              plus
+            },
+            scores {
+              {
+                id str "score",
+                value int 117
+              },
+              {
+                id str "blast_score",
+                value int 117
+              },
+              {
+                id str "e_value",
+                value real { 12837203565041, 10, -76 }
+              },
+              {
+                id str "bit_score",
+                value real { 225641850876625, 10, -12 }
+              },
+              {
+                id str "num_ident",
+                value int 119
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 1, 10, 2 }
+              }
+            }
+          }
+        }
+      },
+      {
+        type diags,
+        segs dendiag {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              general {
+                db "BL_ORD_ID",
+                tag id 1
+              }
+            },
+            starts {
+              1,
+              101
+            },
+            len 119,
+            strands {
+              plus,
+              plus
+            },
+            scores {
+              {
+                id str "score",
+                value int 110
+              },
+              {
+                id str "blast_score",
+                value int 110
+              },
+              {
+                id str "e_value",
+                value real { 144536568456904, 10, -73 }
+              },
+              {
+                id str "bit_score",
+                value real { 212183034911694, 10, -12 }
+              },
+              {
+                id str "num_ident",
+                value int 116
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 991666666666667, 10, -13 }
+              }
+            }
+          }
+        }
+      },
+      {
+        type diags,
+        segs dendiag {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              general {
+                db "BL_ORD_ID",
+                tag id 2
+              }
+            },
+            starts {
+              0,
+              30
+            },
+            len 100,
+            strands {
+              plus,
+              plus
+            },
+            scores {
+              {
+                id str "score",
+                value int 100
+              },
+              {
+                id str "blast_score",
+                value int 100
+              },
+              {
+                id str "e_value",
+                value real { 727049099879798, 10, -68 }
+              },
+              {
+                id str "bit_score",
+                value real { 192956154961794, 10, -12 }
+              },
+              {
+                id str "num_ident",
+                value int 100
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 1, 10, 2 }
+              }
+            }
+          }
+        }
+      },
+      {
+        type diags,
+        segs dendiag {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              general {
+                db "BL_ORD_ID",
+                tag id 0
+              }
+            },
+            starts {
+              0,
+              230
+            },
+            len 100,
+            strands {
+              plus,
+              plus
+            },
+            scores {
+              {
+                id str "score",
+                value int 100
+              },
+              {
+                id str "blast_score",
+                value int 100
+              },
+              {
+                id str "e_value",
+                value real { 727049099879798, 10, -68 }
+              },
+              {
+                id str "bit_score",
+                value real { 192956154961794, 10, -12 }
+              },
+              {
+                id str "num_ident",
+                value int 100
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 1, 10, 2 }
+              }
+            }
+          }
+        }
+      },
+      {
+        type diags,
+        segs dendiag {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              general {
+                db "BL_ORD_ID",
+                tag id 1
+              }
+            },
+            starts {
+              0,
+              230
+            },
+            len 100,
+            strands {
+              plus,
+              plus
+            },
+            scores {
+              {
+                id str "score",
+                value int 94
+              },
+              {
+                id str "blast_score",
+                value int 94
+              },
+              {
+                id str "e_value",
+                value real { 21591573544318, 10, -63 }
+              },
+              {
+                id str "bit_score",
+                value real { 181420026991853, 10, -12 }
+              },
+              {
+                id str "num_ident",
+                value int 98
+              },
+              {
+                id str "hsp_percent_coverage",
+                value real { 1, 10, 2 }
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 133270576282382, 10, -14 },
+        k { 620991117264207, 10, -15 },
+        h { 112409184650115, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { -1, 10, 0 },
+        k { -1, 10, 0 },
+        h { -1, 10, 0 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 108003",
+      "Effective search space used: 108003",
+      "Length adjustment: 9"
+    }
+  }
+}

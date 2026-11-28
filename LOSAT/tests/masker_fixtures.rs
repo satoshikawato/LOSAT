@@ -570,7 +570,7 @@ struct RefusedRow {
 }
 
 /// The rows that LOSAT refuses by name.
-const REFUSED_ROWS: [RefusedRow; 9] = [
+const REFUSED_ROWS: [RefusedRow; 12] = [
     // NCBI's database reader does not open it: NCBI then asks its servers (its remote loader's
     // failure under `unshare -rn`).
     RefusedRow {
@@ -590,14 +590,45 @@ const REFUSED_ROWS: [RefusedRow; 9] = [
         ncbi_err: "Note[F]",
         losat_err: "severity Fatal",
     },
-    // An output format outside what LOSAT's blast_formatter writes (8, 9, 11 and 12): NCBI writes it.
+    // An output format outside what LOSAT's blast_formatter writes (6 to 12 and 20): NCBI writes
+    // it.
     RefusedRow {
         program: "blast_formatter",
-        name: "refused_of6",
+        name: "refused_of5",
         kind: "OutputFormat",
         ncbi_status: 0,
         ncbi_err: "",
-        losat_err: "output format 6 is not supported",
+        losat_err: "output format 5 is not supported",
+    },
+    // The tabular formats of a translated search's archive (PR 3b of line RG-F3): NCBI writes
+    // them.
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_tabular_rpstblastn",
+        kind: "Tabular",
+        ncbi_status: 0,
+        ncbi_err: "",
+        losat_err: "a translated search",
+    },
+    // `-subject` sequences, `BL2SEQ_LEGACY` and outfmt 7: NCBI writes a `# Subject:` line of each
+    // subject.
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_tabular_bl2seq_legacy_7",
+        kind: "Tabular",
+        ncbi_status: 0,
+        ncbi_err: "",
+        losat_err: "BL2SEQ_LEGACY set and outfmt 7",
+    },
+    // Queries given as locations: NCBI reads their sequences from the database or asks its
+    // servers for them (its remote loader's failure under `unshare -rnu`).
+    RefusedRow {
+        program: "blast_formatter",
+        name: "refused_tabular_locations",
+        kind: "Tabular",
+        ncbi_status: 255,
+        ncbi_err: "www.ncbi.nlm.nih.gov",
+        losat_err: "queries given as locations",
     },
     // A NaN or an infinite real number in the results: NCBI stops at it in JSON with an error of
     // its stream (in ASN.1 binary it writes its one special octet, as LOSAT does: row

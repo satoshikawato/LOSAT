@@ -181,7 +181,11 @@ fn next_from<I: Input>(
         return None;
     }
     let (value, posts) = objects.read_object(named::BLAST4_ARCHIVE);
-    Some((value.map(Archive::from_value), posts))
+    let null_element = objects.null_element_read();
+    Some((
+        value.map(|value| Archive::from_value(value, null_element)),
+        posts,
+    ))
 }
 
 impl Archive {
@@ -190,14 +194,16 @@ impl Archive {
     /// reads of the results. An element stated as `NULL` in a list of the messages, of the
     /// search or of the results of a search is refused where LOSAT would first read that list
     /// (`Stop::NullElement`): the messages before any is posted, the search after the checks of
-    /// its body and `ident`, the results after the request.
+    /// its body and `ident`, the results after the request. The messages and the results are
+    /// walked for such an element only when the reader kept one in the object (`null_element`,
+    /// `ObjectStream::null_element_read`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1700-1705
-    pub(crate) fn from_value(mut value: Value) -> Archive {
+    pub(crate) fn from_value(mut value: Value, null_element: bool) -> Archive {
         let ty = named::BLAST4_ARCHIVE;
         let messages = value
             .member(member_index(ty, "messages"))
             .map(|list| V::new(member_type(ty, "messages"), list));
-        if messages.is_some_and(|list| list.holds_null_element()) {
+        if null_element && messages.is_some_and(|list| list.holds_null_element()) {
             return Archive {
                 messages: Vec::new(),
                 search: Err(Stop::NullElement),
@@ -211,7 +217,10 @@ impl Archive {
             .take_member(member_index(ty, "results"))
             .expect("the mandatory results");
         let search = Request::from_value(request).and_then(|request| match request {
-            Some(_) if V::new(member_type(ty, "results"), &results).holds_null_element() => {
+            Some(_)
+                if null_element
+                    && V::new(member_type(ty, "results"), &results).holds_null_element() =>
+            {
                 Err(Stop::NullElement)
             }
             request => Ok(request.map(|request| Search {
@@ -338,20 +347,17 @@ fn seqalign_exception(file: &'static str, line: u32, kind: &'static str, text: &
 pub(crate) fn seq_align_id(align: V<'_>, row: usize) -> Result<&ParsedSeqId, Stop> {
     // The alignments of `disc` segments still to search, the next on top; the first search is
     // the one whose exception leaves (`disc` catches those of its sub-alignments).
-    let mut todo = vec![align];
-    let mut outer = Ok(());
-    let mut first = true;
+    // (A `Vec` takes memory at its first push: an alignment of one segment kind takes none.)
+    let mut todo = Vec::new();
+    let outer = match align_row_id(align, row, &mut todo) {
+        Ok(Some(id)) => return Ok(id),
+        Ok(None) => Ok(()),
+        Err(stop) => Err(stop),
+    };
     while let Some(align) = todo.pop() {
-        match align_row_id(align, row, &mut todo) {
-            Ok(Some(id)) => return Ok(id),
-            Ok(None) => {}
-            Err(stop) => {
-                if first {
-                    outer = Err(stop);
-                }
-            }
+        if let Ok(Some(id)) = align_row_id(align, row, &mut todo) {
+            return Ok(id);
         }
-        first = false;
     }
     match outer {
         Err(stop) => Err(stop),
@@ -360,7 +366,7 @@ pub(crate) fn seq_align_id(align: V<'_>, row: usize) -> Result<&ParsedSeqId, Sto
 }
 
 /// `CSeq_align::GetSeq_id(): can not get seq-id for the row requested.` (Seq_align.cpp:396).
-fn invalid_row() -> Stop {
+pub(crate) fn invalid_row() -> Stop {
     seqalign_exception(
         SEQ_ALIGN_CPP,
         396,

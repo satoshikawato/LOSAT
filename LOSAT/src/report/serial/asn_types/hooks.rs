@@ -38,6 +38,11 @@ pub(super) fn pre_read_member(ty: u16, member: usize, read: &[(u16, Value)]) -> 
 #[inline(never)]
 fn dense_seg_pre_read_member(member: usize, read: &[(u16, Value)]) -> R<()> {
     let ty = named::DENSE_SEG;
+    // The hook reserves only these three (the other members are read without it).
+    let name = super::members(ty)[member].name();
+    if !matches!(name, "starts" | "lens" | "strands") {
+        return Ok(());
+    }
     let get = |name: &str| {
         let index = member_index(named::DENSE_SEG, name);
         read.iter()
@@ -50,11 +55,11 @@ fn dense_seg_pre_read_member(member: usize, read: &[(u16, Value)]) -> R<()> {
     // `max_size()` of a vector of 4-byte and of 1-byte elements.
     const MAX_SIZE_4: u64 = (i64::MAX as u64) / 4;
     const MAX_SIZE_1: u64 = i64::MAX as u64;
-    let (size, max_size) = match super::members(ty)[member].name() {
+    let (size, max_size) = match name {
         "starts" => (dim.wrapping_mul(numseg), MAX_SIZE_4),
         "lens" => (numseg, MAX_SIZE_4),
-        "strands" => (dim.wrapping_mul(numseg), MAX_SIZE_1),
-        _ => return Ok(()),
+        // "strands"
+        _ => (dim.wrapping_mul(numseg), MAX_SIZE_1),
     };
     if size > max_size {
         return Err(Fail::Std(&VECTOR_RESERVE_LENGTH_ERROR));

@@ -8,7 +8,7 @@ mod fasta;
 mod masker;
 mod work;
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io::{Read, Write};
 
 use crate::ncbi_app::Tool;
@@ -58,6 +58,64 @@ pub(crate) fn run_with(
     err: &mut dyn Write,
 ) -> i32 {
     crate::ncbi_app::run_with(&TOOL, words, input, out, err, app::run)
+}
+
+/// `run_with` of LOSAT Web's run (`ncbi_app::run_in`; line NP WW4c, 2026-11-28): the files that
+/// the run writes (`-out FILE`, `-logfile FILE`) go to `files`, and `-xmlhelp` prints NCBI's XML,
+/// as on the command line.
+pub(crate) fn run_in(
+    words: &[OsString],
+    files: &crate::report::run_files::RunFiles,
+    input: &mut dyn Read,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    crate::ncbi_app::run_in(&TOOL, words, files, (input, out, err), app::run)
+}
+
+/// The checks of a dustmasker run before it opens a file (LOSAT Web's validation of the words,
+/// `web_adapter::check_dustmasker`; line NP WW4c): `run_in` with the body `check`. The standard input
+/// is empty; the exit status, with the standard error on `err` and the file of `-logfile` to
+/// `files`.
+pub(crate) fn check_in(
+    words: &[OsString],
+    files: &crate::report::run_files::RunFiles,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    crate::ncbi_app::run_in(
+        &TOOL,
+        words,
+        files,
+        (&mut std::io::empty(), out, err),
+        check,
+    )
+}
+
+/// `Run` up to where it opens its first file (`seqmasks_io::run::check_output`).
+fn check(
+    args: &crate::ncbi_app::args::Args,
+    _settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
+    _stdin: &mut crate::ncbi_app::files::Cin<'_>,
+    _out: &mut dyn Write,
+    diag: &mut crate::ncbi_app::Diag,
+) -> i32 {
+    crate::seqmasks_io::run::check_output(args, diag, PROGRAM)
+}
+
+// No NCBI counterpart: LOSAT Web reads `-logfile` and `-out` against the input names the run
+// opens for reading, so a write name equal to a missing input is refused instead of diverging
+// from the command line, which makes the file and then reads it (line WQA D19; line NP WW4c).
+/// The input file names that a `dustmasker` run with `words` opens for reading: `(for_logfile,
+/// for_out)` (`log_inputs::masker_read_parts`: `-in`, or the files that `seqdb` looks up for the
+/// database of `-infmt blastdb`).
+pub(crate) fn read_files<S: AsRef<OsStr> + Clone>(words: &[S]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    crate::report::log_inputs::tool_read_files(
+        TOOL.program,
+        crate::seqdb::SeqType::Nucleotide,
+        words,
+        crate::report::log_inputs::masker_read_parts(TOOL.program, words),
+    )
 }
 
 #[cfg(test)]

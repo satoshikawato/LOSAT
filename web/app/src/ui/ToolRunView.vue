@@ -4,14 +4,18 @@
 // Outputs preview at most 512 KiB so large counts/FASTA outputs never grow page JS heap;
 // binary outputs show "Binary, <size>". Download streams the full OPFS-backed File.
 // Made counts files (`-out` of `-mk_counts` / `-convert`) offer "Use in BLASTN" and
-// "Mask with these counts".
+// "Mask with these counts"; mask data (a masking run's `-outfmt maskinfo_*` output, `maskDataName`) offers "Use as
+// -mask_data in makeblastdb". A tool that writes its files into the run's directory (makeblastdb, line WW WW4b2) has
+// them listed, each to download and all in one tar archive, and its database offers "Use as Database
+// (-db)" and, for a nucleotide one, "Use as Repeats database (-filtering_db)".
 import { computed, nextTick, ref, shallowRef, useId, watch } from 'vue';
 import { activeSavedCountsTaxid, savedTabCopyOf, type CountsLoader, type SavedTabCopy } from '../application/counts';
-import type { Coordinator, SessionCountsEntry, ToolRunView } from '../application/coordinator';
+import type { Coordinator, MadeDatabase, MaskDataHandover, SessionCountsEntry, ToolRunView } from '../application/coordinator';
+import { primaryBlastDb } from '../domain/blast-db';
 import { parseTaxid, type CountsMadeMeta } from '../domain/counts';
 import type { ToolFileOrigin, ToolOutputEntry } from '../domain/run';
-import { toolCommandWords } from '../domain/tool-argv';
-import { decodeUtf8Preview, toolLabel, toolStageLabel } from '../domain/tools';
+import { handedOverName, maskDataName, toolCommandWords } from '../domain/tool-argv';
+import { decodeUtf8Preview, toolRunTitle, toolWritesDirectory } from '../domain/tools';
 import type { Badge } from '../domain/verification';
 import type { CountsCopy } from '../ports/counts';
 import { announce } from './announcer';
@@ -37,6 +41,9 @@ const emit = defineEmits<{
   'use-in-blastn': [file: File];
   'use-taxid-in-blastn': [taxid: number];
   'mask-with-counts': [entry: SessionCountsEntry];
+  'use-as-database': [made: MadeDatabase];
+  'use-as-repeats-database': [made: MadeDatabase];
+  'use-as-mask-data': [data: MaskDataHandover];
 }>();
 
 const countsState = props.counts === undefined ? undefined : useStore(props.counts.state);
@@ -55,6 +62,14 @@ interface OutputTab {
   readonly entry: ToolOutputEntry;
 }
 
+/** Whether the run's files are those it wrote into its directory (listed apart from the tabs; makeblastdb's). */
+const writesDirectory = computed(() => toolWritesDirectory(props.run.snapshot.tool));
+const madeFiles = computed(() => (writesDirectory.value ? (props.run.record.files ?? []) : []));
+/** The database among the files that the run made, if any (its alias file's, or else its volume's). */
+const madeDatabase = computed(() =>
+  props.run.status === 'completed' ? primaryBlastDb(madeFiles.value.map((file) => file.name)) : undefined,
+);
+
 const outputTabs = computed<readonly OutputTab[]>(() => {
   const { stdout, stderr, files } = props.run.record;
   const list: OutputTab[] = [];
@@ -62,6 +77,8 @@ const outputTabs = computed<readonly OutputTab[]>(() => {
     list.push({ key: stdout.key, label: 'Output', testid: 'tool-tab-stdout', entry: stdout });
   }
   (files ?? []).forEach((file, index) => {
+    // Of the files in the run's directory, those that an option named (-logfile) also have a tab.
+    if (writesDirectory.value && file.option === undefined) return;
     const label = file.option !== undefined ? `${file.option} ${file.name}` : file.name;
     list.push({ key: file.key, label, testid: `tool-tab-file-${index}`, entry: file });
   });
@@ -188,7 +205,8 @@ async function useInBlastn(): Promise<void> {
   if (tab === undefined) return;
   actionError.value = undefined;
   try {
-    const file = await props.coordinator.getToolOutputFile(props.run.snapshot.runId, tab.key, tab.entry.name);
+    // BLASTN's -window_masker_db names the file as its run's directory holds it (`handedOverName`).
+    const file = await props.coordinator.getToolOutputFile(props.run.snapshot.runId, tab.key, handedOverName(tab.entry.name));
     emit('use-in-blastn', file);
   } catch (error) {
     setActionError(error);
@@ -279,6 +297,52 @@ function finishSave(tabKey: string, copy: CountsCopy, kept: boolean): void {
   announce(text);
 }
 
+async function downloadFile(entry: ToolOutputEntry): Promise<void> {
+  actionError.value = undefined;
+  try {
+    await props.coordinator.exportToolOutput(props.run.snapshot.runId, entry.key);
+  } catch (error) {
+    setActionError(error);
+  }
+}
+
+async function downloadAll(): Promise<void> {
+  actionError.value = undefined;
+  try {
+    await props.coordinator.exportToolFiles(props.run.snapshot.runId);
+  } catch (error) {
+    setActionError(error);
+  }
+}
+
+async function useMadeDatabase(as: 'use-as-database' | 'use-as-repeats-database'): Promise<void> {
+  actionError.value = undefined;
+  try {
+    const made = await props.coordinator.madeDatabase(props.run.snapshot.runId);
+    if (as === 'use-as-database') emit('use-as-database', made);
+    else emit('use-as-repeats-database', made);
+  } catch (error) {
+    setActionError(error);
+  }
+}
+
+/** The name under which the active output goes to makeblastdb's `-mask_data`, when it is mask data of a completed run. */
+const maskDataOfTab = computed(() => {
+  const tab = activeTab.value;
+  return tab === undefined || props.run.status !== 'completed' ? undefined : maskDataName(props.run.snapshot, tab.entry);
+});
+
+async function useAsMaskData(): Promise<void> {
+  const tab = activeTab.value;
+  if (tab === undefined) return;
+  actionError.value = undefined;
+  try {
+    emit('use-as-mask-data', await props.coordinator.maskData(props.run.snapshot.runId, tab.key));
+  } catch (error) {
+    setActionError(error);
+  }
+}
+
 function maskWithCounts(): void {
   const tab = activeTab.value;
   if (tab === undefined) return;
@@ -292,10 +356,7 @@ function maskWithCounts(): void {
 }
 
 const command = computed(() => toolCommandWords(props.run.snapshot.argv));
-const toolHeading = computed(() => {
-  const { tool, stage } = props.run.snapshot;
-  return tool === 'windowmasker' ? `${toolLabel(tool)} · ${toolStageLabel(tool, stage)}` : `${toolLabel(tool)} (blast_formatter)`;
-});
+const toolHeading = computed(() => toolRunTitle(props.run.snapshot.tool, props.run.snapshot.stage));
 const duration = computed(() => {
   const { startedAt, endedAt } = props.run.record;
   return startedAt !== undefined && endedAt !== undefined ? formatDuration(endedAt - startedAt) : '';
@@ -351,8 +412,48 @@ function originText(origin: ToolFileOrigin): string {
         Command: <code data-testid="result-command"><CommandText :words="command" :takes-value="takesValue" /></code>
       </p>
 
-      <p v-if="outputTabs.length === 0" class="muted" data-testid="tool-output-empty">This run wrote no output.</p>
-      <template v-else>
+      <section v-if="madeFiles.length > 0" class="tool-made-files" data-testid="tool-made-files">
+        <h3>Files made by the run</h3>
+        <ul class="wm-file-list" data-testid="tool-made-files-list">
+          <li v-for="(file, index) in madeFiles" :key="file.key" class="wm-file-item">
+            <span class="source-name" :data-testid="`tool-made-file-name-${index}`">{{ file.name }}</span>
+            <span class="muted">{{ formatBytes(file.size) }}</span>
+            <button
+              type="button"
+              class="link"
+              :aria-label="`Download ${file.name}`"
+              :data-testid="`tool-made-file-download-${index}`"
+              @click="downloadFile(file)"
+            >
+              Download
+            </button>
+          </li>
+        </ul>
+        <div class="tool-output-actions">
+          <button type="button" data-testid="tool-made-files-download-all" @click="downloadAll">
+            Download all ({{ madeFiles.length === 1 ? '1 file' : `${madeFiles.length} files` }}, .tar)
+          </button>
+          <template v-if="madeDatabase">
+            <button type="button" class="primary-action" data-testid="tool-use-as-database" @click="useMadeDatabase('use-as-database')">
+              Use as Database (-db)
+            </button>
+            <button
+              v-if="madeDatabase.kind === 'nucleotide'"
+              type="button"
+              data-testid="tool-use-as-repeats-database"
+              @click="useMadeDatabase('use-as-repeats-database')"
+            >
+              Use as Repeats database (-filtering_db)
+            </button>
+          </template>
+        </div>
+        <p v-if="actionError && outputTabs.length === 0" class="results-message error" role="alert" data-testid="tool-action-error">
+          {{ actionError }}
+        </p>
+      </section>
+
+      <p v-if="outputTabs.length === 0 && madeFiles.length === 0" class="muted" data-testid="tool-output-empty">This run wrote no output.</p>
+      <template v-else-if="outputTabs.length > 0">
         <TabList v-model="activeKey" label="Tool outputs" :tabs="tabItems" manual />
         <div
           v-if="activeTab"
@@ -387,6 +488,9 @@ function originText(origin: ToolFileOrigin): string {
           <div class="tool-output-actions">
             <button type="button" data-testid="tool-output-download" @click="downloadActive">
               Download {{ downloadLabel(activeTab) }} ({{ formatBytes(activeTab.entry.size) }})
+            </button>
+            <button v-if="maskDataOfTab" type="button" class="primary-action" data-testid="tool-use-as-mask-data" @click="useAsMaskData">
+              Use as -mask_data in makeblastdb
             </button>
             <template v-if="activeTab.entry.isCounts && run.status === 'completed'">
               <button type="button" class="primary-action" data-testid="tool-use-in-blastn" @click="useInBlastn">

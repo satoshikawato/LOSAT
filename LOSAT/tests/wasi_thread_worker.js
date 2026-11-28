@@ -7,7 +7,7 @@
 const { isMainThread, parentPort, workerData } = require("worker_threads");
 const { WASI } = require("wasi");
 const fs = require("fs");
-const { unsignedWasiImports, blockingStdioWrite, endOnAbortTrap } = require("./wasi_artifact");
+const { unsignedWasiImports, environImports, blockingStdioWrite, endOnAbortTrap } = require("./wasi_artifact");
 // The table of the files the command opens (wasi_files.js).
 const { sharedFileImports, directoryReads } = require("./wasi_files");
 
@@ -119,12 +119,16 @@ function createImports(wasi, memory, spawnThread, extra, files, directory) {
   };
 }
 
-async function instantiateWithMemory(module, memory, args, spawnThread, provided, wasi, files = null, directory = undefined) {
+// `environment`: the main instance's environment as a function (`environImports`) in place of this process's at its
+// start; a worker's instance takes this process's.
+async function instantiateWithMemory(module, memory, args, spawnThread, provided, wasi, files = null, directory = undefined,
+  environment = undefined) {
   wasi ??= createWasi(args, directory);
-  const instance = await WebAssembly.instantiate(
-    module,
-    createImports(wasi, memory, spawnThread, hostImports(module, provided), files, directory),
-  );
+  const imports = createImports(wasi, memory, spawnThread, hostImports(module, provided), files, directory);
+  if (environment !== undefined) {
+    Object.assign(imports.wasi_snapshot_preview1, environImports(environment, () => memory));
+  }
+  const instance = await WebAssembly.instantiate(module, imports);
   return { instance, wasi };
 }
 

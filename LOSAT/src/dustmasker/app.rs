@@ -26,6 +26,11 @@ pub(super) fn run(
         Ok(output) => output,
         Err(error) => return diag.run_arg_exception(error),
     };
+    // LOSAT Web's refusal of an output that it does not write (`OpenFiles::create`), as soon as
+    // `-out` is opened (windowmasker's place and words).
+    if let Some(reason) = output.refusal() {
+        return diag.refuse(&work::unsupported(reason));
+    }
     let integer = |name| args.integer(name).expect("an integer key with a default");
     let options = Options {
         input: args.os_value("in").expect("-in has a default"),

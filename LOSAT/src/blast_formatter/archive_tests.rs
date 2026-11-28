@@ -139,14 +139,22 @@ fn the_seq_annot_formats_write_the_archive_s_seq_aligns() {
 
 #[test]
 fn the_other_formats_are_refused_after_ncbi_s_checks() {
-    let (status, out, err) = run_archive(&["-outfmt", "6"]);
+    let (status, out, err) = run_archive(&["-outfmt", "5"]);
     assert_eq!(
         (status, out.as_slice(), err),
         (
             1,
             &b""[..],
-            format!("Error: {}\n", Refusal::OutputFormat(6).reason())
+            format!("Error: {}\n", Refusal::OutputFormat(5).reason())
         )
+    );
+    // The tabular formats are written.
+    let (status, out, err) = run_archive(&["-outfmt", "6"]);
+    assert_eq!((status, err.as_str()), (0, ""));
+    assert!(
+        out.starts_with(b"q1\ts1\t"),
+        "{}",
+        String::from_utf8_lossy(&out)
     );
     // NCBI's check of SAM comes first; this archive is blastn's, so SAM is refused too.
     let (status, _, err) = run_archive(&["-outfmt", "17"]);
@@ -305,6 +313,22 @@ fn non_utf8_outfmt_argument_preserves_raw_bytes_in_error() {
     }
 }
 
+/// `psi_round`, the one check of the round of the formats: a `Web_StepNumber` that is no integer
+/// throws at the first result set (NCBI rows of7_psiblast_step_string and of7/of6/of20/of8
+/// _ps_none_step_str, a query without hits), and not where an object has no result set.
+#[test]
+fn a_step_that_is_no_integer_throws_at_the_first_result_set() {
+    assert_eq!(psi_round(Ok(Some(2)), 1).unwrap(), Some(2));
+    assert_eq!(psi_round(Ok(None), 3).unwrap(), None);
+    assert_eq!(psi_round(Err(()), 0).unwrap(), None);
+    let error = psi_round(Err(()), 1).unwrap_err();
+    assert_eq!(
+        format!("{error}"),
+        format!("{}", invalid_archive()),
+        "the archive's error"
+    );
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:796-818
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:599-608
 #[test]
@@ -323,7 +347,7 @@ fn binary_and_xml_archives_format_identical_to_text_and_match_truncation_quirks(
         let status = super::super::run_with(&line, &mut &bytes[..], &mut out, &mut err);
         (status, out, String::from_utf8(err).unwrap())
     };
-    for outfmt in ["8", "9", "12"] {
+    for outfmt in ["8", "9", "12", "6", "7", "10", "20", "6 std qseq sseq"] {
         let expected = run_bytes(&text, outfmt);
         assert_eq!(expected.0, 0, "text outfmt {outfmt}");
         assert_eq!(run_bytes(&binary, outfmt), expected, "bin outfmt {outfmt}");

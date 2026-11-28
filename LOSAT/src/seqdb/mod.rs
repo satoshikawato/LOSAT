@@ -1301,6 +1301,9 @@ pub struct SeqDb {
     /// totals without a list (`oid_list_fails_scan`): the reports' database, opened again without
     /// the list, meets it (`SeqDb::read_name_records`).
     unlisted_oid_list_error: Option<oid_list::OidListError>,
+    /// Whether the volumes' reads meet `oid_list_error` (a search's database,
+    /// `SeqDb::fail_search_reads_with_oid_list`): each change of it is given to them.
+    search_reads_meet_oid_list: bool,
     /// NCBI's OID list (the alias files' ranges, a list) and its iteration range, when there
     /// is one: ordinal id `i` is the `i`-th OID of the list inside the range.
     filter: Option<Box<filter::OidFilter>>,
@@ -2006,6 +2009,7 @@ impl SeqDb {
             oid_list_fails_scan: false,
             listed_tree: None,
             unlisted_oid_list_error: None,
+            search_reads_meet_oid_list: false,
             filter: None,
             search_path: None,
             reports_show_gis: false,
@@ -2219,6 +2223,7 @@ impl SeqDb {
             }
             Err(failure) => self.oid_list_error = Some(failure),
         }
+        self.x_give_search_reads_oid_list_error();
         self.listed_tree = Some(tree);
     }
 

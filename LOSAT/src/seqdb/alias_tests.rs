@@ -778,3 +778,32 @@ fn v5_alias_seqidlist_and_taxidlist_filter_oids_and_lines() {
     let db_ntx = open_id("n_tx", SeqType::Nucleotide);
     assert_eq!(lines(&db_ntx), [(0, 1), (2, 1), (3, 1)]);
 }
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:394-466
+/// `gu_gil` (a GI list over `gu`, which has no GI ISAM, under NSEQ and LENGTH): NCBI's OID list
+/// fails without a list, so a search's reads meet the failure; an emptied `-seqidlist` (a GI
+/// alone, dropped on a version 5 database) translates no alias list and the build succeeds, so
+/// the reads, also those of the multithreaded scan of a list that includes no OID, meet none
+/// (NCBI 2.17.0: blastp row `db.il.bp.gul.sgi.6` at 1, 2 and 4 threads, the warnings and exit 0).
+#[test]
+fn emptied_seqidlist_clears_the_search_reads_failure_of_the_alias_gi_list() {
+    let idlist = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/idlist");
+    let mut db = SeqDb::open(idlist.join("gu_gil").to_str().unwrap(), SeqType::Protein).unwrap();
+    db.fail_search_reads_with_oid_list();
+    assert!(db.build_oid_list().is_err());
+    assert!(db.volumes()[0].open_sequence_file().is_err());
+    let bytes = std::fs::read(idlist.join("u_gi.txt")).unwrap();
+    let mut warns = Vec::new();
+    let file = super::super::seqidlist::read_si_list(&bytes, &mut warns).unwrap();
+    let list = super::super::filter::SeqidList {
+        negative: false,
+        file,
+    };
+    let mut warnings = Vec::new();
+    db.restrict_seqids(&list, &mut warnings).unwrap();
+    assert_eq!(db.num_seqs(), 0);
+    assert!(db.build_oid_list().is_ok());
+    assert!(db.volumes()[0].open_sequence_file().is_ok());
+    db.set_mt_stop_at_negative(true);
+    db.mt_check_scan_without_blocks().unwrap();
+}

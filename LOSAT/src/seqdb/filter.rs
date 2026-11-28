@@ -1559,12 +1559,29 @@ impl SeqDb {
     // review A of line RG D1b-1).
     /// Makes every read of a sequence fail with the failure of NCBI's build of its OID list
     /// ([`SeqDb::build_oid_list`]), as the reads of a search follow its first request of OIDs:
-    /// the database's opening for a search (`common::database::open_search_database`).
+    /// the database's opening for a search (`common::database::open_search_database`). The
+    /// reads follow the failure as the search's list changes it
+    /// (`SeqDb::x_give_search_reads_oid_list_error`).
     pub fn fail_search_reads_with_oid_list(&mut self) {
-        if let Some(failure) = &self.oid_list_error {
-            for volume in &mut self.volumes {
-                volume.fail_sequence_reads(failure.clone());
-            }
+        self.search_reads_meet_oid_list = true;
+        self.x_give_search_reads_oid_list_error();
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:394-466
+    // NCBI builds its OID list once, under the search's list: the alias files' id lists that a
+    // build without the list fails to translate (a GI list over a volume without a GI ISAM) are
+    // not translated under a list without Seq-ids or taxids (an emptied `-seqidlist`), so the
+    // search's reads, also those of its multithreaded scan, meet no failure (NCBI 2.17.0, row
+    // `db.il.bp.gul.sgi.6` of `blastp.il.tsv` at 1, 2 and 4 threads).
+    /// Gives the volumes of a search's database the failure of NCBI's build of its OID list as
+    /// it stands (`oid_list_error`), none where the build succeeds: at the open, and again where
+    /// the search's list translates the alias files' id lists (`SeqDb::translate_alias_lists`).
+    pub(super) fn x_give_search_reads_oid_list_error(&mut self) {
+        if !self.search_reads_meet_oid_list {
+            return;
+        }
+        for volume in &mut self.volumes {
+            volume.set_sequence_read_failure(self.oid_list_error.clone());
         }
     }
 

@@ -1324,6 +1324,11 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
         want,
         "sqlite absent: run"
     );
+    // A version 5 database with taxids: a version 4 one refuses `-taxids` itself.
+    let taxid_db = format!(
+        "{}/../../LOSAT/tests/db_search/taxfilter/tfp",
+        env!("CARGO_MANIFEST_DIR")
+    );
     for (label, words) in [
         (
             "taxdb.btd without taxdb.bti",
@@ -1348,7 +1353,7 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
                 "-query",
                 "q.fa",
                 "-db",
-                prot_db,
+                taxid_db.as_str(),
                 "-taxids",
                 "9606",
                 "-no_taxid_expansion",

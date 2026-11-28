@@ -1,9 +1,9 @@
-// Tool descriptors and helpers for CLI tools besides BLAST searches (WW3b DESIGN §1-§2, RG-F3p7,
-// line WW WW4b2): windowmasker's three stages (-mk_counts, -ustat, -convert), blast_formatter
-// (-archive), makeblastdb (its options in the groups of NCBI's `-help`),
-// their option filters driven by `-xmlhelp`, mapping into ParameterField / ParameterDescription,
-// and output file naming. Nothing here lists option defaults, value lists or ranges: all
-// of those come from `ToolEngine.describeTool(...)`.
+// Tool descriptors and helpers for CLI tools besides BLAST searches (WW3b DESIGN §1-§2, RG-F3p7, line WW
+// WW4b2 and WW4c): windowmasker's three stages (-mk_counts, -ustat, -convert), blast_formatter (-archive),
+// makeblastdb (its options in the groups of NCBI's `-help`), the Masking tab's dustmasker, segmasker and
+// convert2blastmask, their option filters driven by `-xmlhelp`, mapping into ParameterField /
+// ParameterDescription, and output file naming. Nothing here lists option defaults, value lists or
+// ranges: all of those come from `ToolEngine.describeTool(...)`.
 import type { PrintedKind, ToolDescription, ToolParameterDescription } from 'losat/domain';
 import { exportPrefix, FORMAT_NAMES } from './output-format';
 import type { ParameterField } from './programs';
@@ -17,20 +17,56 @@ export interface ToolEngineOption {
   readonly choices?: readonly string[];
 }
 
-export type ToolId = 'windowmasker' | 'blast_formatter' | 'makeblastdb';
+/** The tools of the Masking tab (WW4c), in the order of its tool switcher. */
+export type MaskingTool = 'dustmasker' | 'segmasker' | 'convert2blastmask';
+
+export type ToolId = 'windowmasker' | 'blast_formatter' | 'makeblastdb' | MaskingTool;
 
 export type WindowMaskerStage = 'mk_counts' | 'mask' | 'convert';
 
-/** A run's stage: windowmasker's three, `format` for blast_formatter, `build` for makeblastdb. */
+/**
+ * A run's stage: windowmasker's three, `format` for blast_formatter, `build` for makeblastdb; a run of the
+ * Masking tab is a `mask` run.
+ */
 export type ToolStage = WindowMaskerStage | 'format' | 'build';
 
-/** Human-readable tool label for Results selector and Run details (the main tab's name). */
-export function toolLabel(tool: ToolId): string {
-  if (tool === 'windowmasker') return 'WindowMasker';
-  return tool === 'blast_formatter' ? 'Format Archive' : 'makeblastdb';
+export interface MaskingToolDescriptor {
+  readonly id: MaskingTool;
+  readonly label: string;
+  /** The sentence shown until `-xmlhelp` has arrived (its `<description>`, as the tool writes it). */
+  readonly fallbackSummary: string;
 }
 
-/** Stage label for Results selector and Run details. */
+/** The Masking tab's tool switcher, DustMasker first (selected by default). */
+export const MASKING_TOOLS: readonly MaskingToolDescriptor[] = Object.freeze([
+  { id: 'dustmasker', label: 'DustMasker', fallbackSummary: 'Low complexity region masker based on Symmetric DUST algorithm' },
+  { id: 'segmasker', label: 'SegMasker', fallbackSummary: 'Low complexity region masker based on the SEG algorithm' },
+  {
+    id: 'convert2blastmask',
+    label: 'convert2blastmask',
+    fallbackSummary: 'Convert masking information in lower-case masked FASTA input to file formats suitable for makeblastdb',
+  },
+]);
+
+/** NCBI's sentence for a tool of the Masking tab, read from `-xmlhelp` once available. */
+export function maskingToolSummary(tool: MaskingTool, description: ToolDescription | undefined): string {
+  return description?.description || MASKING_TOOLS.find((entry) => entry.id === tool)!.fallbackSummary;
+}
+
+/** Whether `tool` is one of the Masking tab's tools. */
+export function isMaskingTool(tool: ToolId): tool is MaskingTool {
+  return MASKING_TOOLS.some((entry) => entry.id === tool);
+}
+
+/** Human-readable tool label for Results selector and Run details. */
+export function toolLabel(tool: ToolId): string {
+  if (tool === 'windowmasker') return 'WindowMasker';
+  if (tool === 'blast_formatter') return 'Format Archive';
+  if (tool === 'makeblastdb') return 'makeblastdb';
+  return MASKING_TOOLS.find((entry) => entry.id === tool)!.label;
+}
+
+/** Stage label for Results selector and Run details: windowmasker's stage, else the command-line tool's name. */
 export function toolStageLabel(tool: ToolId, stage: ToolStage): string {
   if (tool !== 'windowmasker') return tool;
   return windowMaskerStageById(stage as WindowMaskerStage).label;
@@ -38,12 +74,14 @@ export function toolStageLabel(tool: ToolId, stage: ToolStage): string {
 
 /**
  * What Run details and the run's line in Results call the tool of a run: WindowMasker with its stage
- * (`WindowMasker · Mask`), a tab named otherwise than its tool with the tool's name (`Format Archive
- * (blast_formatter)`), and makeblastdb, whose tab has its name, by its name.
+ * ("WindowMasker · Mask"), Format Archive, whose tab is named otherwise than its tool, with the tool's
+ * name ("Format Archive (blast_formatter)"), and the other tools by the name of their tab or tool
+ * ("makeblastdb", "DustMasker").
  */
 export function toolRunTitle(tool: ToolId, stage: ToolStage): string {
   if (tool === 'windowmasker') return `${toolLabel(tool)} · ${toolStageLabel(tool, stage)}`;
-  return toolLabel(tool) === tool ? tool : `${toolLabel(tool)} (${tool})`;
+  if (tool === 'blast_formatter') return `${toolLabel(tool)} (${toolStageLabel(tool, stage)})`;
+  return toolLabel(tool);
 }
 
 /**
@@ -98,15 +136,15 @@ export const TOOL_FILE_STRING_FLAGS: ReadonlySet<string> = new Set(['-ustat', '-
 /** Options whose value is a comma-separated list of files of the run directory (makeblastdb's `-mask_data`). */
 export const TOOL_FILE_LIST_FLAGS: ReadonlySet<string> = new Set(['-mask_data']);
 
-/** Help and version flags, entered via Additional options. */
-export const WINDOWMASKER_HELP_FLAGS: ReadonlySet<string> = new Set(['-h', '-help', '-xmlhelp']);
-
 /**
- * The tools whose argument reader takes `-help-full` (makeblastdb's, for its hidden `-randomize`, which `-help` does not
- * list). The one list of them: `toolPrintsKind` reads it, and every reader of a tool run's help (the drafts, FakeEngine)
- * asks `toolPrintsKind`; a tool whose reader takes `-help-full` is added here.
+ * The help flags of every tool of LOSAT Web (`-xmlhelp` prints the XML, the others the usage). `-help-full` is one of
+ * them for every tool, as NCBI BLAST+ 2.17.0 and LOSAT print each tool's help for it with exit status 0, makeblastdb's
+ * listing its hidden `-randomize`, which `-help` does not list (review of WW4c, F4, probed 2026-11-28). Additional
+ * options take them and the version flags. The one list of them: `toolPrintsKind` reads it, and every reader of a tool
+ * run's help (the drafts, FakeEngine) asks `toolPrintsKind`.
  */
-const HELP_FULL_TOOLS: ReadonlySet<string> = new Set(['makeblastdb']);
+export const WINDOWMASKER_HELP_FLAGS: ReadonlySet<string> = new Set(['-h', '-help', '-help-full', '-xmlhelp']);
+
 export const WINDOWMASKER_VERSION_FLAGS: ReadonlySet<string> = new Set(['-version', '-version-full', '-version-full-xml', '-version-full-json']);
 
 /** Options placed in the Archive and Output blocks of Format Archive rather than "Formatting options". */
@@ -156,6 +194,42 @@ export function allBlastFormatterParameters(description: ToolDescription | undef
 /** Options of `blast_formatter` shown under the collapsible "Formatting options" section. */
 export function blastFormatterOptionParameters(description: ToolDescription | undefined): readonly ToolParameterDescription[] {
   return allBlastFormatterParameters(description).filter((param) => !BLAST_FORMATTER_BLOCK_FLAGS.has(param.flag));
+}
+
+/** Options placed in the Input and Output blocks of the Masking tab rather than "<Tool> options". */
+export const MASKING_BLOCK_FLAGS: ReadonlySet<string> = new Set(['-in', '-infmt', '-out', '-outfmt']);
+
+/** NCBI `-help` usage order of each Masking tool's options (the tool's `USAGE` line); an unknown future option sorts after these in XML order. */
+export const MASKING_USAGE_ORDER: Readonly<Record<MaskingTool, readonly string[]>> = Object.freeze({
+  dustmasker: Object.freeze(['-in', '-out', '-window', '-level', '-linker', '-infmt', '-outfmt', '-parse_seqids', '-hard_masking']),
+  segmasker: Object.freeze(['-in', '-out', '-infmt', '-parse_seqids', '-outfmt', '-window', '-locut', '-hicut']),
+  convert2blastmask: Object.freeze(['-in', '-out', '-outfmt', '-parse_seqids', '-masking_algorithm', '-masking_options']),
+});
+
+/** Every option of a Masking tool from `-xmlhelp` but help and version (which Additional options take), in NCBI `-help` usage order. */
+export function allMaskingParameters(description: ToolDescription | undefined, tool: MaskingTool): readonly ToolParameterDescription[] {
+  if (description === undefined) return [];
+  return sortByUsage(
+    description.parameters.filter(
+      (param) => !param.hidden && !WINDOWMASKER_HELP_FLAGS.has(param.flag) && !WINDOWMASKER_VERSION_FLAGS.has(param.flag),
+    ),
+    MASKING_USAGE_ORDER[tool],
+  );
+}
+
+/** The options that the command line requires (convert2blastmask's `-masking_algorithm` and `-masking_options`): a block of their own. */
+export function maskingRequiredParameters(description: ToolDescription | undefined, tool: MaskingTool): readonly ToolParameterDescription[] {
+  return allMaskingParameters(description, tool).filter((param) => param.mandatory && !MASKING_BLOCK_FLAGS.has(param.flag));
+}
+
+/** The options of a Masking tool shown under its collapsible "<Tool> options" section. */
+export function maskingOptionParameters(description: ToolDescription | undefined, tool: MaskingTool): readonly ToolParameterDescription[] {
+  return allMaskingParameters(description, tool).filter((param) => !param.mandatory && !MASKING_BLOCK_FLAGS.has(param.flag));
+}
+
+/** A block option of a Masking tool (`-infmt`, `-outfmt`), if its `-xmlhelp` lists it. */
+export function maskingBlockParameter(description: ToolDescription | undefined, flag: string): ToolParameterDescription | undefined {
+  return description?.parameters.find((param) => param.flag === flag);
 }
 
 /** NCBI `-help` usage order for makeblastdb's options; any unknown future option sorts after these in XML order. */
@@ -350,6 +424,22 @@ export function stageBlockParameter(description: MaybeToolDescription, stage: Wi
  * several lines (blast_formatter's `-sorthits`: "Sorting option for hits:", then one line a value);
  * the "?" holds every line (`toolParameterHelpText`), as the Search tab's "?" holds the CLI's help.
  */
+/**
+ * The tool options whose text the tool writes or stores as given, with no list of values: makeblastdb's database
+ * `-title` and the masking algorithms' `-mask_id` and `-mask_desc`, convert2blastmask's `-masking_algorithm` (compared
+ * as given, case aside) and `-masking_options` (its `algo-options`), windowmasker's `-meta` (the counts' note). The
+ * tool forms write them as typed, white space and all (`tool-argv.ts`; review of WW4c, F3); the search forms and the
+ * tools' names, numbers and keywords drop the white space around a value.
+ */
+export const TOOL_WRITTEN_TEXT_FLAGS: ReadonlySet<string> = new Set([
+  '-title',
+  '-mask_id',
+  '-mask_desc',
+  '-masking_algorithm',
+  '-masking_options',
+  '-meta',
+]);
+
 export function toToolParameterField(param: ToolParameterDescription): ParameterField {
   const hint = (param.help.split('\n')[0] ?? '').trim();
   if (param.kind === 'Flag') {
@@ -424,11 +514,10 @@ export function toolPrintsKind(argv: readonly string[]): PrintedKind | null {
 
 /** The first help flag of a tool's argv (`-xmlhelp` prints the XML, the others the usage); undefined when there is none. */
 export function toolHelpFlag(argv: readonly string[]): string | undefined {
-  const helpFull = HELP_FULL_TOOLS.has(argv[0] ?? '');
   return argv
     .slice(1)
     .map((word) => word.split('=', 1)[0]!)
-    .find((flag) => WINDOWMASKER_HELP_FLAGS.has(flag) || (helpFull && flag === '-help-full'));
+    .find((flag) => WINDOWMASKER_HELP_FLAGS.has(flag));
 }
 
 /** Download file name for a tool run output or file (`runFileName` pattern). */

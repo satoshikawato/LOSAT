@@ -1,5 +1,6 @@
-// The native command line's makeblastdb runs that the e2e compares the browser's runs with (line NP WW4b1, line WW
-// WW4b2): a run in a folder of its inputs with the browser's zone (`TZ`), its paths written as the engine's `/work`; what
+// The native command line's runs that the e2e of the tool tabs compares the browser's runs with (line NP WW4b1, line WW
+// WW4b2; the Masking tab's tools, line NP WW4c): a run in a folder of its inputs with the browser's zone (`TZ`), its paths
+// written as the engine's `/work`; the files of a run's "Download all" (a tar) read back; what
 // may differ between two runs of the same input (the seconds of the times that makeblastdb prints and stores as
 // MM/DD/YYYY HH:MM:SS, and the elapsed time) masked; and the browser's run equal to the native run just before it or
 // just after it, so that the minute of the index file's date and of the metadata file's time stays compared (a minute
@@ -9,6 +10,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import type { Page } from '@playwright/test';
 import { NATIVE } from './native';
 
 /** What a run wrote: its exit status, its streams and the files of its folder that it made or changed, by name. */
@@ -40,8 +42,11 @@ export function folderOf(files: ReadonlyMap<string, Buffer>): string {
   return folder;
 }
 
-/** The native command line's run of `argv` in a folder of `inputs` with `TZ=zone`, its paths written as `/work`. */
-export function nativeMakeblastdb(argv: readonly string[], inputs: ReadonlyMap<string, Buffer>, zone: string): Written {
+/**
+ * The native command line's run of `argv` (the words after `losat`: the tool, then its words) in a folder of `inputs` with
+ * `TZ=zone`, its paths written as `/work`.
+ */
+export function nativeRun(argv: readonly string[], inputs: ReadonlyMap<string, Buffer>, zone: string): Written {
   const folder = folderOf(inputs);
   try {
     const run = spawnSync(NATIVE!, argv, { cwd: folder, env: { ...process.env, TZ: zone }, maxBuffer: 1 << 28 });
@@ -79,4 +84,35 @@ export function maskedOf(written: Written): string[] {
  */
 export function asNative(browser: readonly string[], natives: readonly (readonly string[])[]): readonly string[] {
   return natives.find((native) => JSON.stringify(native) === JSON.stringify(browser)) ?? natives[0]!;
+}
+
+/** The names and bytes of the files in a tar archive (ustar, with pax `path` records). */
+export function untar(bytes: Buffer): Map<string, Buffer> {
+  const files = new Map<string, Buffer>();
+  let at = 0;
+  let paxPath: string | undefined;
+  while (at + 512 <= bytes.length) {
+    const header = bytes.subarray(at, at + 512);
+    if (header.every((byte) => byte === 0)) break;
+    const field = (from: number, length: number) => header.subarray(from, from + length).toString('utf8').replace(/\0.*$/s, '');
+    const size = Number.parseInt(field(124, 12).trim(), 8);
+    const type = String.fromCharCode(header[156]!);
+    const body = bytes.subarray(at + 512, at + 512 + size);
+    if (type === 'x') {
+      paxPath = /\d+ path=(.*)\n/.exec(body.toString('utf8'))?.[1];
+    } else {
+      const prefix = field(345, 155);
+      const name = paxPath ?? (prefix === '' ? field(0, 100) : `${prefix}/${field(0, 100)}`);
+      files.set(name, Buffer.from(body));
+      paxPath = undefined;
+    }
+    at += 512 + Math.ceil(size / 512) * 512;
+  }
+  return files;
+}
+
+/** The files of a finished run's "Download all" (a tar), by name, and the archive's name. */
+export async function downloadAll(page: Page): Promise<{ readonly name: string; readonly files: Map<string, Buffer> }> {
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('tool-made-files-download-all').click()]);
+  return { name: download.suggestedFilename(), files: untar(readFileSync((await download.path())!)) };
 }

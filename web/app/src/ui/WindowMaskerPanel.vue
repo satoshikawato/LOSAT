@@ -60,11 +60,7 @@ const formatField = computed(() => {
 const commandWords = computed(() => props.draft.previewCommandWords(state.value));
 const takesValue = computed(() => toolTakesValue(state.value.description));
 
-const runCount = computed(() => {
-  if (!props.draft.usesFastaBox(state.value)) return 1;
-  const count = (state.value.fastaPaste.trim() !== '' ? 1 : 0) + state.value.fastaFiles.length;
-  return state.value.fastaMode === 'separate' && count > 1 ? count : 1;
-});
+const runCount = computed(() => props.draft.runCount(state.value));
 
 const buttonLabel = computed(() => {
   if (state.value.submitting) return 'Starting…';

@@ -24,9 +24,13 @@ function dialogs(page: Page): string[] {
   return seen;
 }
 
-async function expectTab(page: Page, tab: 'search' | 'results' | 'windowmasker' | 'makeblastdb' | 'blast-formatter'): Promise<void> {
+async function expectTab(
+  page: Page,
+  tab: 'search' | 'results' | 'windowmasker' | 'masking' | 'makeblastdb' | 'blast-formatter',
+): Promise<void> {
   await expect(page.getByTestId(`tab-${tab}`)).toHaveAttribute('aria-selected', 'true');
-  const panel = tab === 'windowmasker' ? 'wm-panel' : tab === 'makeblastdb' ? 'mk-panel' : tab === 'blast-formatter' ? 'bf-panel' : `${tab}-panel`;
+  const panels = { windowmasker: 'wm-panel', masking: 'ms-panel', makeblastdb: 'mk-panel', 'blast-formatter': 'bf-panel' } as const;
+  const panel = tab in panels ? panels[tab as keyof typeof panels] : `${tab}-panel`;
   await expect(page.getByTestId(panel)).toBeVisible();
 }
 
@@ -121,6 +125,9 @@ test('the tab buttons and the arrow keys keep one Results entry, and a reload op
   await page.keyboard.press('ArrowRight');
   await expectTab(page, 'windowmasker');
   await expect(page.getByTestId('tab-windowmasker')).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expectTab(page, 'masking');
+  await expect(page.getByTestId('tab-masking')).toBeFocused();
   await page.keyboard.press('ArrowRight');
   await expectTab(page, 'makeblastdb');
   await expect(page.getByTestId('tab-makeblastdb')).toBeFocused();

@@ -35,7 +35,8 @@ fn blastn_2_3() -> KarlinParams {
 }
 
 /// The EtoS of the protein programs before this owner (`tblastx::ncbi_cutoffs::
-/// cutoff_score_from_evalue` of a32dc3fe6b, the port of exception 8), for the bit comparison.
+/// cutoff_score_from_evalue` of a32dc3fe6b, the port shared since line PS DECISIONS 28), for the
+/// bit comparison.
 fn port_before(evalue: f64, searchsp: i64, kbp: &KarlinParams) -> i32 {
     if kbp.lambda < 0.0 || kbp.k < 0.0 || kbp.h < 0.0 {
         return BLAST_SCORE_MIN;
@@ -79,6 +80,29 @@ fn blastn_before(evalue: f64, searchsp: i64, kbp: &KarlinParams) -> i32 {
     s
 }
 
+/// BLASTN's ungapped word cutoff copy before this owner (`blastn::ncbi_cutoffs::
+/// compute_blastn_cutoff_score_ungapped` of a32dc3fe6b) before its cap: its one e-value is
+/// `CUTOFF_E_BLASTN` (0.05), which it raised to `kSmallFloat` before the gap decay (NCBI decays
+/// first, blast_stat.c:4137-4144, then raises, :4049; the owner does the same).
+fn blastn_ungapped_before(searchsp: i64, rate: f64, kbp: &KarlinParams) -> i32 {
+    if kbp.lambda < 0.0 || kbp.k < 0.0 || kbp.h < 0.0 {
+        return 1;
+    }
+    let mut s = 1;
+    let e = 0.05f64.max(1.0e-297);
+    let e = if rate > 0.0 && rate < 1.0 {
+        e * (1.0 - rate)
+    } else {
+        e
+    };
+    let q = kbp.k * (searchsp as f64) / e;
+    let es = ncbi_int4_from_double((q.glibc_ln() / kbp.lambda).ceil());
+    if es > s {
+        s = es;
+    }
+    s
+}
+
 const EVALUES: [f64; 12] = [
     1e-300, 1e-297, 1e-200, 1e-50, 1e-10, 1e-3, 0.05, 1.0, 10.0, 1000.0, 1e6, 1e300,
 ];
@@ -99,7 +123,8 @@ const SPACES: [i64; 12] = [
 
 // The owner gives the bits of the code it replaced on valid blocks: the hit-saving and word
 // cutoffs of the protein programs (the port raised to 1, with and without the decay) and BLASTN's
-// two copies (x86-64 `INT_MIN`).
+// two copies (x86-64 `INT_MIN`; the ungapped one at its only e-value, where its order of the
+// clamp and the decay, the reverse of NCBI's, cannot change a bit).
 #[test]
 fn the_owner_gives_the_cutoffs_of_the_copies_it_replaced() {
     for kbp in [blosum62_ungapped(), blosum62_gapped(), blastn_2_3()] {
@@ -124,10 +149,20 @@ fn the_owner_gives_the_cutoffs_of_the_copies_it_replaced() {
                 );
             }
         }
+        for &ss in &SPACES {
+            for rate in [0.0, 0.1, 0.5] {
+                assert_eq!(
+                    cutoff_score(0.05, &kbp, ss, Some(rate), CutoffConversion::X86Int4),
+                    blastn_ungapped_before(ss, rate, &kbp),
+                    "{ss} {rate} {kbp:?}"
+                );
+            }
+        }
     }
 }
 
-// blast_stat.c:4059-4061 (line PS DECISIONS 28, PD-LOSAT-NCBI-DEFECTS exception 8): a quotient
+// blast_stat.c:4059-4061 (TBLASTX: PD-LOSAT-NCBI-DEFECTS exception 8; the other protein
+// programs: line PS DECISIONS 28): a quotient
 // `K searchsp / E` past the double takes `ln K + ln searchsp - ln E` under `FiniteQuotient`;
 // under `X86Int4` NCBI's x86-64 `INT_MIN` keeps the cutoff of 1.
 #[test]

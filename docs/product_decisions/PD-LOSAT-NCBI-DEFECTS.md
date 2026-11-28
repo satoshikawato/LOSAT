@@ -2847,9 +2847,20 @@ file would differ, and NCBI's programs still could not open the database).
   `hard_ranges[n]` after the last chunk (version 1.83; version 1.82 and before named `[1]`; for a
   masked subject `n` is the number of hard ranges, a read 4 bytes past the array of
   `CSeqDB`; the overlap it chooses only merges HSPs that intersect across a chunk boundary, and
-  hard chunks are disjoint), the out-of-range `double` to `Int4`
-  conversion (INT_MIN), and the catch in `BlastSetupPreliminarySearchEx` that never
+  hard chunks are disjoint), and the catch in `BlastSetupPreliminarySearchEx` that never
   matches.
+- The out-of-range `double` to `Int4` conversion (`INT_MIN`) of BLASTN's `BLAST_Cutoffs`
+  (`BlastKarlinEtoS_simple`, `blast_stat.c:4041-4064`), listed until 2026-11-28 among the defects
+  without an effect, does change the output. With an extreme `-searchsp` and `-evalue` (rows
+  `db.etos.bn.int4min.ss.e300`: `-searchsp 9223372036854775807 -evalue 1e-300`) the quotient
+  `K * searchsp / E` is past the range of a double, NCBI's x86-64 build converts it to `INT_MIN`,
+  the hit-saving cutoff stays 1 and so does the word cutoff, every seed is extended, and NCBI
+  BLAST+ 2.17.0 writes an alignment that the finite value of exception 8 would not find (one row
+  against none; with `-evalue 1e-200` the quotient is finite and NCBI writes none,
+  `db.etos.bn.finite.ss.e200`). LOSAT reproduces it (`stats::cutoffs::CutoffConversion::BLASTN`),
+  as decision D4 reproduces the conversions of `-threshold` and the X-drops. Whether it stays so
+  is the maintainer's open question Q-ETOS8 (line RG item X-etos-owner), with the other programs'
+  conversion of the same quotient.
 - `losat windowmasker -mk_counts`, `-convert` and `-checkdup` (version 1.72, 2026-11-22, line NP
   item M5b, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07): NCBI's defined
   but surprising results are written byte for byte (fixture rows of `LOSAT/tests/windowmasker`):

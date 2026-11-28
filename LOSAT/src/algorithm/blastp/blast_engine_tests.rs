@@ -220,6 +220,7 @@ fn blastp_and_tblastx_word_cutoffs_are_one_function() {
         cutoff_score_for_update_tblastx, word_cutoff_score_for_update, CUTOFF_E_BLASTP,
         CUTOFF_E_TBLASTX,
     };
+    use crate::stats::cutoffs::CutoffConversion;
     assert_eq!(CUTOFF_E_BLASTP, 1e-300);
     assert_eq!(CUTOFF_E_TBLASTX, 1e-300);
     let karlin = crate::stats::lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
@@ -240,13 +241,25 @@ fn blastp_and_tblastx_word_cutoffs_are_one_function() {
             0.0,
             &karlin,
             1.0,
+            CutoffConversion::PROTEIN,
         );
         assert_eq!(blastp, tblastx, "{query} {subject} {trigger} {cap}");
     }
     // The E-value is the program's: 1.0 (BLASTX's) lowers the score below the gap trigger.
-    let loose = word_cutoff_score_for_update(1.0, 300, 1_000, 1000, 1000, 0.0, &karlin, 1.0);
-    let tight =
-        word_cutoff_score_for_update(CUTOFF_E_BLASTP, 300, 1_000, 1000, 1000, 0.0, &karlin, 1.0);
+    let word_cutoff = |cutoff_e| {
+        word_cutoff_score_for_update(
+            cutoff_e,
+            300,
+            1_000,
+            1000,
+            1000,
+            0.0,
+            &karlin,
+            1.0,
+            CutoffConversion::PROTEIN,
+        )
+    };
+    let (loose, tight) = (word_cutoff(1.0), word_cutoff(CUTOFF_E_BLASTP));
     assert!(loose < tight, "{loose} {tight}");
 }
 

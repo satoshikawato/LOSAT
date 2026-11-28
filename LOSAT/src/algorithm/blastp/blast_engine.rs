@@ -772,7 +772,7 @@ fn blastp_cutoff_score_max(
             gapped_params,
             search_space,
             None,
-            crate::stats::cutoffs::CutoffConversion::FiniteQuotient,
+            crate::stats::cutoffs::CutoffConversion::PROTEIN,
         ),
     }
 }
@@ -1173,6 +1173,7 @@ fn blastp_ungapped_word_cutoff_score_for_context(
         0.0,
         &ctx.karlin_params,
         1.0,
+        crate::stats::cutoffs::CutoffConversion::PROTEIN,
     )
 }
 
@@ -1195,7 +1196,7 @@ pub(super) fn sum_stats_hit_cutoffs(
         avg_qlen,
         avg_subject_length,
         crate::core::link_hsps::BLAST_GAP_DECAY_RATE_GAPPED,
-        crate::stats::cutoffs::CutoffConversion::FiniteQuotient,
+        crate::stats::cutoffs::CutoffConversion::PROTEIN,
     );
     contexts
         .iter()

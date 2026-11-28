@@ -67,7 +67,7 @@ impl<'a> EvalueStats<'a> {
                 kbp,
                 self.search_space,
                 None,
-                crate::stats::cutoffs::CutoffConversion::FiniteQuotient,
+                crate::stats::cutoffs::CutoffConversion::PROTEIN,
             ),
         }
     }

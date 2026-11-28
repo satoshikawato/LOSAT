@@ -37,7 +37,11 @@ pub struct PreparedQueryBatch {
     pub(crate) reader_shape: Option<std::sync::Arc<super::reader_batch::ReaderBatchShape>>,
     /// Whether a context of the reader batch before this unit is valid (`reader_batch::attach`):
     /// NCBI's sum statistics carry their e-value over all the batch's contexts
-    /// (`parameters::context_cutoffs`). False for a unit that is the whole batch, and in phase 1.
+    /// (`parameters::context_cutoffs`). False for a unit that is the whole batch, and in phase 1,
+    /// whose minima over the batch stay exact without it only because every gapped context reads
+    /// one block and one search space: the first valid context's sum cutoff is then the smallest
+    /// (later contexts start from the e-value of a score of 1, so their cutoff is not lower). A
+    /// block per context would need the carry in phase 1 too.
     pub(crate) batch_valid_before: bool,
     /// EXPERIMENT (LOSAT_X_BXUNGAPSENT): whether `sequence_start` is on the path of the seed
     /// loops' sentinel walks (`blastx/x_ungap_sent.rs`, `query_fits`, another matrix than BLOSUM62

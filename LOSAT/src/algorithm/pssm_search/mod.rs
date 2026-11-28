@@ -88,8 +88,14 @@ pub struct PsiSearch {
     pub(crate) warning_title: Option<Vec<u8>>,
     /// What the search strategy's request holds of the PSSM (`PssmQueryRequest`): kept only for a
     /// run that writes one (`in_pssm::PssmReader::strategy`, `pssm_request_written`) of a PSSM that
-    /// NCBI's check passes; `None` otherwise and for a FASTA query's later rounds.
+    /// NCBI's check passes; `None` otherwise, for a FASTA query's later rounds and for a request
+    /// that LOSAT refuses (`request_refusal`).
     pub(crate) request: Option<PssmQueryRequest>,
+    /// LOSAT's refusal of a search strategy's request whose write NCBI stops in with its exception
+    /// (`in_pssm::psi_search_and_object`: a delayed member read again with an error), which the
+    /// run makes where NCBI's write starts, after the outfmt 0 prolog
+    /// (`PssmQueryStop::RequestRefused`); `None` otherwise.
+    pub(crate) request_refusal: Option<String>,
     /// The PSSM that psiblast's archive (outfmt 11) of a round of this search holds in its request
     /// before the round's K/A write-back (`algorithm::blastp::archive::PsiArchive`): `-in_pssm`'s
     /// object after `CPsiBlastImpl`'s constructor (the scores of a PSSM of frequency ratios only
@@ -159,7 +165,8 @@ pub(crate) fn pssm_request_written(strategy: bool, database: bool) -> bool {
 
 /// What stops a PSSM query's run before its search, after the outfmt 0 prolog, in NCBI's order
 /// (`PsiSearch::stop_before_search`): the search strategy's request of a run with `-subject`, NCBI's
-/// check of the PSSM, the PSSM engine's scores, then the search's set-up of the query.
+/// check of the PSSM, the write of the request (LOSAT's refusal), the PSSM engine's scores, then
+/// the search's set-up of the query.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PssmQueryStop {
     /// "Remote PSI-BL2SEQ is not supported" (`s_InitializeExportStrategy`): the options error, no
@@ -168,6 +175,10 @@ pub(crate) enum PssmQueryStop {
     /// `CPsiBlastValidate::Pssm`'s error, which the request makes too before it is written
     /// (`x_Process_Pssm`): the engine error, no request.
     Invalid(String),
+    /// LOSAT's refusal of the request whose ASN.1 text write NCBI stops in with its exception
+    /// (`PsiSearch::request_refusal`), where `SaveSearchStrategy` starts it: after the prolog
+    /// and NCBI's check of the PSSM, before the PSSM engine's scores; no request.
+    RequestRefused(String),
     /// The PSSM engine's error for the scores of a PSSM of frequency ratios only, in
     /// `CPsiBlastImpl`'s constructor, after `SaveSearchStrategy` wrote the request: the engine
     /// error, after the request (`after_request`).
@@ -179,12 +190,14 @@ pub(crate) enum PssmQueryStop {
 }
 
 impl PssmQueryStop {
-    /// NCBI's error (exit status 1 for the options error, 3 for the engine's).
+    /// NCBI's error (exit status 1 for the options error, 3 for the engine's), or LOSAT's refusal
+    /// (exit status 1).
     pub(crate) fn error(&self) -> anyhow::Error {
         match self {
             PssmQueryStop::Bl2seq => {
                 crate::blastinput::app::options_error("Remote PSI-BL2SEQ is not supported")
             }
+            PssmQueryStop::RequestRefused(refusal) => anyhow::anyhow!("{refusal}"),
             PssmQueryStop::Invalid(message)
             | PssmQueryStop::Scores(message)
             | PssmQueryStop::Setup(message) => crate::blastinput::app::engine_error(message),
@@ -192,7 +205,8 @@ impl PssmQueryStop {
     }
 
     /// Whether NCBI has written the search strategy's request when it stops (a run that writes
-    /// one, `pssm_request_written`).
+    /// one, `pssm_request_written`); not the request that LOSAT refuses (`RequestRefused`), of
+    /// which NCBI writes a part and LOSAT nothing.
     pub(crate) fn after_request(&self) -> bool {
         matches!(self, PssmQueryStop::Scores(_) | PssmQueryStop::Setup(_))
     }
@@ -239,9 +253,11 @@ impl PsiSearch {
     /// What stops the run of this PSSM query before its search (psiblast's and tblastn's one rule):
     /// with `-export_search_strategy` (`strategy`) and no database (`database`), the request's
     /// "Remote PSI-BL2SEQ" before anything else; then NCBI's check of the PSSM (the request makes
-    /// it, and `CPsiBlastImpl` without one); then the PSSM engine's scores of a PSSM of frequency
-    /// ratios only, which `CPsiBlastImpl` computes after the request was written; then the query
-    /// set-up that `CPsiBlast::Run` starts with (`setup_error`). `None` for a run that searches.
+    /// it, and `CPsiBlastImpl` without one); then the write of a request that LOSAT refuses
+    /// (`request_refusal`, made for a run that writes one); then the PSSM engine's scores of a
+    /// PSSM of frequency ratios only, which `CPsiBlastImpl` computes after the request was
+    /// written; then the query set-up that `CPsiBlast::Run` starts with (`setup_error`). `None`
+    /// for a run that searches.
     pub(crate) fn stop_before_search(
         &self,
         strategy: bool,
@@ -252,6 +268,9 @@ impl PsiSearch {
         }
         if let Some(message) = &self.validation_error {
             return Some(PssmQueryStop::Invalid(message.clone()));
+        }
+        if let Some(refusal) = &self.request_refusal {
+            return Some(PssmQueryStop::RequestRefused(refusal.clone()));
         }
         if let Some(message) = &self.scores_error {
             return Some(PssmQueryStop::Scores(message.clone()));
@@ -466,6 +485,7 @@ impl PsiSearch {
             setup_messages,
             warning_title: None,
             request: None,
+            request_refusal: None,
             archive_pssm: None,
             archive_matrix_name_unwritable: false,
             annot: annot_index::AnnotOutcome::default(),

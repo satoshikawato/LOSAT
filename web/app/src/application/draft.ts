@@ -147,8 +147,8 @@ export type SourceCheck =
   | { readonly state: 'pending' }
   /**
    * `readerError`: the reader's error that ends the query's records, the command line's text; a run
-   * reads the records before it and ends with it, as the command line does, so it is a warning, not
-   * a refusal (line WQA's D10, 2026-11-19).
+   * that reads that far fails with it, as the command line does, after the reports of the query
+   * batches before its batch, so it is a warning, not a refusal (line WQA's D10, 2026-11-19).
    */
   | { readonly state: 'ok'; readonly records: number; readonly readerError?: string }
   /** `record` is the index, in the record table, of the record that the message names. */

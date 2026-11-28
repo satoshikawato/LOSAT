@@ -12,7 +12,7 @@ use crate::ncbi_app::Diag;
 
 /// The output formats that blast_formatter writes; it refuses the others by name
 /// (`Refusal::OutputFormat`).
-pub(crate) const WRITTEN_FORMATS: [i32; 7] = [6, 7, 8, 9, 10, 12, 20];
+pub(crate) const WRITTEN_FORMATS: [i32; 8] = [6, 7, 8, 9, 10, 11, 12, 20];
 
 /// The output formats of NCBI's blast_formatter (0 to 18 and 20; `-help`, probe P2.201): the
 /// tests' list of the refusals (`documented`).
@@ -51,8 +51,10 @@ pub(crate) enum Refusal {
     /// the mapper; NCBI's programs write no such archive (PHI-BLAST's archives end with NCBI's
     /// engine error instead, `search_program::blast_type`).
     Program(&'static str),
-    /// A value in an archive's results that LOSAT's encoder of the output format does not write
-    /// (`report::serial::SerialError`), what it is and the format: a NaN or an infinite real
+    /// A value that LOSAT's encoder of the output format does not write yet
+    /// (`report::serial::SerialError`), in an archive's results (`-outfmt 12`) or in its request
+    /// or results (`-outfmt 11`, which writes the archive again), what it is and the format (a
+    /// limit of LOSAT's writers, not of the input): a NaN or an infinite real
     /// number in `-outfmt 12`, at which NCBI stops with an error of its JSON stream (agent C6 of
     /// line RG item F3, 2026-11-23, `remaining-gaps-20261112/F/f3/tmp/c6/pd`; in 9 NCBI writes
     /// its one special octet, as LOSAT's ASN.1 binary encoder does), and the values the encoders
@@ -68,6 +70,9 @@ pub(crate) enum Refusal {
     /// letters NCBI's formatter reads in its search setup in a way that LOSAT does not reproduce
     /// (`archive::setup_subjects`): what it holds.
     SubjectSetup(String),
+    /// `-outfmt 11` of an archive whose queries are a `seq-loc-list`: NCBI's `CObjMgr_QueryFactory`
+    /// resolves the locations through its data loaders (the database or NCBI's servers).
+    SeqLocQuery,
 }
 
 impl Refusal {
@@ -112,8 +117,19 @@ impl Refusal {
                 super::PROGRAM
             ),
             Refusal::Unwritable(what, format) => format!(
-                "output format {format} of a BLAST archive with {what} in its results is not \
+                "output format {format} of a BLAST archive with {what} in its {} is not \
                  supported by LOSAT's {}",
+                if *format == 11 {
+                    "request or its results"
+                } else {
+                    "results"
+                },
+                super::PROGRAM
+            ),
+            Refusal::SeqLocQuery => format!(
+                "output format 11 of a BLAST archive whose queries are a list of sequence \
+                 locations (seq-loc-list), for which NCBI BLAST+ fetches sequences from its data \
+                 loaders, is not supported by LOSAT's {}",
                 super::PROGRAM
             ),
             Refusal::Tabular(what) => format!(
@@ -148,7 +164,9 @@ impl Refusal {
             Refusal::FatalMessage => "severity Fatal".to_string(),
             Refusal::Prefetch => "`PRE_FETCH_SEQS_LIMIT=2147483647`".to_string(),
             Refusal::Program(_) => "mapper".to_string(),
-            Refusal::Unwritable(..) => "an archive's results".to_string(),
+            Refusal::Unwritable(_, 11) => "`-outfmt` `11` (request or results)".to_string(),
+            Refusal::Unwritable(..) => "`12` (results)".to_string(),
+            Refusal::SeqLocQuery => "seq-loc-list".to_string(),
             Refusal::Tabular(_) => "tabular output formats".to_string(),
             Refusal::SubjectSetup(_) => "sets up the subject sequences".to_string(),
         }
@@ -164,7 +182,7 @@ impl std::fmt::Display for Refusal {
 
 impl std::error::Error for Refusal {}
 
-/// The written formats as a list in words: `8, 9 and 12`.
+/// The written formats as a list in words: `6, 7, 8, 9, 10, 11, 12 and 20`.
 fn written_formats() -> String {
     let names: Vec<String> = WRITTEN_FORMATS.iter().map(i32::to_string).collect();
     match names.split_last() {
@@ -193,7 +211,9 @@ pub(crate) fn documented() -> Vec<Refusal> {
         Refusal::FatalMessage,
         Refusal::Prefetch,
         Refusal::Program("mapr2g"),
+        Refusal::Unwritable("", 11),
         Refusal::Unwritable("", 12),
+        Refusal::SeqLocQuery,
         Refusal::Tabular(String::new()),
         Refusal::SubjectSetup(String::new()),
     ]);

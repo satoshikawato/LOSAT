@@ -331,3 +331,33 @@ fn strtod_reads_the_whole_of_these_only() {
         assert!(!whole(text), "{text}");
     }
 }
+
+// `LOSAT/tests/unit/sscanf_le_ld_vectors.tsv`: glibc 2.39's `sscanf` of tokens with `%le` and
+// `%ld` (the forms where scanf and `strtod` part, then random ones), made with `ctypes` by
+// `remaining-gaps-20261112/F/f3/tmp/p6f/scanf/vectors.py` (line RG-F3, the FilterString values).
+#[test]
+fn scanf_reads_as_glibcs_sscanf() {
+    let table = include_str!("../../tests/unit/sscanf_le_ld_vectors.tsv");
+    let mut rows = 0;
+    // The first line says what the columns are; a token may start with `#`.
+    for row in table.lines().skip(1) {
+        let fields: Vec<&str> = row.split('\t').collect();
+        let [text, le_rc, le_bits, ld_rc, ld_value] = fields[..] else {
+            panic!("{row:?}");
+        };
+        let le = scan_double(text.as_bytes()).map(|value| format!("{:016x}", value.to_bits()));
+        assert_eq!(
+            le.as_deref(),
+            (le_rc == "1").then_some(le_bits),
+            "%le {text:?}"
+        );
+        let ld = crate::ncbi_str::scan_long(text.as_bytes()).map(|value| value.to_string());
+        assert_eq!(
+            ld.as_deref(),
+            (ld_rc == "1").then_some(ld_value),
+            "%ld {text:?}"
+        );
+        rows += 1;
+    }
+    assert_eq!(rows, 1610);
+}

@@ -5622,6 +5622,13 @@ impl FormatThrow {
         }
     }
 
+    /// Whether the query's report or the run ends at the first subject whose load throws
+    /// ([`AfterThrow::EndsReport`], [`AfterThrow::EndsRun`]): the subjects after it are not read.
+    pub fn ends_on_throw(self) -> bool {
+        self.run()
+            .is_some_and(|run| matches!(run.after, AfterThrow::EndsReport | AfterThrow::EndsRun))
+    }
+
     /// [`FormatThrow::run`] of the answer of the formats `formats` ([`FormatThrow::of_formats`]).
     pub fn of_run(formats: impl IntoIterator<Item = Self>) -> Option<RunThrow> {
         Self::of_formats(formats).run()

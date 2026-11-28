@@ -1,11 +1,12 @@
 # name<TAB>arguments (shell words, run in this directory; "< file" = stdin). NCBI BLAST+ 2.17.0 blast_formatter (ws, env_blast, the conda build), 2026-11-20, ad-RG-F3-1 (line RG item F3), every row under unshare -rn: no row reaches NCBI's servers.
 # in/bn.asn: blastn -query in/q.fa -subject in/s.fa -outfmt 11 -out in/bn.asn (NCBI BLAST+ 2.17.0, same day); in/q.fa and in/s.fa by remaining-gaps-20261112/F/f3 (impl_b.md). conf/malformed.ini is that of tests/convert2blastmask. Run without LOSAT_, NCBI_ and BLAST variables but NCBI_CONFIG_PATH (this directory) and BLAST_USAGE_REPORT=false (NCBI only).
-# Not frozen: -version and the full versions (LOSAT prints its own, NCBI's forms with LOSAT's package; tests/ncbi_toolkit_version.rs), -xmlhelp (LOSAT's XML is NCBI's without -rid, which LOSAT refuses at the run; tests/ncbi_toolkit_help.rs, against NCBI's frozen XML src/ncbi_xmlhelp/blast_formatter.xml), -rid with a value (NCBI asks its servers; LOSAT refuses it, src/blast_formatter/run_tests.rs), an unreadable -archive (git keeps no file mode that hides a file from its owner; NCBI's text is that of a missing file, probe P3.124), a standard output that cannot be written (NCBI's runtime aborts: src/blast_formatter/archive_tests.rs and the test blast_formatter_standard_output_failure_aborts of tests/masker_fixtures.rs, from probes of agent C6, 2026-11-23), and of the output formats other than 6 to 10, 12 and 20 only NCBI's own checks (of13_no_out, of17_blastp_sam) and one refusal by name (refused_of5) for the rest.
+# Not frozen: -version and the full versions (LOSAT prints its own, NCBI's forms with LOSAT's package; tests/ncbi_toolkit_version.rs), -xmlhelp (LOSAT's XML is NCBI's without -rid, which LOSAT refuses at the run; tests/ncbi_toolkit_help.rs, against NCBI's frozen XML src/ncbi_xmlhelp/blast_formatter.xml), -rid with a value (NCBI asks its servers; LOSAT refuses it, src/blast_formatter/run_tests.rs), an unreadable -archive (git keeps no file mode that hides a file from its owner; NCBI's text is that of a missing file, probe P3.124), a standard output that cannot be written (NCBI's runtime aborts: src/blast_formatter/archive_tests.rs and the test blast_formatter_standard_output_failure_aborts of tests/masker_fixtures.rs, from probes of agent C6, 2026-11-23), and of the output formats other than 6 to 12 and 20 only NCBI's own checks (of13_no_out, of17_blastp_sam) and one refusal by name (refused_of5) for the rest.
 # Rows from of8_db on (line RG item F3 PR 1, agent C5 of ad-RG-F3-5, 2026-11-23): NCBI BLAST+ 2.17.0, the official release build on the local machine (ws was down), by remaining-gaps-20261112/F/f3/tools/fixC.py, every NCBI run under unshare -rn. Their archives were written by NCBI's own programs: in/db.asn, in/batch.asn (BATCH_SIZE=1), in/warn.asn (-max_target_seqs 1, BATCH_SIZE=1) and in/pd.asn (-parse_deflines) by blastn -query in/q2.fa -db in/db/s3 -outfmt 11 (in/db/s3: makeblastdb -blastdb_version 4 of in/s3.fa, which holds in/s.fa, a copy with a change every 40 letters and its second half; in/q2.fa holds in/q.fa and a part of in/s.fa); in/err.asn (blastn -task blastn -reward 1 -penalty -2 -gapopen 0 -gapextend 0: an error object); in/ps.asn (psiblast -query in/ps.faa -db ../db_search/paja -num_iterations 2; in/ps.faa = residues 251-290 of tests/fasta/psiblast/tk.faa); in/rps.asn and in/rtn.asn (rpsblast -query in/rps.faa = tests/fasta/psiblast/tk.faa, rpstblastn -query in/rtn.fna = the second record of tests/fasta/rps/nq4.fna, -db in/rps/rps_mini, the files of tests/db_search/rps/rps_mini that a protein database open reads); in/soft.asn (blastn -db_soft_mask 11 on a dustmasker-masked database made elsewhere; in/m/db is the same sequence without its mask) and in/nodb.asn (a database that is not here). Made from them by fixC.py: in/garbage.asn (in/db.asn and a line), in/cut2.asn (in/batch.asn cut in its second object), in/empty.asn, in/fatal.asn (in/warn.asn with its first message's severity 4). @OUT@ is a new directory of each run; the files a run leaves there follow its standard output in ncbi/<name>.out. refused/<name>.err is LOSAT's refusal by name; ncbi/<name>.* keeps NCBI's bytes (refused_fatal_message's trace names the local binary).
 # Rows from of8_delta on (line RG item F3 PR 1, agent C6 of ad-RG-F3-5, 2026-11-23): NCBI BLAST+ 2.17.0, the official release build on the local machine, by remaining-gaps-20261112/F/f3/tools/fixC6.py, every NCBI run under unshare -rn. in/delta.asn and in/phi.asn: the first object of in/ps.asn with its service changed to delta_blast and phi (review of PR 1, F3/review/c_tmp/scripts); in/tax_both.asn and in/tx5_both.asn: in/db.asn with a taxid list and a negative taxid list, on in/db/s3 and on in/txdb/t (makeblastdb -in in/s3.fa -dbtype nucl -taxid 9606 -blastdb_version 5, in the review); in/bad1.asn and in/bad2.asn: in/batch.asn with a byte 0x07 in a query title of its first and of its second object (the line of the post counts over the file). in/real_pinf.asn and in/real_nan.asn (tools/fixC6b.py): in/bn.asn with its first e-value PLUS-INFINITY and NOT-A-NUMBER; refused_real_12 is LOSAT's refusal by name of such a value (NCBI stops at it in JSON); NCBI writes it in ASN.1 binary, as LOSAT does since line RG-F3's PR 2 (row real_pinf_9, named refused_real_9 until agent C9 of ad-RG-F3-10, 2026-11-24; NCBI's bytes unchanged).
 # Rows from opt_bho09_8 on (line RG item F3 PR 1, agent C7 of ad-RG-F3-5, 2026-11-24): NCBI BLAST+ 2.17.0, the official release build on the local machine, by remaining-gaps-20261112/F/f3/tools/fixC7.py, every NCBI run under unshare -rn. in/opt_<name>.asn is in/bn.asn with one option of its search added or changed to a value that a search program's option check refuses (BestHitOverhang 0.9, BestHitScoreEdge -1, Culling 1 with best hit, Culling -1, MaxHspsPerSubject -1, PercentIdentity 150, QueryCovHspPerc 150, WordSize 3 and -1, an e-value of 0, HitlistSize 0): blast_formatter builds the options of each object without checking them, and only the hit list size changes what it writes.
 # Rows from of6_db on (line RG item F3 PR 3a, agent E1 of ad-RG-F3-10, 2026-11-25): NCBI BLAST+ 2.17.0 on ws (blast_formatter: env_blast, the conda build, as the first rows; the archives by the official release's search programs), by remaining-gaps-20261112/F/f3/tools/fixE1.py and fixE1b.py (rows of20_prefetch_abc, of7_deltablast_all, refused_tabular_locations), every NCBI run under unshare -rn (refused_tabular_locations under unshare -rnu with the host name rgff3-probe, as NCBI's request names the machine). New inputs: in/s3pd.fa, in/qgnl.fa, in/bp_s.faa, in/qacc.fa (made by fixE1.py and fixE1b.py from in/s3.fa, in/q.fa, in/ps.faa); in/bn_ungapped.asn, dcmb.asn, bnt.asn, bnspd.asn, pdq.asn, bp_db.asn, bp_ungapped.asn, bp_subject.asn, bp_subject_pd.asn, pdq_acc.asn (NCBI's blastn/blastp -outfmt 11; pdq_acc.asn with -parse_deflines holds its query as a seq-loc-list); in/mix_n_p.asn (db.asn then bp_db.asn), in/ps_step_str.asn (ps.asn with its second Web_StepNumber a string).
 # Rows from of8_db_bin on (line RG-F3bx, 2026-11-27): NCBI BLAST+ 2.17.0 (ws, env_blast), every NCBI run under unshare -rn: ASN.1 binary (ARCHIVE_FORMAT=bin) and ASN.1-style XML (ARCHIVE_FORMAT=xml) archives for -db, -subject, BATCH_SIZE=1, rpsblast and error objects, plus binary truncation quirks (missing last 1 or 2 bytes, stray 0x30 or 00 00, batch missing last 1 byte), XML truncations and trailing <junk/>, multi-object 803.7 bad-char positions in object 2 (in/bad2.asnb, in/bad2.xml), and UTF-8 BOM before text ASN.1 (in/bom.asn).
+# Rows from of11_db on (line RG item F3 PR 6, RG-F3p6, 2026-11-27): NCBI BLAST+ 2.17.0 blast_formatter (ws, env_blast, the conda build), every NCBI run under unshare -rn, covering -outfmt 11 across database, subject, multi-object, psiblast, rpsblast, rpstblastn, delta_blast, phi, error objects, messages, hit-list limits, taxid lists, ARCHIVE_FORMAT (text, xml, bin, other), -out files, PRE_FETCH_SEQS_LIMIT, BL2SEQ_LEGACY, non-visible characters, special real values, and /dev/full write failures.
 noargs	
 h	-h
 help	-help
@@ -299,6 +300,144 @@ of8_xml_junk	-archive in/xml_junk.xml -outfmt 8
 bad_title_2_bin	-archive in/bad2.asnb -outfmt 8
 bad_title_2_xml	-archive in/bad2.xml -outfmt 8
 of8_bom	-archive in/bom.asn -outfmt 8
+of11_db	-archive in/db.asn -outfmt 11
+of11_subject	-archive in/bn.asn -outfmt 11
+of11_batch	-archive in/batch.asn -outfmt 11
+of11_psiblast	-archive in/ps.asn -outfmt 11
+of11_rpsblast	-archive in/rps.asn -outfmt 11
+of11_rpstblastn	-archive in/rtn.asn -outfmt 11
+of11_delta	-archive in/delta.asn -outfmt 11
+of11_phi	-archive in/phi.asn -outfmt 11
+of11_error_object	-archive in/err.asn -outfmt 11
+of11_messages_mts2	-archive in/warn.asn -outfmt 11 -max_target_seqs 2
+of11_mts2	-archive in/db.asn -outfmt 11 -max_target_seqs 2
+of11_na0	-archive in/db.asn -outfmt 11 -num_alignments 0
+of11_pd_archive_only	-archive in/pd.asn -outfmt 11
+of11_pd_formatter_only	-archive in/db.asn -outfmt 11 -parse_deflines
+of11_mask_algorithm	-archive in/soft.asn -outfmt 11
+taxids_both_11	-archive in/tax_both.asn -outfmt 11
+taxids_both_tax_11	-archive in/tx5_both.asn -outfmt 11
+of11_xml_db	ARCHIVE_FORMAT=xml -archive in/db.asn -outfmt 11
+of11_xml_subject	ARCHIVE_FORMAT=XML -archive in/bn.asn -outfmt 11
+of11_bin_db	ARCHIVE_FORMAT=bin -archive in/db.asn -outfmt 11
+of11_bin_subject	ARCHIVE_FORMAT=BIN -archive in/bn.asn -outfmt 11
+of11_bin_binary	ARCHIVE_FORMAT=binary -archive in/bn.asn -outfmt 11
+of11_af_other	ARCHIVE_FORMAT=json -archive in/bn.asn -outfmt 11
+of11_out_file	-archive in/db.asn -outfmt 11 -out @OUT@/o.asn
+of11_out_file_bin	ARCHIVE_FORMAT=bin -archive in/bn.asn -outfmt 11 -out @OUT@/o.asn
+of11_prefetch_abc	PRE_FETCH_SEQS_LIMIT=abc -archive in/db.asn -outfmt 11
+bl2seq_legacy_11	BL2SEQ_LEGACY=1 -archive in/bn.asn -outfmt 11
+bad_title_1_11	-archive in/bad1.asn -outfmt 11
+bad_title_2_11	-archive in/bad2.asn -outfmt 11
+bad_title_1_11_bin	ARCHIVE_FORMAT=bin -archive in/bad1.asn -outfmt 11
+bad_title_1_11_xml	ARCHIVE_FORMAT=xml -archive in/bad1.asn -outfmt 11
+real_pinf_11	-archive in/real_pinf.asn -outfmt 11
+real_nan_11	-archive in/real_nan.asn -outfmt 11
+real_pinf_11_bin	ARCHIVE_FORMAT=bin -archive in/real_pinf.asn -outfmt 11
+real_nan_11_xml	ARCHIVE_FORMAT=xml -archive in/real_nan.asn -outfmt 11
+opt_hitlist0_11	-archive in/opt_hitlist0.asn -outfmt 11
+opt_cull_besthit_11	-archive in/opt_cull_besthit.asn -outfmt 11
+out_full_bn_11	-archive in/bn.asn -outfmt 11 -out /dev/full
+out_full_db_11	-archive in/db.asn -outfmt 11 -out /dev/full
+out_full_batch_11	-archive in/batch.asn -outfmt 11 -out /dev/full
+out_full_bin_11	ARCHIVE_FORMAT=bin -archive in/bn.asn -outfmt 11 -out /dev/full
+out_full_xml_11	ARCHIVE_FORMAT=xml -archive in/bn.asn -outfmt 11 -out /dev/full
+# Rows from of11_db_from_bin on (line RG item F3 PR 6 after review R6, agent P6Fb of ad-RG-F3-13, 2026-11-27): NCBI BLAST+ 2.17.0, the official release build on the local machine (/home/kawato/tools/ncbi-blast-oracle), by remaining-gaps-20261112/F/f3/tools/fixP6F.py, every NCBI run under unshare -rn: -outfmt 11 of the binary (BER) and XML archives of #1680, their cuts and junk, the text edge archives, the formatter's options, and in/fs_<name>.asn: an archive of in/ with a FilterString setter first in each object's algorithm options (fixP6F.py inputs); refused_filter_* are LOSAT's refusals by name of a FilterString number that NCBI's sscanf does not store, where NCBI then writes a variable it never set (ncbi/<name>.* keeps those bytes).
+of11_db_from_bin	-archive in/db.asnb -outfmt 11
+of11_subject_from_bin	-archive in/bn.asnb -outfmt 11
+of11_batch_from_bin	-archive in/batch.asnb -outfmt 11
+of11_error_object_from_bin	-archive in/err.asnb -outfmt 11
+of11_rpsblast_from_bin	-archive in/rps.asnb -outfmt 11
+bad_title_2_11_from_bin	-archive in/bad2.asnb -outfmt 11
+of11_bin_cut1	-archive in/bin_cut1.asnb -outfmt 11
+of11_bin_cut2	-archive in/bin_cut2.asnb -outfmt 11
+of11_bin_plus30	-archive in/bin_plus30.asnb -outfmt 11
+of11_bin_plus00	-archive in/bin_plus00.asnb -outfmt 11
+of11_batch_bin_cut1	-archive in/batch_bin_cut1.asnb -outfmt 11
+of11_db_from_xml	-archive in/db.xml -outfmt 11
+of11_subject_from_xml	-archive in/bn.xml -outfmt 11
+of11_batch_from_xml	-archive in/batch.xml -outfmt 11
+of11_error_object_from_xml	-archive in/err.xml -outfmt 11
+of11_rpsblast_from_xml	-archive in/rps.xml -outfmt 11
+bad_title_2_11_from_xml	-archive in/bad2.xml -outfmt 11
+of11_xml_cut1	-archive in/xml_cut1.xml -outfmt 11
+of11_xml_cut2	-archive in/xml_cut2.xml -outfmt 11
+of11_xml_cut20	-archive in/xml_cut20.xml -outfmt 11
+of11_xml_junk	-archive in/xml_junk.xml -outfmt 11
+of11_bin_db_from_bin	ARCHIVE_FORMAT=bin -archive in/db.asnb -outfmt 11
+of11_bin_subject_from_xml	ARCHIVE_FORMAT=bin -archive in/bn.xml -outfmt 11
+of11_xml_subject_from_bin	ARCHIVE_FORMAT=xml -archive in/bn.asnb -outfmt 11
+bad_title_2_11_xml_from_bin	ARCHIVE_FORMAT=xml -archive in/bad2.asnb -outfmt 11
+refused_database_11	-archive in/nodb.asn -outfmt 11
+refused_fatal_message_11	-archive in/fatal.asn -outfmt 11
+of11_garbage	-archive in/garbage.asn -outfmt 11
+of11_cut2	-archive in/cut2.asn -outfmt 11
+of11_empty	-archive in/empty.asn -outfmt 11
+of11_bom	-archive in/bom.asn -outfmt 11
+of11_messages	-archive in/warn.asn -outfmt 11
+of11_rpstblastn_mts1	-archive in/rtn.asn -outfmt 11 -max_target_seqs 1
+of11_xml_rpsblast	ARCHIVE_FORMAT=xml -archive in/rps.asn -outfmt 11
+of11_bin_psiblast	ARCHIVE_FORMAT=bin -archive in/ps.asn -outfmt 11
+of11_prefetch_max	PRE_FETCH_SEQS_LIMIT=2147483647 -archive in/db.asn -outfmt 11
+of11_nd3	-archive in/db.asn -outfmt 11 -num_descriptions 3
+of11_ll40	-archive in/db.asn -outfmt 11 -line_length 40
+of11_sorthits	-archive in/db.asn -outfmt 11 -sorthits 1
+of11_sorthsps	-archive in/db.asn -outfmt 11 -sorthsps 1
+of11_html	-archive in/db.asn -outfmt 11 -html
+of11_show_gis	-archive in/db.asn -outfmt 11 -show_gis
+of11_mts0	-archive in/db.asn -outfmt 11 -max_target_seqs 0
+of11_mts600	-archive in/db.asn -outfmt 11 -max_target_seqs 600
+of11_na3_nd2	-archive in/batch.asn -outfmt 11 -num_alignments 3 -num_descriptions 2
+of11_fields	-archive in/db.asn -outfmt "11 qseqid"
+opt_bho09_11	-archive in/opt_bho09.asn -outfmt 11
+opt_bhse_neg_11	-archive in/opt_bhse_neg.asn -outfmt 11
+opt_cull_neg_11	-archive in/opt_cull_neg.asn -outfmt 11
+opt_maxhsps_neg_11	-archive in/opt_maxhsps_neg.asn -outfmt 11
+opt_pident150_11	-archive in/opt_pident150.asn -outfmt 11
+opt_qcov150_11	-archive in/opt_qcov150.asn -outfmt 11
+opt_word3_11	-archive in/opt_word3.asn -outfmt 11
+opt_word_neg_11	-archive in/opt_word_neg.asn -outfmt 11
+opt_evalue0_11	-archive in/opt_evalue0.asn -outfmt 11
+fs_bn_Lm_11	-archive in/fs_bn_Lm.asn -outfmt 11
+fs_bn_D3_11	-archive in/fs_bn_D3.asn -outfmt 11
+fs_bn_Ddefault_11	-archive in/fs_bn_Ddefault.asn -outfmt 11
+fs_bn_D2err_11	-archive in/fs_bn_D2err.asn -outfmt 11
+fs_bn_R_11	-archive in/fs_bn_R.asn -outfmt 11
+fs_bn_Dbig_11	-archive in/fs_bn_Dbig.asn -outfmt 11
+fs_bn_Dneg_11	-archive in/fs_bn_Dneg.asn -outfmt 11
+fs_bn_F_11	-archive in/fs_bn_F.asn -outfmt 11
+fs_bn_W_11	-archive in/fs_bn_W.asn -outfmt 11
+fs_bn_mold_11	-archive in/fs_bn_mold.asn -outfmt 11
+fs_bn_Sabc_11	-archive in/fs_bn_Sabc.asn -outfmt 11
+refused_filter_dust_abc_11	-archive in/fs_bn_Dabc.asn -outfmt 11
+fs_bn_Rlong_11	-archive in/fs_bn_Rlong.asn -outfmt 11
+fs_bn_Dlate_11	-archive in/fs_bn_Dlate.asn -outfmt 11
+fs_db_Lm_11	-archive in/fs_db_Lm.asn -outfmt 11
+fs_ps_S_11	-archive in/fs_ps_S.asn -outfmt 11
+fs_ps_L_11	-archive in/fs_ps_L.asn -outfmt 11
+fs_ps_S2err_11	-archive in/fs_ps_S2err.asn -outfmt 11
+fs_ps_Snan_11	-archive in/fs_ps_Snan.asn -outfmt 11
+fs_ps_Snegnan_11	-archive in/fs_ps_Snegnan.asn -outfmt 11
+fs_ps_Snanp_11	-archive in/fs_ps_Snanp.asn -outfmt 11
+fs_ps_Shex_11	-archive in/fs_ps_Shex.asn -outfmt 11
+fs_ps_Sinf_11	-archive in/fs_ps_Sinf.asn -outfmt 11
+fs_ps_Sbig_11	-archive in/fs_ps_Sbig.asn -outfmt 11
+fs_ps_Smix_11	-archive in/fs_ps_Smix.asn -outfmt 11
+refused_filter_seg_abc_11	-archive in/fs_ps_Sabc.asn -outfmt 11
+fs_ps_Dabc_11	-archive in/fs_ps_Dabc.asn -outfmt 11
+fs_rps_Lm_11	-archive in/fs_rps_Lm.asn -outfmt 11
+fs_rtn_Lm_11	-archive in/fs_rtn_Lm.asn -outfmt 11
+# Rows real_subnormal_* (agent P6Fb of ad-RG-F3-13, 2026-11-28): in/real_subnormal.asn is in/bn.asn with its first e-value { 145968789957799, 10, -330 }, a subnormal double (the value that NCBI BLAST+ 2.17.0 wrote for the unset SEG locut of row refused_filter_seg_abc_11); NCBI's reader makes it DBL_MIN, which -outfmt 11 writes as { 22250738585072, 10, -321 }. NCBI BLAST+ 2.17.0, the official release build on the local machine, under unshare -rn.
+real_subnormal_11	-archive in/real_subnormal.asn -outfmt 11
+real_subnormal_8	-archive in/real_subnormal.asn -outfmt 8
+real_subnormal_9	-archive in/real_subnormal.asn -outfmt 9
+real_subnormal_12	-archive in/real_subnormal.asn -outfmt 12
+# Rows fs_bn_Dabc_level_11 to fs_ps_Sabc_locut_11 (line RG item F3 PR 6 after review R6 round 2, agent P6Fc of ad-RG-F3-13, 2026-11-28): NCBI BLAST+ 2.17.0, the official release build on the local machine (/home/kawato/tools/ncbi-blast-oracle), by remaining-gaps-20261112/F/f3/tools/fixP6Fc.py, every NCBI run under unshare -rn. The archives of the review: in/fs_bn_Dabc.asn with DustFilteringLevel 20 (fs_bn_Dabc_level) or a second FilterString "D 20 64 1;" (fs_bn_Dabc_D20) or "F" (fs_bn_Dabc_F) after its FilterString, in/fs_ps_Sabc.asn with a second FilterString "S 10 2.2 2.5;" (fs_ps_Sabc_S22) or SegFilteringLocut { 22, 10, -1 } (fs_ps_Sabc_locut) after it. A later setter decides the value that sscanf did not read; "F" does not set it, which LOSAT refuses (refused_filter_dust_abc_F_11, NCBI's bytes in ncbi/<name>.out vary).
+fs_bn_Dabc_level_11	-archive in/fs_bn_Dabc_level.asn -outfmt 11
+fs_bn_Dabc_D20_11	-archive in/fs_bn_Dabc_D20.asn -outfmt 11
+refused_filter_dust_abc_F_11	-archive in/fs_bn_Dabc_F.asn -outfmt 11
+fs_ps_Sabc_S22_11	-archive in/fs_ps_Sabc_S22.asn -outfmt 11
+fs_ps_Sabc_locut_11	-archive in/fs_ps_Sabc_locut.asn -outfmt 11
 # Rows from of6_lp_2048_3000 on (line RG item F3 PR 3a, the P2 re-check of review R1: NCBI's reads instead of refusals; probes probe3.py, probe4.py and probe5.py of agent E3 of ad-RG-F3-12, 2026-11-27, frozen by agent E3t of ad-RG-F3-13): NCBI BLAST+ 2.17.0, the official release build on the local machine, every NCBI run under unshare -rn. in/lp_*.asn and in/lm_*.asn: blastn -query <the first 2048 letters of a random 3000-letter subject, or their reverse complement> -subject <that subject> -outfmt 11 with the subject Bioseq made a raw iupacna of <length> letters that holds <held> (lp_<held>_<length>, lm_<held>_<length>); in/lq_*.asn: the same of the query Bioseq of in/lp's archive; in/s_*.asn (residues outside NCBIstdaa's 28 codes and IUPACaa letters), in/c_*.asn (Seq-data codings that do not convert), in/g_gap.asn (a delta gap): in/bp_subject.asn or in/bn.asn with one -subject Bioseq's inst changed; in/d*.asn, in/r1m.asn, in/dq*.asn: deltas (literals short of their length, segments that end before the length or pass it, a literal of 4294967295 letters, a gap) in the subject of in/lp, in/lm or in/bn.asn and the query of in/bn.asn; in/s_empty.asn and in/e_*.asn: a -subject Bioseq of 0 letters (titled, untitled, without data, virtual, one of two). The rows of BL2SEQ_LEGACY with a -subject Bioseq of 4294967295 letters of the same probes (of6_p_*, of10_p_std, of20_p_std, of6_t*) are frozen apart.
 of6_lp_2048_3000	BL2SEQ_LEGACY=1 -archive in/lp_2048_3000.asn -outfmt '6 std sstrand sseq'
 of6_lm_2048_3000	BL2SEQ_LEGACY=1 -archive in/lm_2048_3000.asn -outfmt '6 std sstrand sseq'
@@ -422,3 +561,11 @@ of8_c_dlen	-archive in/t_dlen.asn -outfmt 8
 of10_c_dlen	-archive in/t_dlen.asn -outfmt '10 std slen'
 of20_c_dlen	-archive in/t_dlen.asn -outfmt '20 std slen'
 of6_c_dlen_p	-archive in/c_dlen_p.asn -outfmt '6 std slen'
+# Rows from of11_s_empty on (line RG item F3 PR 3a with PR 6 (#1686) merged, agent E3e of ad-RG-F3-14, 2026-11-28): NCBI BLAST+ 2.17.0, the official release build on the local machine (/home/kawato/tools/ncbi-blast-oracle), by remaining-gaps-20261112/F/f3/tmp/e3e/probe11.py, every NCBI run under unshare -rn: -outfmt 11 of PR 3a's -subject archives whose subject setup posts NCBI's warning of a sequence without letters or ends with NCBI's engine error. NCBI sets up the subjects before it writes the archive, as for the other formats; with BL2SEQ_LEGACY it does not.
+of11_s_empty	-archive in/s_empty.asn -outfmt 11
+of11_s_empty_legacy	BL2SEQ_LEGACY=1 -archive in/s_empty.asn -outfmt 11
+of11_e_two	-archive in/e_two.asn -outfmt 11
+of11_slen_short	-archive in/slen_short.asn -outfmt 11
+of11_slen_short_legacy	BL2SEQ_LEGACY=1 -archive in/slen_short.asn -outfmt 11
+of11_s_hash	-archive in/s_hash.asn -outfmt 11
+of11_c_dlen_p	-archive in/c_dlen_p.asn -outfmt 11

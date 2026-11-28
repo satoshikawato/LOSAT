@@ -444,7 +444,8 @@ fn an_archive_of_a_dbsize_of_minus_two_to_the_63_writes_its_digits() {
     impl AlignSource for NoAligns {
         fn write<E: crate::report::serial::encoder::Encoder>(
             &mut self,
-            _out: &mut ArchiveOut<'_, E>,
+            _enc: &mut E,
+            _flush: &mut dyn FnMut(&mut E),
         ) -> anyhow::Result<()> {
             Ok(())
         }
@@ -535,7 +536,8 @@ fn a_psiblast_round_writes_its_step_and_composition_mode() {
     impl AlignSource for NoAligns {
         fn write<E: crate::report::serial::encoder::Encoder>(
             &mut self,
-            _out: &mut ArchiveOut<'_, E>,
+            _enc: &mut E,
+            _flush: &mut dyn FnMut(&mut E),
         ) -> anyhow::Result<()> {
             Ok(())
         }

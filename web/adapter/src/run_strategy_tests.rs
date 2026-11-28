@@ -1234,10 +1234,12 @@ fn the_files_of_a_database_search_are_no_strategy_file() {
 }
 
 /// The run's files go to the host once, after the run (`RunFileArchive::close`): a file handed over
-/// after that is refused, so that a strategy file that the engine hands over late is its error
-/// (LOSAT's internal error of `strategy::end_run`) and not a file lost without one (review 2 of
-/// line RG F1w, N-a). Each file comes with the option that names it, which its entry's comment
-/// carries; one without is LOSAT's internal error (line RG item F1w-r2, review 3 S1).
+/// after that is refused, so that a file that the engine hands over late is its error and not a
+/// file lost without one (review 2 of line RG F1w, N-a). Each file comes with the option that
+/// names it, which its entry's comment carries; one without is LOSAT's internal error (line RG item
+/// F1w-r2, review 3 S1), and so is a name that comes twice: the run's table gives each path's file
+/// once (line RG item F1w-r3), where an archive that replaced a name's bytes hid the file of
+/// `-out_pssm L` behind the log's `L`.
 #[test]
 fn a_file_handed_over_after_the_runs_files_went_out_is_refused() {
     use losat::web_adapter::{FileReceiver as _, RunFileOption};
@@ -1252,6 +1254,13 @@ fn a_file_handed_over_after_the_runs_files_went_out_is_refused() {
             .unwrap_err()
             .to_string(),
         "LOSAT's internal error: the run's file x.asn came without the option that names it"
+    );
+    assert_eq!(
+        archive
+            .receive_run_file(RunFileOption::Logfile, b"s.asn", b"log")
+            .unwrap_err()
+            .to_string(),
+        "LOSAT's internal error: the run's file s.asn came twice"
     );
     RunFileArchive::emit(archive.close()).unwrap();
     let late = archive

@@ -952,14 +952,75 @@ the subjects it loads, then `Warning: [<program>] Error pre-fetching sequence da
 batch's query warnings. A minus-strand Seq-align of `bbs|123` (no ISAM key in version 4, so no Bioseq) fails after every
 load (`ids/pfw_look_fw_rc.fna`, `ids/pfw_look_rc_fw.fna`: `fw70` on the plus strand of `gb|AF000070.1|`, `rc123` on the
 minus strand of `bbs|123`); the lookup of `gnl|BL_ORD_ID|0` with a text tag fails where the loads reach it, in the
-order of NCBI's Seq-id handles (the ids its mapper packs first), which LOSAT does not model, so a batch with it whose
-other subjects' loads write a text is LOSAT's refusal. In psiblast, where the report reads the sequences it shows
+order of NCBI's Seq-id handles (the ids its mapper packs first), which LOSAT follows since line NP item O4b2-10
+(below): a batch with it whose other subjects' loads write a text is LOSAT's refusal only where LOSAT does not know
+whether such a load comes before it (a handle of its key, both unpacked). In psiblast, where the report reads the sequences it shows
 (`pfw_weak_v5` with `pfw_q6.faa`, `-max_target_seqs 3`: the text tag ranks last, beyond the cut), the failed prefetch
 leaves `sp||NAMEY` unloaded and NCBI's formatter reads it one by one, matching `sp|P00042.1|NAMEY` weakly: LOSAT refuses
 there, and where the PSSM (`-out_ascii_pssm`) holds such a sequence (NCBI drops its letters). `pfw_bad/ntag_t5` fails the
 lookup of an accession on its file, which NCBI's prefetch rethrows (exit 2): LOSAT's refusal. With `-ungapped` BLASTN makes one Seq-align of a subject's HSPs, whose strand is its first
 HSP's: `ids/pfw_fwL_rcS.fna` aligns with `bbs|123` on the plus strand first (240 letters) and on the minus strand (60),
 `ids/pfw_fwS_rcL.fna` the other way round. `ids/pfw_ps_q21.faa` holds `pshare_q2.faa` and `pshare_q1.faa`.
+
+The order of a failed prefetch's loads (line NP item O4b2-10; rows `db.o4b2_10.*`, `db.id.pfw.bn.tag.off.6` and `db.id.pfw.bp.tag.bad.6`):
+`make_ids.py --pfworder-only` writes `ids/ntagx_t5` from `ids/nordtagx.fna` (`gnl|BL_ORD_ID|x002`, a text tag that
+NCBI's mapper packs as 2 and whose lookup throws, with `gb|FFF00093.1|`; then `gb|FFF00094.1|`, packed 94),
+`ids/ntagc_t5` from `ids/nordtagc.fna` with `ids/nordtagc.taxid_map` (`gb|FFF00010.1|`, `gnl|BL_ORD_ID|x050`, then
+`gb|FFF00090.1|` with taxid 150, which shares the slot of 99990 in a volume's 256-slot taxonomy cache) and the protein
+copies `ids/ptagx_t5` (`pordtagx.faa`) and `ids/ptagc_t5` (`pordtagc.faa`, `pordtagc.taxid_map`; `x051`), every other
+sequence with taxid 99990 (version 5, official makeblastdb 2.17.0). With `BLASTDB=tests/seqdb/taxdb/offset_last_past_end`
+and the queries `ids/nordtag_q.fna` and `ids/nordtag_q.faa` (qa hits the sequence with the text tag, qb the other ones),
+NCBI's prefetch loads the Seq-id handles below the failing one in its map and ends there: `ntag_t5` writes the offset
+error of `gb|FFF00092.1|` (92, before the unpacked text tag), then the warning; `ntagx_t5` the warning alone (a report
+that reads `gb|FFF00094.1|` loads it then and writes the offset error after the warning); `ntagc_t5` one offset error
+(`gb|FFF00010.1|`), then the warning, and `gb|FFF00090.1|` takes no step through the slot there. NCBI wrote the same
+bytes of every `ncbi` row in four heap layouts. Its default `-outfmt 6` of these databases stops at the first row's
+`saccver` (after its `qaccver` and a tab) with a null pointer exception whose report carries a stack trace with the
+run's addresses: LOSAT writes NCBI's bytes before it (that stdout, and the texts before the exception) and refuses there
+(the `.6.reject` rows: NCBI's stdout, `ncbi-stderr`). `pshare_t5`'s `lcl|555` and the text tag are both unpacked, so
+NCBI's map orders them by address: LOSAT refuses where that load writes the offset error (`ids/pshare_q2.faa`,
+`-max_target_seqs 2`, one query per batch: NCBI wrote 0, 1, 1 and 0 offset errors in four heap layouts) and writes
+NCBI's bytes where the load of a packed id before the failure wrote it first (`ids/pfw_ps_q21.faa`, and
+`db.id.pfw.bp.tag.bad.6` with `bad_magic`). PSIBLAST's `-outfmt 16` and the reports of `pshare_t5` that read its
+subjects are refused for other reasons (LOSAT's PSIBLAST has no outfmt 16; `lcl|555` is held by two sequences) and have
+no row here.
+
+The loads that a failed prefetch made (line NP item O4b2-10, round 2; query `ids/pordslot_q.faa`, the same
+`BLASTDB`): NCBI's data source holds the locks of a prefetch's loads until its data loader returns them to the scope,
+and a lookup that throws ends that, so the loads made before it go to the data source's cache of 10 (its map releases
+the largest key first, so the 10 smallest keys stay) and not to the scope, and a report's read of a dropped one loads it
+again and looks its slot up again. `make_ids.py --pfworder-only` writes `ids/pslot11_t5` (`ids/pordslot11.faa`,
+`ids/pordslot11.taxid_map`: `gb|FFF00090.1|` taxid 150, the best hit, then `gb|FFF00011.1|` to `gb|FFF00001.1|` taxid
+99990, then the failing `gnl|BL_ORD_ID|x050`, the worst hit): NCBI drops `gb|FFF00011.1|` and its report's read of it
+writes the offset error again after the 150 load; `ids/pslot12_t5` and `ids/pslot10_t5` the same with 12 and 10 loads
+before the failure (two dropped, none), `ids/pslotc_t5` the control with `gb|FFF00050.1|` in place of the failing id
+(every load held by the scope), and `ids/pslotr_t5` and `ids/pslotm_t5` with `gb|FFF00011.1|` or `gb|FFF00001.1|` the
+best hit (one offset error and two: the largest key is the dropped one). `ids/ptie_t5` and `ids/ptie150_t5`
+(`ids/pordtie.faa`: `gb|FFF00010.1|`, `gb|FFF00050.1|` of the failing tag's packed number, the tag, `gb|FFF00090.1|`
+taxid 150; `gb|FFF00050.1|` with taxid 99990 or 150) hold a load that NCBI's map may put before the failure or after it:
+LOSAT takes it made and not made, and writes NCBI's bytes where both give the same texts, as here (refused before); for
+the same reason `db.o4b2_9.bp.r2.mix.off.16` is an `ncbi` row now. The aliases `ids/pvab_t5.pal` and `ids/pvcd_t5.pal`
+put the loads before and after the tag in two volumes (`pordva.faa` to `pordvd.faa`). `ids/nordtag_rc.fna`, the reverse
+complement of `ids/nordtag_q.fna`, gives BLASTN Seq-aligns on the minus strand, whose lengths NCBI reads only after
+every lookup of the batch succeeded (rows `db.o4b2_10.bn.rc.*` on `ntag_t5`, `ntagx_t5` and `ntagc_t5`, with and without
+`BATCH_SIZE=1`), and `db.o4b2_10.psi.it{2,3}.*` run two and three rounds of psiblast on `ptagx_t5` and `ptagc_t5`.
+NCBI wrote the same bytes of every row in four heap layouts. The 200 ids of NCBI's map count every Seq-align id of the
+batch, also one that a query resolves (a query's own id, line RG-KB item 12; unit tests only).
+
+Every load that a failed prefetch made counts among the blobs that the cache of 10 takes after a load of a larger key,
+whatever its taxids (line NP item O4b2-10, round 3; rows `db.o4b2_10.bp.pslotmix*`, `db.o4b2_10.bp.pslotscope.*` and
+`db.o4b2_10.bp.pslottie.*`):
+`ids/pslotmix_t5` (`ids/pordslotmix.faa`, `ids/pordslotmix.taxid_map`) is `ids/pslot11_t5` with `gb|FFF00001.1|` of
+taxid 9606, another slot, so 10 releases follow `gb|FFF00011.1|`, which NCBI drops (an offset error after the 150 load),
+and `ids/pslotmix12_t5` puts the 9606 load at key 11, released first, so the cache keeps the 10 loads of 99990 after it.
+LOSAT counts such a load where NCBI's scope holds no read of the run since its reset and refuses where that decides the
+texts: `ids/pslotscope_t5` (`ids/pordslotscope.faa`, query `ids/pordslotscope_q.faa`, `BATCH_SIZE=1`, `-evalue 1e-10`)
+is `ids/pslotmix_t5` whose `gb|FFF00001.1|` is the first query's only hit, which the first batch reads; the pairwise
+report and outfmt 6 reset the scope after that batch (two offset errors in outfmt 0), and BLAST XML keeps it, so the
+second batch's prefetch resolves that load in the scope, which then releases nothing (one offset error; LOSAT refuses).
+`ids/pslottie_t5` (`ids/pordslottie.faa`): `gb|FFF00010.1|` to `gb|FFF00001.1|` and `gb|FFF00050.1|` of the failing
+tag's packed number, all of taxid 99990: NCBI loads `gb|FFF00050.1|` before the failure (released first and dropped
+after the 10 others) or not at all, and its report's read loads it either way (refused before).
 
 Copies of one record that follow each other in a hit list (line DBID N3; rows `db.id.join.*`): `make_ids.py
 --join-only` writes, from the FASTA of `ids/make_join_fasta.py`, `ids/pjoin_a`, `ids/pjoin_b`, `ids/pjoin_c` and
@@ -2058,6 +2119,19 @@ Rows `db.ak.*.l62*` (D1a-6 review A F2): `aliaskeys/n_nseq0_l62` (`NSEQ 0`, `LEN
 `allx_q649.faa` (TBLASTN, with and without `OLD_FSC=1`) or `alln_q.fna` (BLASTN split `CHUNK_SIZE=200`, TBLASTX):
 LOSAT writes the reports of the two unsearchable batches before batch 3 refuses the 64-bit effective search space overflow
 (`ncbi-near` against the matching `allx.faa` / `alln.fna` runs).
+Rows `db.ak.bp.*x6*`, `db.ak.bp.rej.nseq0.oldfsc.blocks*`, `db.ak.bp.*.b1*`, `db.ak.bp.*l55*`, `db.rps.*.b1*` and
+`db.rps.*ds55*` (line RG series D, item bp-SF1): BLASTP's and RPSBLAST's refusals of a call's setup come after the reports
+of the query batches before the batch that meets them. `aliaskeys/p_l55` (`LENGTH 36028797018963968`, 2^55, over
+`../taxfilter/tfp`) with `aliaskeys/q_hba_long.faa` (`hba`, the 142 letters of `taxfilter/q.faa`, then `long`, `hba` 35
+times, 4,970 letters) and `BATCH_SIZE=1`: the first batch has hits, the second's effective search space overflows `Int8`
+(NCBI wraps it and goes on); `aliaskeys/q_hba.faa` alone is the near run. `../fasta/rps/x6only.faa` (the six X-only
+queries of `x6q.faa`) is the near run of the count-0 refusal after six unsearched batches, and over `p_l55` an input
+whose invalid contexts NCBI computes no space for (exit 0).
+Review rows of bp-SF1: `db.ak.bp.rej.l55.b1.{0,5}` and `db.ak.bp.rej.nseq0.oldfsc.one.0` (a refusal of the first batch:
+outfmt 0's prolog, which NCBI writes before the batch's setup, then the refusal; nothing in outfmt 5),
+`db.ak.bp.l55.x1hba.7` (`aliaskeys/q_x1_hba.faa`: an X-only query of 10,000 letters, then `q_hba.faa`'s hba, in one
+batch: exit 0), `db.ak.bp.l55.hba.5` and `db.ak.bp.rej.l55.b2.5` (outfmt 5 up to the end of the first batch's iteration),
+`db.ak.ps.l55.hba.7` and `db.ak.ps.rej.l55.b2.7` (psiblast: the first query's report, then the plain refusal).
 Rows `db.cnt.avg2p32.g3.*`, `db.cnt.g3.*`, `db.ak.bn.rej.nseq0.g3.*` and `db.gr.bn.rej.mo00.g3.split.b1` (D1a-6 review A F1):
 `../fasta/rps/g3_acn.fna` (`>g3`, `aC` followed by 398 `N`) and `../fasta/rps/alln_g3.fna` (`alln.fna`, then `g3_acn.fna`)
 with `-task megablast -lcase_masking -soft_masking false -dust no -strand plus CHUNK_SIZE=200`: the whole batch keeps base `C`

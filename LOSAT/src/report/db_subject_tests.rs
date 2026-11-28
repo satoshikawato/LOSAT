@@ -4192,3 +4192,42 @@ fn the_holders_bioseq_is_its_record_by_its_loaded_line() {
     assert_eq!(bioseq.ordinal(), 10);
     assert_eq!(bioseq.record.bioseq_ids(), &[gb("AAA00009", 1)]);
 }
+
+#[test]
+fn a_holder_that_a_batch_loaded_answers_the_loads_of_every_later_batch() {
+    // 0: the subject `gb|AAA00030.1|`; 1: a holder whose line holds that id after its own
+    // `gb|AAA00031.1|`, loaded by its own hit in batch 0 (line DBID hr2c2, rows
+    // `db.hr2.mb.slH.*`: NCBI writes the holder in every later batch).
+    let parsed = [
+        sequence(vec![gb("AAA00030", 1)], 0),
+        sequence(vec![gb("AAA00031", 1), gb("AAA00030", 1)], 1),
+    ];
+    let record: SharedRecord = std::sync::Arc::new(std::sync::RwLock::new(ScopeRecord::default()));
+    record.write().unwrap().set_keeps_scope(Some(false));
+    record.write().unwrap().note(Some(0), [&parsed[1]]);
+    let load_in = |batch: usize| {
+        let read = ReportRead {
+            one_by_one: true,
+            batch: Some(batch),
+            prefetch_fails: false,
+        };
+        HitLoads::of(
+            LoadsBefore::new(&record, Some(batch), false),
+            Some(RunThrow::every_row(AfterThrow::WritesRow)),
+            [(read, ReportKeys::Entries(vec![Some(0)]))],
+            |key| parsed.get(key),
+            |_, _| 0,
+        )
+        .load(0)
+    };
+    let second = load_in(1);
+    assert!(
+        matches!(second, HitLoad::Shown(ShownInstead { holder: Some(holder), .. })
+            if holder == DbSequence::of_unrestricted(1)),
+        "{second:?}"
+    );
+    // The record of batch 1 notes that load as the holder's blob, not the subject's own, so
+    // the loader still holds the id for the holder in batch 2.
+    record.write().unwrap().note(Some(1), [&parsed[0]]);
+    assert_eq!(load_in(2), second);
+}

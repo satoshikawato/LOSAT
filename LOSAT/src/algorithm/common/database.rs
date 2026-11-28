@@ -4259,8 +4259,9 @@ pub(crate) struct ParsedShown {
     /// (`ShownHolders::shown`).
     pub(crate) light_length: bool,
     /// Whether a table prints identities that the program counts on the search's letters
-    /// (`report::tabular::prints_identities`; not BLASTN's, whose tables count them on the rows
-    /// where NCBI does): a holder of other letters is refused (`ShownHolders::other_letters`).
+    /// (TBLASTN's tables without rows, `report::tabular::prints_identities`; the other programs'
+    /// tables count them on the rows of the letters that the reports read, as NCBI): a holder of
+    /// other letters is refused there (`ShownHolders::other_letters`).
     pub(crate) table_identities: bool,
 }
 
@@ -4380,11 +4381,6 @@ pub(crate) struct ShownHolders<'d> {
 }
 
 impl<'d> ShownHolders<'d> {
-    /// The database whose holders these are.
-    pub(crate) fn db(&self) -> &'d SeqDb {
-        self.db
-    }
-
     /// The holders of the reported subjects of `db` (`protein` for a protein database) for the
     /// refusals of `program`.
     pub(crate) fn new(db: &'d SeqDb, protein: bool, program: &'d str) -> Self {
@@ -4401,17 +4397,20 @@ impl<'d> ShownHolders<'d> {
     /// that sequence's record as the program read it (`holder_record` of its ordinal id: `None`
     /// where the call does not report it), loaded by its line, with its length. `subject_end` is
     /// the end (exclusive, 0-based, in the subject's letters) of the subject's ranges in its
-    /// HSPs, or with `exact` the subject's length, which a translated subject's holder must have
-    /// (NCBI translates its letters and numbers its minus frames by the holder's length, from the
-    /// Seq-align's coordinates of the subject's); `light_length` whether a table writes `slen`
-    /// without reading the Bioseq
+    /// HSPs where the rows do not read past a holder's end (BLASTX; 0 where they show NCBI's gaps
+    /// there, `report::row_letters::shown_subject_row`), or with `exact` the subject's length,
+    /// which a translated subject's holder must have (NCBI translates its letters and numbers its
+    /// minus frames by the holder's length, from the Seq-align's coordinates of the subject's);
+    /// `light_length` whether a table writes `slen` without reading the Bioseq
     /// (`TabularSpec::reads_subject_bioseq`), which NCBI looks up apart (a light call by the
-    /// Seq-align id). `None` where the loads give the subject itself. LOSAT's refusals: a holder
-    /// that the call does not report, a database with a positive list (its Seq-aligns'
-    /// `use_this_seqid`), a header read with a UTF8String or a taxonomy database whose lookups
-    /// write texts (the holder's load writes them where the subject's would not), a subject that
-    /// a query's scope finds (`seen_by_scope`), a holder shorter than the subject's ranges
-    /// (NCBI's rows then end in gaps) or of another length where `exact`, the light `slen`, and
+    /// Seq-align id: the holder's length where the batch's prefetch gave it,
+    /// `HitLoads::read_alone`). `None` where the loads give the subject itself. LOSAT's
+    /// refusals: a holder that the call does not report, a database with a positive list (its
+    /// Seq-aligns' `use_this_seqid`), a header read with a UTF8String or a taxonomy database whose
+    /// lookups write texts (the holder's load writes them where the subject's would not), a
+    /// subject that a query's scope finds (`seen_by_scope`), the lines of `holder_lines`, a holder
+    /// shorter than `subject_end` or of another length where `exact`, the light `slen` that a
+    /// report of a batch without the prefetch reads, and
     /// a holder whose own Seq-align id is the subject's in other letter case
     /// (`differs_in_case_only`).
     #[allow(clippy::too_many_arguments)]
@@ -4463,9 +4462,12 @@ impl<'d> ShownHolders<'d> {
                 "where the taxonomy database writes texts at its lookups (the holder's load writes them)",
             ));
         }
-        if light_length {
+        if let Some(why) = self.holder_lines(loads, key, (holder, line), subject.alignment_id())? {
+            return Err(refuse(why));
+        }
+        if light_length && loads.read_alone(key) {
             return Err(refuse(
-                "in a table that writes slen without another field of the subject (NCBI looks that length up apart, by the Seq-align id)",
+                "in a table that writes slen without another field of the subject where a batch's prefetch is off (NCBI looks that length up apart, by the Seq-align id, among the sequences loaded in the run)",
             ));
         }
         let length = if self.protein {
@@ -4476,14 +4478,16 @@ impl<'d> ShownHolders<'d> {
             self.db.nucleotide_length(holder.ordinal())
         }
         .map_err(|error| database_error(error, self.program))?;
-        if subject_end > length {
-            return Err(refuse(&format!(
-                "where that sequence ({length} letters) is shorter than the subject's aligned range (NCBI's rows then end in gaps)"
-            )));
-        }
+        // A translated subject's holder of another length first (review 2 of line DBID hr-2a,
+        // L3: `subject_end` is then the subject's length, not its aligned range).
         if exact && subject_end != length {
             return Err(refuse(&format!(
-                "where that sequence ({length} letters) is not as long as the subject ({subject_end}): NCBI translates its letters and numbers the minus frames by its length"
+                "where that sequence ({length} letters) is not as long as the subject ({subject_end}): NCBI translates its letters and numbers the minus frames by its length (where an aligned range passes its end, NCBI BLAST+ 2.17.0 stops in some formats: CAlnVec::TranslateNAToAA(): NA size expected to be divisible by 3)"
+            )));
+        }
+        if subject_end > length {
+            return Err(refuse(&format!(
+                "where that sequence ({length} letters) is shorter than the subject's aligned range (NCBI's rows then end in gaps, which LOSAT's BLASTX rows do not show)"
             )));
         }
         let bioseq = crate::report::shown_bioseq::ShownBioseq::new(
@@ -4504,12 +4508,83 @@ impl<'d> ShownHolders<'d> {
         Ok(Some(bioseq))
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1328-1359
+    // (cited at `DeflineSet::bioseq_defline`: a load of the holder's blob for the Seq-align id
+    // reads its Bioseq with that id as the target, and stops where no line holds it)
+    /// Why LOSAT does not write the record of `holder`, loaded by its line `line`, for the subject
+    /// `key` of `loads` whose Seq-align id is `target`: a load of its blob for that id (any but
+    /// the scope's weak match, `ShownBy::Weak`, where a line holds an id of the id's handle) where
+    /// none of its lines holds it (`DeflineSet::bioseq_defline`: NCBI stops there; row
+    /// `db.id.blastp.look.held.pdb.6.reject`, `pdb|1abc|A` for `pdb|1ABC|A`), and a line that
+    /// holds it only as an id of
+    /// another type of the same accession (`compare` across GenBank, EMBL, DDBJ and the others it
+    /// takes together: NCBI then names the Bioseq's id in the Seq-align id's form, which LOSAT does
+    /// not follow; rows `db.hr1.bp.lru*.6t`). `None` where neither holds.
+    fn holder_lines(
+        &self,
+        loads: &crate::report::db_subject::HitLoads,
+        key: usize,
+        (holder, line): (crate::seqdb::DbSequence, usize),
+        target: &crate::seqid::ParsedSeqId,
+    ) -> Result<Option<&'static str>> {
+        use crate::report::db_subject::{HitLoad, ShownBy, ShownInstead};
+        use crate::seqid::defline_set::{compare, Sic};
+        let set = self
+            .db
+            .defline_set(holder.ordinal())
+            .map_err(|error| database_error(error, self.program))?;
+        let weak = matches!(
+            loads.load(key),
+            HitLoad::Shown(ShownInstead {
+                by: ShownBy::Weak,
+                ..
+            })
+        );
+        // Only a line of the target's own handle lets the loader's `m_Ids` give the holder for it
+        // (a load of its blob for the id, step 3); a holder that the scope's index matches by
+        // another id (another type, review 4's `zq` family: `ref|` for `emb|`) is not loaded
+        // for the id, and NCBI writes it.
+        let handle = crate::seqid::mask_handle::mask_handle_key(target)
+            .ok()
+            .flatten();
+        let by_handle = handle.is_some()
+            && set
+                .deflines
+                .iter()
+                .flat_map(|defline| &defline.ids)
+                .any(|id| {
+                    crate::seqid::mask_handle::mask_handle_key(id)
+                        .ok()
+                        .flatten()
+                        .is_some_and(|key| Some(key) == handle)
+                });
+        if !weak && by_handle && set.bioseq_defline(target).is_none() {
+            return Ok(Some(
+                "where its definition lines do not hold the Seq-align id (NCBI BLAST+ 2.17.0 stops where it loads that sequence for the id: oid headers do not contain target gi/seq_id)",
+            ));
+        }
+        let held = |same: bool| {
+            set.deflines.get(line).is_some_and(|defline| {
+                defline.ids.iter().any(|id| {
+                    compare(id, target) == Sic::Yes
+                        && (id.alternative() == target.alternative()) == same
+                })
+            })
+        };
+        if !held(true) && held(false) {
+            return Ok(Some(
+                "where its line holds the Seq-align id as an id of another type of the same accession (NCBI then names the Bioseq's id in the Seq-align id's form)",
+            ));
+        }
+        Ok(None)
+    }
+
     /// LOSAT's refusal of the subject `ordinal` (with the record `subject`) whose holder `holder`
     /// has other letters (`same` false, the caller's comparison) where the program's reports count
-    /// or show them on the subject's own letters (`counted`: a table that prints identities,
-    /// `report::tabular::prints_identities`, of a translated program; any report of BLASTP):
-    /// NCBI counts and shows the holder's. `Ok` where the letters are the same or nothing is
-    /// `counted`.
+    /// them on the subject's own letters (`counted`: a TBLASTN table that prints identities
+    /// without its rows, `report::tabular::prints_identities`, whose counts are the search's and
+    /// whose letters TBLASTN does not read): NCBI counts the holder's. `Ok` where the letters are
+    /// the same or nothing is `counted`.
     pub(crate) fn other_letters(
         &self,
         (ordinal, subject): (u32, &crate::report::db_subject::ParsedSubject),
@@ -4523,7 +4598,7 @@ impl<'d> ShownHolders<'d> {
         Err(parsed_refusal(
             self.db.oid(ordinal),
             &format!(
-                "has the Seq-align id {}, for which NCBI BLAST+ 2.17.0 writes the record of database sequence {} (its places give that sequence's Bioseq): LOSAT does not write that record where its letters differ and LOSAT's reports count or show the subject's own letters (NCBI counts and shows that sequence's)",
+                "has the Seq-align id {}, for which NCBI BLAST+ 2.17.0 writes the record of database sequence {} (its places give that sequence's Bioseq): LOSAT does not write that record where its letters differ and a table prints identities without its rows, which LOSAT counts on the subject's own letters (NCBI counts that sequence's)",
                 String::from_utf8_lossy(&subject.alignment_fasta()),
                 holder.holder
             ),

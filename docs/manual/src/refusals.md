@@ -64,6 +64,7 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 
 | Option or value | What happens |
 | :--- | :--- |
+| `-db` with a volume whose sequence file (`.nsq`, `.psq`) is empty (0 bytes) | Refused where the search reads a sequence of that volume: NCBI crashes. At `-num_threads` above 1, `blastn`, `blastp` and `blastx` read no further than NCBI's scan, which stops at a sequence of negative length (a damaged index) and, in an empty `.nsq`, at a sequence that starts at offset 0: a volume after the stop is not read, and the search completes as NCBI's does, also where that volume's sequence file is missing. |
 | `-import_search_strategy` with a strategy file in binary or XML form | Refused: not yet supported. Strategy files in text form, the form that `-export_search_strategy` writes, work. |
 | `-import_search_strategy` with queries given as a list of locations, a GI list, a PHI-BLAST pattern, or a PSI-BLAST, RPS-BLAST or PSSM search | Refused: not yet supported. |
 | `-import_search_strategy` with an option that the program does not have or refuses on its command line | Refused (for example composition-based statistics in `blastn`). The strategy's options that the program's command line runs run as there, the database mask, `-subject_besthit`, `-filtering_db` and the MegaBLAST index included. |

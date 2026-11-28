@@ -6550,10 +6550,14 @@ fn open_search_database(
             );
             // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:96-173
             // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:374-399
+            // The search of the repeats of `-filtering_db` (`hits_only`) is NCBI's `CLocalBlast`
+            // without threads, whatever threads LOSAT gives it: its scan does not stop at a
+            // negative length, and its traceback's read errors are those of one thread.
             let word_size =
                 crate::algorithm::blastn::coordination::determine_effective_word_size(args);
             let database = database.with_mt_mode(
-                args.num_threads,
+                if args.hits_only { 1 } else { args.num_threads },
                 args.mt_mode,
                 word_size,
                 Some(args.query.as_path()),
@@ -7170,8 +7174,8 @@ pub fn run_local_database(
 /// the alignments of its search of the repeats, and nothing that only a formatter reads is read
 /// (`BlastnArgs::hits_only`: NCBI's search of the repeats has no formatter). An exception of NCBI's
 /// search is `RepeatError::Posted`, its message: an error of the database reader where the
-/// database is opened, and the stop of a batch that the search's set-up finds without a valid query
-/// (`BLAST engine error: `, `CBlastException` eSetup).
+/// database is opened or in the search, and the stop of a batch that the search's set-up finds
+/// without a valid query (`BLAST engine error: `, `CBlastException` eSetup).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:368-390
 pub(crate) fn repeat_search_hits(
@@ -7235,18 +7239,28 @@ pub(crate) fn repeat_search_hits(
         })
     };
     result.map_err(|error| match error.downcast::<crate::cli::NativeError>() {
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:650-651
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-639,650-651
         // The search's set-up that finds no valid query stops with its messages, which the
         // command line writes after its prefix (`ENGINE_ERROR`, NCBI's `BLAST engine error:`).
-        Ok(native) => match native
-            .message
-            .strip_prefix(ENGINE_ERROR.as_bytes())
-            .and_then(|text| text.strip_prefix(b" "))
-            .and_then(|text| text.strip_suffix(b"\n"))
-        {
-            Some(text) if native.exit == 3 => RepeatError::Posted(text.to_vec()),
-            _ => RepeatError::Search(native.into()),
-        },
+        // An exception of the database reader in the search (`DATABASE_ERROR`, NCBI's `BLAST
+        // Database error:`, which the command line writes with its `GetMsg()`), such as a
+        // traceback that cannot read a subject's ambiguity data, leaves the search to the
+        // set-up of each query, which posts its `GetMsg()`.
+        Ok(native) => {
+            let posted = |prefix: &str, exit: i32| {
+                native
+                    .message
+                    .strip_prefix(prefix.as_bytes())
+                    .and_then(|text| text.strip_prefix(b" "))
+                    .and_then(|text| text.strip_suffix(b"\n"))
+                    .filter(|_| native.exit == exit)
+                    .map(<[u8]>::to_vec)
+            };
+            match posted(ENGINE_ERROR, 3).or_else(|| posted(crate::wording::DATABASE_ERROR, 2)) {
+                Some(text) => RepeatError::Posted(text),
+                None => RepeatError::Search(native.into()),
+            }
+        }
         Err(error) => RepeatError::Search(error),
     })?;
     Ok(collected)

@@ -2881,6 +2881,12 @@ impl SeqDb {
             }
             let mut cur = start_oid.max(vol_start) - vol_start;
             let stop = end_oid.min(vol_end) - vol_start;
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1783-1785
+            // The scan's first read of an OID of the volume opens its sequence file, whose error
+            // (a missing file) ends the search; a protein's length then comes from the index.
+            if cur < stop {
+                volume.open_sequence_file()?;
+            }
             while cur < stop {
                 let hi = stop.min(cur.saturating_add(CHUNK));
                 let found = match self.seqtype {
@@ -3017,7 +3023,7 @@ impl SeqDb {
     ) -> SeqBlockResult {
         let (volume, first_oid) = self.volume_and_first_oid(range)?;
         if self.mt_gap_stopped_before_at(range, first_oid)? {
-            return volume.empty_stopped_block(range.first_ordinal, first_oid);
+            return Ok(volume.empty_stopped_block(range.first_ordinal, first_oid));
         }
         let block = read(volume, first_oid)?;
         self.mt_check_after_last_block(range, first_oid, block)

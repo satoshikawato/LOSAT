@@ -348,7 +348,8 @@ impl Volume {
     /// Relative index of the first nucleotide in `first..end` whose NCBI `x_GetSequence` length is
     /// negative, or `None`. Checks that the byte NCBI reads (`file[start + whole_bytes]`) lies
     /// within the mapped readable length for every scanned OID, reading the byte only when
-    /// `whole_bytes >= 2^29` can overflow 32-bit `whole_bytes * 4`.
+    /// `whole_bytes >= 2^29` can overflow 32-bit `whole_bytes * 4`. A sequence file of no bytes
+    /// maps a null pointer, which decides at the first OID (`x_empty_file_stops_at`).
     pub(super) fn x_first_negative_nucleotide_in(
         &self,
         first: u32,
@@ -362,7 +363,10 @@ impl Volume {
         self.check_range(first, end)?;
         let seq_offsets = self.index.sequence_offsets(first, end)?;
         let amb_offsets = self.index.ambiguity_offsets(first, end)?;
-        let file = self.open_non_empty_seq_file()?;
+        let file = self.seq_file()?;
+        if file.is_empty() {
+            return self.x_empty_file_stops_at(seq_offsets[0]).map(|()| Some(0));
+        }
         let readable = file.readable_len();
         for (i, &amb) in amb_offsets.iter().enumerate() {
             let start = seq_offsets[i];
@@ -397,21 +401,37 @@ impl Volume {
         Ok(None)
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1783-1785
-    /// Opens the volume's sequence file (matching `x_OpenSeqFile` before `x_GetSequence`) and
-    /// returns an empty `SequenceBlock` marked `stopped_at_negative`.
-    pub(super) fn empty_stopped_block(
-        &self,
-        first_ordinal: u32,
-        first_oid: u32,
-    ) -> Result<SequenceBlock, SeqDbError> {
-        let path = self.open_non_empty_seq_file()?.path().to_path_buf();
-        Ok(SequenceBlock::empty_stopped(
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1817-1841
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:694-710
+    /// NCBI's read of the first nucleotide that its scan reads in this volume, whose sequence
+    /// file has no bytes, at the offset `start`: the file maps a null pointer, so a sequence that
+    /// starts at offset 0 gets the null pointer itself, which is a length of -1 (the
+    /// multithreaded scan stops there: `Ok`); any other start adds its offset to the null pointer
+    /// and NCBI's read of the sequence's last byte crashes (the refusal).
+    fn x_empty_file_stops_at(&self, start: u32) -> Result<(), SeqDbError> {
+        if start == 0 {
+            return Ok(());
+        }
+        Err(SeqDbError::NcbiCrashes {
+            path: with_extension(&self.base, self.index.seqtype, "sq"),
+            message: "the sequence file has no bytes, which NCBI maps as a null pointer"
+                .to_string(),
+        })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:699-707
+    /// An empty `SequenceBlock` of the volume marked `stopped_at_negative`: NCBI's scan stopped
+    /// before the block and reads none of its sequences, so it opens no file of the volume here
+    /// (the scan opened the sequence file of each volume it read, `x_OpenSeqFile`, where the
+    /// readers of the OIDs before the stop did: `SeqDb::x_has_negative_in_oid_range`, the block
+    /// readers).
+    pub(super) fn empty_stopped_block(&self, first_ordinal: u32, first_oid: u32) -> SequenceBlock {
+        SequenceBlock::empty_stopped(
             self.index.seqtype,
             first_ordinal,
             first_oid,
-            path,
-        ))
+            with_extension(&self.base, self.index.seqtype, "sq"),
+        )
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
@@ -991,6 +1011,15 @@ impl Volume {
         self.check_range(first, end)?;
         let seq_offsets = self.index.sequence_offsets(first, end)?;
         let amb_offsets = self.index.ambiguity_offsets(first, end)?;
+        // A sequence file of no bytes: the multithreaded scan stops at a first sequence that
+        // starts at offset 0 (the null pointer's length is -1) and reads nothing of it; any
+        // other start crashes in NCBI and keeps the refusals below.
+        if stop_at_negative
+            && self.seq_file()?.is_empty()
+            && self.x_empty_file_stops_at(seq_offsets[0]).is_ok()
+        {
+            return Ok(self.empty_stopped_block(first_ordinal, first_oid));
+        }
         // `seq_offsets[i] < amb <= seq_offsets[i + 1]` for every `i` implies `seq_offsets` is
         // strictly ascending, so one pass validates both offset arrays for the contiguous fast path.
         let all_regular = amb_offsets

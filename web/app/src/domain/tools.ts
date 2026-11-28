@@ -1,5 +1,6 @@
-// Tool descriptors and helpers for CLI tools besides BLAST searches (WW3b DESIGN §1-§2, RG-F3p7):
-// windowmasker's three stages (-mk_counts, -ustat, -convert), blast_formatter (-archive),
+// Tool descriptors and helpers for CLI tools besides BLAST searches (WW3b DESIGN §1-§2, RG-F3p7,
+// line WW WW4b2): windowmasker's three stages (-mk_counts, -ustat, -convert), blast_formatter
+// (-archive), makeblastdb (its options in the groups of NCBI's `-help`),
 // their option filters driven by `-xmlhelp`, mapping into ParameterField / ParameterDescription,
 // and output file naming. Nothing here lists option defaults, value lists or ranges: all
 // of those come from `ToolEngine.describeTool(...)`.
@@ -16,21 +17,41 @@ export interface ToolEngineOption {
   readonly choices?: readonly string[];
 }
 
-export type ToolId = 'windowmasker' | 'blast_formatter';
+export type ToolId = 'windowmasker' | 'blast_formatter' | 'makeblastdb';
 
 export type WindowMaskerStage = 'mk_counts' | 'mask' | 'convert';
 
-export type ToolStage = WindowMaskerStage | 'format';
+/** A run's stage: windowmasker's three, `format` for blast_formatter, `build` for makeblastdb. */
+export type ToolStage = WindowMaskerStage | 'format' | 'build';
 
-/** Human-readable tool label for Results selector and Run details. */
+/** Human-readable tool label for Results selector and Run details (the main tab's name). */
 export function toolLabel(tool: ToolId): string {
-  return tool === 'windowmasker' ? 'WindowMasker' : 'Format Archive';
+  if (tool === 'windowmasker') return 'WindowMasker';
+  return tool === 'blast_formatter' ? 'Format Archive' : 'makeblastdb';
 }
 
 /** Stage label for Results selector and Run details. */
 export function toolStageLabel(tool: ToolId, stage: ToolStage): string {
-  if (tool === 'blast_formatter') return 'blast_formatter';
+  if (tool !== 'windowmasker') return tool;
   return windowMaskerStageById(stage as WindowMaskerStage).label;
+}
+
+/**
+ * What Run details and the run's line in Results call the tool of a run: WindowMasker with its stage
+ * (`WindowMasker · Mask`), a tab named otherwise than its tool with the tool's name (`Format Archive
+ * (blast_formatter)`), and makeblastdb, whose tab has its name, by its name.
+ */
+export function toolRunTitle(tool: ToolId, stage: ToolStage): string {
+  if (tool === 'windowmasker') return `${toolLabel(tool)} · ${toolStageLabel(tool, stage)}`;
+  return toolLabel(tool) === tool ? tool : `${toolLabel(tool)} (${tool})`;
+}
+
+/**
+ * Whether the tool writes its files into the run's directory (makeblastdb's database, ABI v2 version 17), rather than
+ * the files that its options name as it writes them (`-out`, `-logfile`): Results lists them, with a download of all.
+ */
+export function toolWritesDirectory(tool: ToolId): boolean {
+  return tool === 'makeblastdb';
 }
 
 export interface ToolStageDescriptor {
@@ -68,11 +89,24 @@ export const WINDOWMASKER_BLOCK_FLAGS: ReadonlySet<string> = new Set(['-in', '-i
 /** Stage-selector flags (one is always chosen by the stage switcher). */
 export const WINDOWMASKER_STAGE_FLAGS: ReadonlySet<string> = new Set(['-mk_counts', '-ustat', '-convert']);
 
-/** String-typed options in windowmasker.xml whose values name files in the run directory. */
-export const WINDOWMASKER_FILE_STRING_FLAGS: ReadonlySet<string> = new Set(['-ustat', '-ids', '-exclude_ids']);
+/**
+ * String-typed options whose values name files in the run directory: windowmasker's `-ustat`, `-ids`,
+ * `-exclude_ids`, and makeblastdb's `-mask_data` (a comma-separated list of them, `TOOL_FILE_LIST_FLAGS`).
+ */
+export const TOOL_FILE_STRING_FLAGS: ReadonlySet<string> = new Set(['-ustat', '-ids', '-exclude_ids', '-mask_data']);
+
+/** Options whose value is a comma-separated list of files of the run directory (makeblastdb's `-mask_data`). */
+export const TOOL_FILE_LIST_FLAGS: ReadonlySet<string> = new Set(['-mask_data']);
 
 /** Help and version flags, entered via Additional options. */
 export const WINDOWMASKER_HELP_FLAGS: ReadonlySet<string> = new Set(['-h', '-help', '-xmlhelp']);
+
+/**
+ * The tools whose argument reader takes `-help-full` (makeblastdb's, for its hidden `-randomize`, which `-help` does not
+ * list). The one list of them: `toolPrintsKind` reads it, and every reader of a tool run's help (the drafts, FakeEngine)
+ * asks `toolPrintsKind`; a tool whose reader takes `-help-full` is added here.
+ */
+const HELP_FULL_TOOLS: ReadonlySet<string> = new Set(['makeblastdb']);
 export const WINDOWMASKER_VERSION_FLAGS: ReadonlySet<string> = new Set(['-version', '-version-full', '-version-full-xml', '-version-full-json']);
 
 /** Options placed in the Archive and Output blocks of Format Archive rather than "Formatting options". */
@@ -122,6 +156,86 @@ export function allBlastFormatterParameters(description: ToolDescription | undef
 /** Options of `blast_formatter` shown under the collapsible "Formatting options" section. */
 export function blastFormatterOptionParameters(description: ToolDescription | undefined): readonly ToolParameterDescription[] {
   return allBlastFormatterParameters(description).filter((param) => !BLAST_FORMATTER_BLOCK_FLAGS.has(param.flag));
+}
+
+/** NCBI `-help` usage order for makeblastdb's options; any unknown future option sorts after these in XML order. */
+export const MAKEBLASTDB_USAGE_ORDER: readonly string[] = Object.freeze([
+  '-in',
+  '-input_type',
+  '-dbtype',
+  '-title',
+  '-parse_seqids',
+  '-hash_index',
+  '-mask_data',
+  '-mask_id',
+  '-mask_desc',
+  '-gi_mask',
+  '-gi_mask_name',
+  '-out',
+  '-blastdb_version',
+  '-max_file_sz',
+  '-metadata_output_prefix',
+  '-logfile',
+  '-taxid',
+  '-taxid_map',
+  '-oid_masks',
+]);
+
+/**
+ * The headings of makeblastdb's option groups, as NCBI's `-help` prints them (` *** Input options`): `-xmlhelp` gives
+ * each option its group's number only. A group that a later version adds is shown under "Other options".
+ */
+export const MAKEBLASTDB_GROUPS: Readonly<Record<string, string>> = Object.freeze({
+  '1': 'Input options',
+  '2': 'Configuration options',
+  '3': 'Sequence masking options',
+  '4': 'Output options',
+  '5': 'Taxonomy options',
+});
+
+/** makeblastdb's options placed in the Input and Output blocks of its tab rather than in its option groups. */
+export const MAKEBLASTDB_BLOCK_FLAGS: ReadonlySet<string> = new Set(['-in', '-input_type', '-dbtype', '-out']);
+
+/**
+ * Every option of makeblastdb that its `-help` lists, in its usage order: those of a group, and the required
+ * `-dbtype` (NCBI's "REQUIRED ARGUMENTS", which have no group); not the help and version flags, and not hidden
+ * options (`-randomize`, which `-help-full` lists; Additional options take it).
+ */
+export function makeblastdbParameters(description: ToolDescription | undefined): readonly ToolParameterDescription[] {
+  if (description === undefined) return [];
+  return sortByUsage(
+    description.parameters.filter((param) => (param.group !== undefined || param.mandatory) && !param.hidden),
+    MAKEBLASTDB_USAGE_ORDER,
+  );
+}
+
+/** The sections of makeblastdb's options outside the Input and Output blocks: one for each group of `-help`, in its order. */
+export function makeblastdbOptionSections(
+  description: ToolDescription | undefined,
+): readonly { readonly title: string; readonly parameters: readonly ToolParameterDescription[] }[] {
+  const sections = new Map<string, ToolParameterDescription[]>();
+  for (const param of makeblastdbParameters(description)) {
+    if (MAKEBLASTDB_BLOCK_FLAGS.has(param.flag)) continue;
+    const title = (param.group === undefined ? undefined : MAKEBLASTDB_GROUPS[param.group]) ?? 'Other options';
+    const list = sections.get(title);
+    if (list === undefined) sections.set(title, [param]);
+    else list.push(param);
+  }
+  return [...sections].map(([title, parameters]) => ({ title, parameters }));
+}
+
+/** makeblastdb's options shown in its option groups (every option of `makeblastdbOptionSections`). */
+export function makeblastdbOptionParameters(description: ToolDescription | undefined): readonly ToolParameterDescription[] {
+  return makeblastdbOptionSections(description).flatMap((section) => section.parameters);
+}
+
+/** The input types of makeblastdb whose `-in` names files that the run directory holds as picked (not a database). */
+export type MakeblastdbInputType = 'fasta' | 'asn1_bin' | 'asn1_txt' | 'blastdb';
+
+/** The input type that `-input_type` gives (`fasta`, its default, for an empty or unknown value). */
+export function makeblastdbInputType(value: unknown): MakeblastdbInputType {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return text === 'asn1_bin' || text === 'asn1_txt' || text === 'blastdb' ? text : 'fasta';
 }
 
 /** NCBI `-help` usage order for windowmasker's options; any unknown future option sorts after these in XML order. */
@@ -247,7 +361,7 @@ export function toToolParameterField(param: ToolParameterDescription): Parameter
   if (param.choices !== undefined && param.choices.length > 0) {
     return { flag: param.flag, label: '', kind: 'choice', choices: param.choices, hint };
   }
-  if (WINDOWMASKER_FILE_STRING_FLAGS.has(param.flag) || param.kind === 'File_In') {
+  if (TOOL_FILE_STRING_FLAGS.has(param.flag) || param.kind === 'File_In') {
     return { flag: param.flag, label: '', kind: 'file-text', hint };
   }
   if (param.kind === 'Integer' || param.kind === 'Int8') {
@@ -297,14 +411,24 @@ export function toolTakesValue(description: ToolDescription | undefined): (flag:
   return (flag: string) => valued.has(flag);
 }
 
-/** Whether the argv asks the tool to print help or version instead of running a stage. */
+/**
+ * Whether the argv asks the tool to print its version or its help instead of running a stage, as the command line
+ * does: a version flag anywhere wins (NCBI BLAST+ 2.17.0 and LOSAT print the version for `-help -version`), else a
+ * help flag (`toolHelpFlag`).
+ */
 export function toolPrintsKind(argv: readonly string[]): PrintedKind | null {
-  for (const word of argv.slice(1)) {
-    const flag = word.split('=', 1)[0]!;
-    if (WINDOWMASKER_HELP_FLAGS.has(flag)) return 'help';
-    if (WINDOWMASKER_VERSION_FLAGS.has(flag)) return 'version';
-  }
-  return null;
+  const flags = argv.slice(1).map((word) => word.split('=', 1)[0]!);
+  if (flags.some((flag) => WINDOWMASKER_VERSION_FLAGS.has(flag))) return 'version';
+  return toolHelpFlag(argv) === undefined ? null : 'help';
+}
+
+/** The first help flag of a tool's argv (`-xmlhelp` prints the XML, the others the usage); undefined when there is none. */
+export function toolHelpFlag(argv: readonly string[]): string | undefined {
+  const helpFull = HELP_FULL_TOOLS.has(argv[0] ?? '');
+  return argv
+    .slice(1)
+    .map((word) => word.split('=', 1)[0]!)
+    .find((flag) => WINDOWMASKER_HELP_FLAGS.has(flag) || (helpFull && flag === '-help-full'));
 }
 
 /** Download file name for a tool run output or file (`runFileName` pattern). */
@@ -314,6 +438,21 @@ export function toolOutputFileName(
 ): string {
   const safe = name.replace(/\/+$/, '').replaceAll('/', '_');
   return `${exportPrefix({ number: run.number, program: run.tool, task: run.stage, queuedAt: run.queuedAt })}.${safe}`;
+}
+
+/**
+ * The name under which an output of a tool run downloads: a file that the tool wrote into its run directory keeps its
+ * own name (makeblastdb's database files name each other: an alias file its volumes), else the run's start of names and
+ * the output's name (`stdout.txt` and `stderr.txt` for the streams).
+ */
+export function toolOutputDownloadName(
+  run: { readonly number: number; readonly tool: ToolId; readonly stage: ToolStage; readonly queuedAt: number },
+  entry: { readonly key: string; readonly name: string },
+): string {
+  if (entry.key === 'stdout') return toolOutputFileName(run, 'stdout.txt');
+  if (entry.key === 'stderr') return toolOutputFileName(run, 'stderr.txt');
+  if (toolWritesDirectory(run.tool)) return entry.name.slice(entry.name.lastIndexOf('/') + 1);
+  return toolOutputFileName(run, entry.name);
 }
 
 /** Default counts output file name for Make counts and Convert counts (`wmasker.<sformat>`). */

@@ -1864,8 +1864,8 @@ fn search(
     // With `-export_search_strategy` the request is made first: with `-subject` it stops the run
     // ("Remote PSI-BL2SEQ is not supported", exit status 1, the strategy file empty; NCBI 2.17.0
     // `tbn.pssm.sub*` of line RG F1d probe 7) before the PSSM's check, which a request with `-db`
-    // makes (no request then); the PSSM engine's error comes after the request is written
-    // (`PsiSearch::stop_before_search`, psiblast's rule too).
+    // makes (no request then); LOSAT's refusal of a request whose write NCBI stops in comes next
+    // (no request), the engine's error after the request (`PsiSearch::stop_before_search`).
     let pssm_stop = pssm
         .as_deref()
         .and_then(|psi| psi.stop_before_search(args.strategy.is_some(), database.is_some()));

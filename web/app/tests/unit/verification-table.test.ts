@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { generateVerificationTable } from '../../build/verification';
 import {
   FILE_VALUE,
+  FILES_VALUE,
   NOT_SUPPORTED_LABEL,
   optionKey,
   RANGE_VALUE,
@@ -15,6 +16,7 @@ import {
   type OptionGrammar,
 } from '../../src/domain/verification';
 import BLAST_FORMATTER_XMLHELP_DOC from '../../src/infra/fake/blast_formatter-xmlhelp.json';
+import MAKEBLASTDB_XMLHELP_DOC from '../../src/infra/fake/makeblastdb-xmlhelp.json';
 import WINDOWMASKER_XMLHELP_DOC from '../../src/infra/fake/windowmasker-xmlhelp.json';
 
 const repository = resolve(import.meta.dirname, '../../../..');
@@ -116,6 +118,13 @@ describe('verification table', () => {
       'docs/evidence/losat_web_e2e/run-20261004T163746Z/sweeps/after-tblastx.tsv',
       'LOSAT/tests/windowmasker/cases.tsv',
       'LOSAT/tests/blast_formatter/cases.tsv',
+      'LOSAT/tests/dropin_corpus_manifest.tsv',
+      'LOSAT/tests/fixtures/asn1/makeblastdb/ncbi_2_17_0_manifest.tsv',
+      'LOSAT/tests/seqdb/gi_mask/cases.tsv',
+      'LOSAT/tests/non_utf8_names/cases.tsv',
+      'LOSAT/src/writedb/tests/makeblastdb_v5_cases.rs',
+      'LOSAT/src/writedb/tests/makeblastdb_parse_cases.rs',
+      'LOSAT/src/writedb/tests/makeblastdb_fix_cases.rs',
     ]);
     for (const source of table.sources) {
       expect(source.sha256, source.path).toMatch(/^[0-9a-f]{64}$/);
@@ -222,6 +231,89 @@ describe('verification table', () => {
       ['blast_formatter', '-archive', 'bn.asn', '-outfmt', '8', '-line_length', '40'],
     ]) {
       const badge = bfBadge(argv);
+      expect(badge.level, argv.join(' ')).toBe('outside');
+      expect(badge.label, argv.join(' ')).toBe(NOT_SUPPORTED_LABEL);
+    }
+  });
+
+  it("generates makeblastdb option sets from every NCBI-frozen ledger of makeblastdb runs and grades runs (line WW, WW4b2 R1)", () => {
+    const mk = table.tools?.makeblastdb;
+    expect(mk).toBeDefined();
+    expect([...mk!.optionSets]).toEqual([...mk!.optionSets].sort());
+    for (const key of mk!.optionSets) expect(key).not.toMatch(/"-(in|out|logfile)"/);
+    // The runs NCBI ended with exit status 0 that each ledger's test compares (the counts of 2026-11-28; a ledger
+    // grows, and a reader that stops reading its rows shows here).
+    const taken = Object.fromEntries(table.sources.map((s) => [s.path, s.optionSets]));
+    expect(taken['LOSAT/tests/dropin_corpus_manifest.tsv']).toBeGreaterThanOrEqual(57);
+    expect(taken['LOSAT/tests/fixtures/asn1/makeblastdb/ncbi_2_17_0_manifest.tsv']).toBeGreaterThanOrEqual(59);
+    expect(taken['LOSAT/tests/seqdb/gi_mask/cases.tsv']).toBeGreaterThanOrEqual(23);
+    expect(taken['LOSAT/tests/non_utf8_names/cases.tsv']).toBeGreaterThanOrEqual(8);
+    expect(taken['LOSAT/src/writedb/tests/makeblastdb_v5_cases.rs']).toBeGreaterThanOrEqual(86);
+    expect(taken['LOSAT/src/writedb/tests/makeblastdb_parse_cases.rs']).toBeGreaterThanOrEqual(9);
+    expect(taken['LOSAT/src/writedb/tests/makeblastdb_fix_cases.rs']).toBeGreaterThanOrEqual(5);
+
+    const mkGrammar = toolOptionGrammar(parseToolDescription(MAKEBLASTDB_XMLHELP_DOC.xml));
+    const mkBadge = (argv: readonly string[]) =>
+      toolVerificationBadge({ tool: 'makeblastdb', argv, runtimePath: 'serial', grammar: mkGrammar }, table);
+    for (const argv of [
+      // The drop-in ledger.
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl'],
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'prot', '-out', 'mydb'],
+      ['makeblastdb', '-in', 'a.fa b.fa', '-dbtype', 'nucl', '-parse_seqids', '-out', 'db'],
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-parse_seqids', '-taxid_map', 'map.txt', '-out', 'db'],
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-title', 'my genome', '-out', 'db'],
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-blastdb_version', '5'],
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'prot', '-mask_data', 'seg.asnb'],
+      // Two -mask_data files of two algorithms without -gi_mask (MKW13, MKW14: WW4b2 R3 F2); three are the same loop.
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-parse_seqids', '-mask_data', 'a.asnb,b.asnb', '-out', 'db'],
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-mask_data', 'windowmasker-run1.asnb,windowmasker-run2.asnb', '-out', 'db'],
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-mask_data', 'a.asnb,b.asnb,c.asnb', '-out', 'db'],
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'prot', '-mask_data', 'm.asnb', '-mask_id', 'mine', '-mask_desc', 'my seg', '-out', 'db'],
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-blastdb_version', '4', '-mask_data', 'dust.asnb'],
+      // The ASN.1 manifest.
+      ['makeblastdb', '-in', 'e.asnb', '-input_type', 'asn1_bin', '-dbtype', 'prot', '-title', 'T', '-out', 'db'],
+      ['makeblastdb', '-in', 'e.asn', '-input_type', 'asn1_txt', '-dbtype', 'nucl', '-title', 'x', '-oid_masks', '1', '-out', 'db'],
+      // -gi_mask in several volumes.
+      ['makeblastdb', '-in', 'n.fa', '-dbtype', 'nucl', '-parse_seqids', '-title', 't', '-max_file_sz', '400', '-mask_data', 'd.asnb', '-gi_mask', '-gi_mask_name', 'g1'],
+      // -taxid: any taxonomy ID other than 0 is stored as given (the ledgers hold 9606, 562 and 1).
+      ['makeblastdb', '-in', 'e.asn', '-input_type', 'asn1_txt', '-dbtype', 'prot', '-title', 'T', '-taxid', '7227', '-out', 'db'],
+      // Names that are not UTF-8: -metadata_output_prefix.
+      ['makeblastdb', '-in', 'in.fa', '-dbtype', 'nucl', '-title', 't', '-out', 'db', '-metadata_output_prefix', 'meta/'],
+      // The version 5 runs of the Rust tables: -input_type blastdb, -randomize, -oid_masks, volumes.
+      ['makeblastdb', '-in', 'src', '-input_type', 'blastdb', '-dbtype', 'nucl', '-out', 'db'],
+      ['makeblastdb', '-in', 'src', '-input_type', 'blastdb', '-dbtype', 'prot', '-out', 'db', '-randomize'],
+      ['makeblastdb', '-in', 'p.fa', '-dbtype', 'prot', '-out', 'db', '-title', 't', '-parse_seqids', '-oid_masks', '2'],
+      ['makeblastdb', '-in', 'p.fa', '-dbtype', 'prot', '-out', 'db', '-title', 't', '-max_file_sz', '300B'],
+      // The -parse_seqids runs: -hash_index with -taxid_map.
+      ['makeblastdb', '-in', 'p.fa', '-dbtype', 'prot', '-out', 'db', '-title', 't', '-parse_seqids', '-hash_index', '-taxid_map', 'm.txt'],
+    ]) {
+      const badge = mkBadge(argv);
+      expect(badge.level, argv.join(' ')).toBe('certified');
+      expect(badge.label, argv.join(' ')).toBe(SUPPORTED_LABEL);
+    }
+    // A list option's key says one entry or several (WW4b2 R3 F2): one mask column is not two.
+    const mkKey = (argv: readonly string[]) => toolOptionKey(argv, mkGrammar);
+    expect(mkKey(['makeblastdb', '-dbtype', 'nucl', '-mask_data', 'a.asnb'])).toBe(JSON.stringify([['-dbtype', 'nucl'], ['-mask_data', FILE_VALUE]]));
+    expect(mkKey(['makeblastdb', '-dbtype', 'nucl', '-mask_data', 'a.asnb,b.asnb'])).toBe(JSON.stringify([['-dbtype', 'nucl'], ['-mask_data', FILES_VALUE]]));
+    expect(mkKey(['makeblastdb', '-dbtype', 'nucl', '-mask_data', ' a b.asnb ', '-mask_id', 'm1,m2', '-mask_desc', 'd', '-gi_mask_name', 'g1,g2'])).toBe(
+      JSON.stringify([['-dbtype', 'nucl'], ['-gi_mask_name', FILES_VALUE], ['-mask_data', FILE_VALUE], ['-mask_desc', FILE_VALUE], ['-mask_id', FILES_VALUE]]),
+    );
+    expect(mkKey(['makeblastdb', '-dbtype', 'nucl', '-title', 'a,b'])).toBe(JSON.stringify([['-dbtype', 'nucl'], ['-title', FILE_VALUE]]));
+    for (const argv of [
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-max_file_sz', '1MB'],
+      // Two -mask_data files with an option that no row of two runs with.
+      ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-parse_seqids', '-hash_index', '-mask_data', 'a.asnb,b.asnb', '-out', 'db'],
+      // A single-volume database with -gi_mask: NCBI ends it with exit status 2 (approved exception 25), so no row counts.
+      ['makeblastdb', '-in', 'n.fa', '-dbtype', 'nucl', '-parse_seqids', '-title', 't', '-mask_data', 'd.asnb', '-gi_mask'],
+      ['makeblastdb', '-in', 'n.fa', '-dbtype', 'nucl', '-parse_seqids', '-title', 't', '-mask_data', 'd.asnb', '-gi_mask', '-gi_mask_name', 'g1'],
+      // -mask_id without -mask_data, -mask_desc in version 4 with several volumes: only in mask_writer, whose test leaves the metadata file uncompared.
+      ['makeblastdb', '-in', 'n.fa', '-dbtype', 'nucl', '-blastdb_version', '4', '-title', 't', '-mask_data', 'm.asnt', '-mask_id', 'a', '-max_file_sz', '400B'],
+      // The source builds of the Rust tables' -input_type blastdb cases (a folder of {D}, not compared).
+      ['makeblastdb', '-in', 'raw.fa', '-dbtype', 'nucl', '-parse_seqids', '-taxid_map', 't.map', '-mask_data', 'd.asnb', '-title', 'S', '-out', 's/src'],
+      // -taxid 0 leaves the sequences to -taxid_map, a path no ledger row runs.
+      ['makeblastdb', '-in', 'e.asn', '-input_type', 'asn1_txt', '-dbtype', 'prot', '-title', 'T', '-taxid', '0', '-out', 'db'],
+    ]) {
+      const badge = mkBadge(argv);
       expect(badge.level, argv.join(' ')).toBe('outside');
       expect(badge.label, argv.join(' ')).toBe(NOT_SUPPORTED_LABEL);
     }

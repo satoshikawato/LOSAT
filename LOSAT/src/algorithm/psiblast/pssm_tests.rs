@@ -1518,7 +1518,7 @@ fn pssm_files_and_round_files_deliver_bytes_through_run_files_receiver() {
         versions: Default::default(),
         run_files: run_files.clone(),
     };
-    check_pssm_files(&linked, 1, None).unwrap();
+    check_pssm_files(&linked, 1, None, "PSIBLAST").unwrap();
     let mut files = PssmFiles::new(&linked);
     files.add(Some(b"asn-linked"), None).unwrap();
     files.commit().unwrap();

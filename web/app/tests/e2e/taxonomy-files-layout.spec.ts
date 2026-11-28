@@ -92,7 +92,10 @@ test.describe('the folder picked for -db: its taxonomy files stay where the user
         await page.getByTestId('subject-source-database').check();
         await page.getByTestId('subject-db-folder-input').setInputFiles(folder);
         await expect(page.getByTestId('subject-db-selected')).toContainText('protdb/tfp');
-        if (taxids) await page.getByTestId('db-filter-taxids').fill(taxids);
+        if (taxids) {
+          await page.getByTestId('subject-db-filters-toggle').click();
+          await page.getByTestId('db-filter-taxids').fill(taxids);
+        }
         await openParameters(page);
         await page.getByTestId('param-extra').fill(`-logfile ${name}`);
         await submit(page);

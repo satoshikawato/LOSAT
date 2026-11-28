@@ -968,35 +968,69 @@ pub(super) fn strip_dir_prefix<'a>(path: &'a [u8], dir: &[u8]) -> Option<&'a [u8
     }
 }
 
-// No NCBI counterpart: LOSAT Web reads `-logfile` and `windowmasker -out` against the file names
-// that `resolve_in` checks or opens for `dbname`, so a write name equal to a missing
-// alias/index/group-alias file is refused instead of diverging from the command line, which
-// creates the file and then reads it back (line WQA D19b).
-/// File names that [`resolve_in`] and [`compute_masks`] check or open for `dbname` (`seqtype`),
-/// using the engine's own [`SearchPath::from_environment`], [`resolve_in_recording`] (on both `Ok`
-/// and `Err`) and [`compute_masks_recording`] (on `Ok`). Paths inside the working directory are
-/// returned relative to it so `run_files` matches them without making missing parent folders
-/// present.
+// No NCBI counterpart: LOSAT Web reads `-logfile` and `windowmasker -out` against the files that
+// reading `dbname` checks or opens, so a write name equal to a missing alias/index/group-alias or
+// component file is refused instead of diverging from the command line, which creates the file
+// and then reads it back (line WQA D19b); the command line refuses the same files for `-logfile`
+// (line WQA D23, `report::log_inputs`), both from `SeqDb::read_paths` (line WQA D26).
+/// The files that reading a BLAST database checks or opens ([`database_files`]), each once.
+#[derive(Debug, Default)]
+pub(crate) struct DatabaseFiles {
+    /// The files whose presence the resolution and `ComputeMasks` check, a file made there
+    /// changing what the opening reads (`DbReadPaths::looked_up`).
+    pub(crate) looked_up: Vec<Vec<u8>>,
+    /// The other files that reading the database opens: those of the alias files, the GI masks
+    /// and the volumes found.
+    pub(crate) found: Vec<Vec<u8>>,
+}
+
+/// The files that reading `dbname` (`seqtype`) along the engine's own
+/// [`SearchPath::from_environment`] checks or opens for a run of `db_use`
+/// ([`super::SeqDb::read_paths`]), with the paths
+/// inside the working directory relative to it so `run_files` matches them without making missing
+/// parent folders present.
+pub(crate) fn database_files(
+    dbname: &[u8],
+    seqtype: SeqType,
+    blastdb: Option<&[u8]>,
+    db_use: super::DbUse,
+) -> DatabaseFiles {
+    let search = SearchPath::from_environment(blastdb);
+    let read = super::SeqDb::read_paths(dbname, seqtype, &search, db_use);
+    let cwd = fix_delimiters(&search.cwd);
+    let norm_cwd = normalize_path(&cwd);
+    let mut seen = std::collections::HashSet::with_capacity(read.files.len());
+    let mut files = DatabaseFiles::default();
+    for (index, path) in read.files.iter().enumerate() {
+        let relative = strip_dir_prefix(path, &norm_cwd)
+            .or_else(|| strip_dir_prefix(path, &cwd))
+            .unwrap_or(path.as_slice())
+            .to_vec();
+        if !seen.insert(relative.clone()) {
+            continue;
+        }
+        if index < read.looked_up {
+            files.looked_up.push(relative);
+        } else {
+            files.found.push(relative);
+        }
+    }
+    files
+}
+
+/// Every file of [`database_files`] for `dbname`, the looked-up ones first.
 pub(crate) fn database_lookup_files(
     dbname: &[u8],
     seqtype: SeqType,
     blastdb: Option<&[u8]>,
+    db_use: super::DbUse,
 ) -> Vec<Vec<u8>> {
-    let search = SearchPath::from_environment(blastdb);
-    let mut raw = Vec::new();
-    if let Ok(mut tree) = resolve_in_recording(dbname, seqtype, &search, Some(&mut raw)) {
-        let _ = compute_masks_recording(&mut tree.root, Some(&mut raw));
-    }
-    let cwd = fix_delimiters(&search.cwd);
-    let norm_cwd = normalize_path(&cwd);
-    let mut out = Vec::with_capacity(raw.len());
-    for path in raw {
-        let stripped = strip_dir_prefix(&path, &norm_cwd)
-            .or_else(|| strip_dir_prefix(&path, &cwd))
-            .unwrap_or(path.as_slice());
-        push_unique(&mut out, stripped.to_vec());
-    }
-    out
+    let DatabaseFiles {
+        mut looked_up,
+        found,
+    } = database_files(dbname, seqtype, blastdb, db_use);
+    looked_up.extend(found);
+    looked_up
 }
 
 fn collect_volumes(node: &AliasNode, out: &mut Vec<Vec<u8>>) {
@@ -1064,8 +1098,9 @@ pub(super) fn resolve_in(
 }
 
 /// [`resolve_in`], optionally recording every file path checked or opened (`record`) for
-/// [`database_lookup_files`]. When `record` is `None`, behavior and cost are unchanged.
-fn resolve_in_recording(
+/// [`super::SeqDb::read_paths`], on `Ok` and on `Err` (the files checked up to the error). When
+/// `record` is `None`, behavior and cost are unchanged.
+pub(super) fn resolve_in_recording(
     dbname: &[u8],
     seqtype: SeqType,
     search: &SearchPath,
@@ -1219,36 +1254,6 @@ pub(super) fn collect_alias_files(node: &AliasNode, out: &mut std::collections::
     }
     for subnode in &node.subnodes {
         collect_alias_files(subnode, out);
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1999-2090
-/// Collects the filter list file paths referenced by `PATH_KEYS` (`OIDLIST`, `GILIST`, `TILIST`,
-/// `SEQIDLIST`, `TAXIDLIST`) across the alias tree under `node`, resolved against each alias
-/// file's directory (and, for `OIDLIST`, also the directory of the node's first volume, matching
-/// `compute_masks`).
-pub(super) fn collect_alias_list_files(
-    node: &AliasNode,
-    out: &mut std::collections::BTreeSet<Vec<u8>>,
-) {
-    for &key in &PATH_KEYS {
-        let Some(value) = node.value(key) else {
-            continue;
-        };
-        if value.is_empty() {
-            continue;
-        }
-        if key == "OIDLIST" || !value.contains(&b' ') {
-            out.insert(combine_path(&node.db_path, value));
-        }
-        if key == "OIDLIST" {
-            if let Some(first) = node.vol_names.first() {
-                out.insert(combine_path(dir_name(first), value));
-            }
-        }
-    }
-    for subnode in &node.subnodes {
-        collect_alias_list_files(subnode, out);
     }
 }
 
@@ -1496,9 +1501,10 @@ pub(super) fn compute_masks(node: &mut AliasNode) -> Result<(), SeqDbError> {
 }
 
 /// [`compute_masks`], optionally recording every `OIDLIST` (primary and first-volume fallback when
-/// primary is missing) and id-list path checked or resolved (`record`). When `record` is `None`
-/// (the default engine path), nothing is recorded or allocated.
-fn compute_masks_recording(
+/// primary is missing) and id-list path checked or resolved (`record`, for
+/// [`super::SeqDb::read_paths`]). When `record` is `None` (the default engine path), nothing is
+/// recorded or allocated.
+pub(super) fn compute_masks_recording(
     node: &mut AliasNode,
     mut record: Option<&mut Vec<Vec<u8>>>,
 ) -> Result<(), SeqDbError> {

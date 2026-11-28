@@ -155,6 +155,9 @@ mod database;
 // not run (line RG item D5b).
 #[path = "mb_index.rs"]
 mod mb_index;
+// The index files that the loader reads, which `-logfile` must not name (`report::log_inputs`,
+// line WQA D26).
+pub(crate) use mb_index::{index_volume_names, old_style_names, volume_super_header};
 // The search of a query batch with a MegaBLAST database index (`-use_index true`): the index's
 // seeds and the indexed word finder (line RG item D5b-2).
 #[path = "mb_index_seeds.rs"]

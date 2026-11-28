@@ -781,6 +781,160 @@ fn tools_refuse_self_referencing_logfile() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+// Line WQA D26 round 1: a name that the run cannot open is the run's log, as NCBI writes it. The
+// mask column of a masked database is read with `-db_soft_mask` only, the id-lookup files with an
+// id list or a taxonomy option, the RPS files by `rpsblast` and `rpstblastn`: a plain `blastn` or
+// `blastp` search may name them as its `-logfile` (the refusals with the option are the tests
+// above).
+#[test]
+fn database_files_that_the_run_cannot_open_are_the_log() {
+    let dir = fresh_dir("d26-unopened");
+    fs::write(dir.join("in.fa"), NUCL_FASTA).unwrap();
+    fs::write(dir.join("prot.fa"), PROT_FASTA).unwrap();
+    let ok = |args: &[&str], label: &str| {
+        let out = run_in(&dir, args, &[]);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(0), "{label}: {stderr}");
+        assert!(!stderr.contains("-logfile file"), "{label}: {stderr}");
+    };
+    ok(
+        &[
+            "makeblastdb",
+            "-in",
+            "in.fa",
+            "-dbtype",
+            "nucl",
+            "-out",
+            "nd",
+            "-logfile",
+            "nd.mk",
+        ],
+        "makeblastdb nucl",
+    );
+    ok(
+        &[
+            "makeblastdb",
+            "-in",
+            "prot.fa",
+            "-dbtype",
+            "prot",
+            "-out",
+            "pd",
+            "-logfile",
+            "pd.mk",
+        ],
+        "makeblastdb prot",
+    );
+    // Not opened by this search: the mask column and the GI index of the database, the id-lookup
+    // files, the metadata.
+    for name in ["nd.naa", "nd.nog", "nd.nnd", "nd.nos", "nd.nto"] {
+        ok(
+            &[
+                "blastn", "-query", "in.fa", "-db", "nd", "-outfmt", "6", "-logfile", name,
+            ],
+            name,
+        );
+    }
+    // The RPS files belong to the RPS searches.
+    for name in ["pd.rps", "pd.loo", "pd.aux", "pd.freq", "pd.pnd"] {
+        ok(
+            &[
+                "blastp", "-query", "prot.fa", "-db", "pd", "-outfmt", "6", "-logfile", name,
+            ],
+            name,
+        );
+    }
+    // The files that the same searches do open stay refused.
+    for (args, name) in [
+        (
+            [
+                "blastn", "-query", "in.fa", "-db", "nd", "-logfile", "nd.nsq",
+            ],
+            "nd.nsq",
+        ),
+        (
+            [
+                "blastp", "-query", "prot.fa", "-db", "pd", "-logfile", "pd.phr",
+            ],
+            "pd.phr",
+        ),
+    ] {
+        let before = fs::read(dir.join(name)).unwrap();
+        let out = run_in(&dir, &args, &[]);
+        assert_eq!(out.status.code(), Some(1), "{name}");
+        assert_eq!(fs::read(dir.join(name)).unwrap(), before, "{name}");
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// Line WQA D26 item 7 (D19b review follow-up): the entries that `windowmasker -mk_counts
+// -fa_list true` reads from its list file are inputs of the run, as the list file is.
+#[test]
+fn windowmasker_fa_list_entries_are_refused() {
+    let dir = fresh_dir("wm-fa-list");
+    let list = dir.join("list.txt");
+    let entry = dir.join("m.fa");
+    fs::write(&list, b"m.fa\n").unwrap();
+    fn argv(log: Option<&str>) -> Vec<&str> {
+        let mut argv = vec![
+            "windowmasker",
+            "-mk_counts",
+            "-fa_list",
+            "true",
+            "-in",
+            "list.txt",
+            "-out",
+            "c.out",
+        ];
+        if let Some(log) = log {
+            argv.extend(["-logfile", log]);
+        }
+        argv
+    }
+    let list_snap = snapshot(&list);
+
+    // A missing entry: refused before `-logfile` creates it.
+    let out = run_in(&dir, &argv(Some("m.fa")), &[]);
+    assert_refused_and_unchanged(
+        &out,
+        &[(&list, &list_snap)],
+        "windowmasker -fa_list missing entry",
+    );
+    assert!(!entry.exists(), "m.fa created");
+    assert!(!dir.join("c.out").exists(), "c.out created");
+
+    // An existing entry: refused, its bytes and mtime unchanged.
+    fs::write(&entry, NUCL_FASTA).unwrap();
+    let entry_snap = snapshot(&entry);
+    let out = run_in(&dir, &argv(Some("m.fa")), &[]);
+    assert_refused_and_unchanged(
+        &out,
+        &[(&entry, &entry_snap), (&list, &list_snap)],
+        "windowmasker -fa_list entry",
+    );
+
+    // The list file itself: refused.
+    let out = run_in(&dir, &argv(Some("list.txt")), &[]);
+    assert_refused_and_unchanged(
+        &out,
+        &[(&entry, &entry_snap), (&list, &list_snap)],
+        "windowmasker -fa_list list file",
+    );
+
+    // Without `-logfile` the run counts the entry.
+    let out = run_in(&dir, &argv(None), &[]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "windowmasker -fa_list without -logfile: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(snapshot(&entry), entry_snap, "m.fa changed");
+    assert!(dir.join("c.out").exists(), "c.out not written");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[cfg(unix)]
 #[test]
 fn symlinks_and_hardlinks_to_inputs_are_refused() {

@@ -607,15 +607,16 @@ is missing or is a file, or that names a folder of the run, keeps its messages o
 a `-logfile` that names an existing file of the run (inside or outside the working directory) or a file
 the run opens or checks for reading even when that file is missing (a `-db` search's `-gilist`,
 `-negative_gilist`, `-ipglist`, `-negative_ipglist`, `-seqidlist`, `-negative_seqidlist`, `-taxidlist` or
-`-negative_taxidlist`, database lookup files of `-db`, BLASTN's `-filtering_db` or `windowmasker -infmt blastdb`
-— alias `.nal`/`.pal`, index `.nin`/`.pin`, `index.alx`, `DBLIST` targets and local-copy/search-path
-candidates — `taxdb.bti` or paired `taxdb.btd` when the `-outfmt` consults the taxonomy database,
+`-negative_taxidlist`, the files that reading the database of `-db`, BLASTN's `-filtering_db` or
+`windowmasker -infmt blastdb` checks or opens, which the command line refuses too (line WQA D26) — lookup
+candidates (alias `.nal`/`.pal`, index `.nin`/`.pin`, `index.alx`, `DBLIST` targets and local-copy/search-path
+candidates), alias lists and the files of each volume that the run can open (its index, header, sequence and string-index files and LMDB file; the id-lookup files only with an id list or taxonomy option, the column, GI-index and GI-mask files only with `-db_soft_mask` or `-db_hard_mask`) — `taxdb.bti` or paired `taxdb.btd` when the `-outfmt` consults the taxonomy database,
 `taxonomy4blast.sqlite3` when shadowing an existing file on
 the search path, or `windowmasker`'s `-in`, `-fa_list true` listed entries, `-ustat`,
 `-ids` or `-exclude_ids`, without making missing parent folders present), and a `windowmasker` `-out`
 that names an existing file or a missing input the command line reads after opening `-out` (`-in` of
-`-mk_counts`, including `-fa_list true` listed entries and `-infmt blastdb` lookup files, and `-ustat` of
-masking), are refused (in both `validate` and `run`/`losat_web2_tool`, exit status 1 in tools);
+`-mk_counts`, including `-fa_list true` listed entries and the lookup candidates and alias lists of an
+`-infmt blastdb` database, and `-ustat` of masking), are refused (in both `validate` and `run`/`losat_web2_tool`, exit status 1 in tools);
 `windowmasker -logfile /dev/stdout` writes diagnostic messages into stream 11 in the command line's byte
 order; stream 8 entries (searches) and stream 12 `BEGIN` frames (tools, for both `-logfile` and `-out`)
 carry the command line's normalized file name (`run.log` for ` run.log` and `./run.log`, `logs` for

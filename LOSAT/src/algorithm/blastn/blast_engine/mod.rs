@@ -18,10 +18,12 @@ mod run;
 
 // Re-export the main run function
 pub(crate) use run::repeat_search_hits;
+// The MegaBLAST index files that the search's loader reads (`report::log_inputs`, line WQA D26).
 pub use run::run;
 pub use run::run_local;
 pub use run::run_local_database;
 pub(crate) use run::QueryBatchSizes;
+pub(crate) use run::{index_volume_names, old_style_names, volume_super_header};
 // LOSAT_X_BNLUTDROP (graduated), EXPERIMENT (LOSAT_X_QGROUPPAR, LOSAT_X_BNQPACK, LOSAT_X_QPREPPAR,
 // LOSAT_X_BNTBRANGELOG): the summary lines `main` prints at exit (no NCBI counterpart).
 pub use run::x_lut_drop_print_summary;

@@ -1467,6 +1467,9 @@ async function checkLogfileRunFiles(engine, native, scratch) {
   const EF = Buffer.from([0xef]);
   const CONF = Buffer.from("[BLAST]\n");
   const T = ["-max_target_seqs", "1", "-outfmt", "6", "-num_threads", "1"];
+  // A one-volume nucleotide database `db/x` (line WQA D26: the files of a `-db` that the CLI and LOSAT Web refuse alike).
+  const DBX = Object.fromEntries(["nhr", "nin", "nsq"].map((ext) =>
+    [`db/x.${ext}`, fs.readFileSync(path.join(ROOT, `LOSAT/tests/db_search/arch_tbx_snucl.${ext}`))]));
   const workDir = fs.mkdtempSync(path.join(scratch, "d19-work."));
   const cliDir = fs.mkdtempSync(path.join(scratch, "d19-cli."));
   const absDir = fs.mkdtempSync(path.join(scratch, "d19-abs."));
@@ -1507,7 +1510,20 @@ async function checkLogfileRunFiles(engine, native, scratch) {
     { id: "s-wmdb-dir", program: "blastn", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, counts: { "wm/c.obinary": COUNTS }, extra: ["-window_masker_db", "wm/c.obinary"], logfile: "wm" },
     { id: "s-wmdb-self", program: "blastn", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, counts: { "wm/c.obinary": COUNTS }, extra: ["-window_masker_db", "wm/c.obinary"], logfile: "wm/c.obinary", expect: "refusal", cliRefuses: "wm/c.obinary" },
     // D19b: `-db` missing alias file `.nal` refused at validate and run (CLI creates and reads it back).
-    { id: "s2-db-nal", program: "blastn", query: ["q.fa", Q], db: "db/wm", work: { "db/wm.nin": Buffer.from("") }, logfile: "db/wm.nal", expect: "refusal" },
+    { id: "s2-db-nal", program: "blastn", query: ["q.fa", Q], db: "db/wm", work: { "db/wm.nin": Buffer.from("") }, logfile: "db/wm.nal", expect: "refusal", cliRefuses: "db/wm.nal" },
+    // D26: the files of a `-db` that the run checks or opens, missing ones too, are refused by LOSAT Web and the CLI
+    // alike (one producer): the string index of a volume (the run opens it), the group alias file, a lookup candidate
+    // of a database that does not resolve, and the GI-mask index of the alias file's MASKLIST with a mask option. A
+    // file of the database that this run cannot open (the GI index and the GI-mask files without a mask option) or
+    // of the database's folder that the run does not read is the run's log (round 1: only the files that the run opens).
+    { id: "s2-db-component", program: "blastn", query: ["q.fa", Q], db: "db/x", work: DBX, logfile: "db/x.nsd", expect: "refusal", cliRefuses: "db/x.nsd" },
+    { id: "s2-db-group-alias", program: "blastn", query: ["q.fa", Q], db: "db/x", work: DBX, logfile: "db/index.alx", expect: "refusal", cliRefuses: "db/index.alx" },
+    { id: "s2-db-unresolved", program: "blastn", query: ["q.fa", Q], db: "db/none", work: DBX, logfile: "db/none.nal", expect: "refusal", cliRefuses: "db/none.nal" },
+    { id: "s2-db-gi-mask", program: "blastn", query: ["q.fa", Q], db: "db/m", work: { ...DBX, "db/m.nal": Buffer.from("TITLE m\nDBLIST x\nMASKLIST mk\n") }, extra: ["-db_soft_mask", "0"], logfile: "mk.gni", expect: "refusal", cliRefuses: "mk.gni" },
+    { id: "s2-db-gi-index", program: "blastn", query: ["q.fa", Q], db: "db/x", work: DBX, extra: ["-db_hard_mask", "0"], logfile: "db/x.nog", expect: "refusal", cliRefuses: "db/x.nog" },
+    { id: "s0-db-gi-index-unasked", program: "blastn", query: ["q.fa", Q], db: "db/x", work: DBX, logfile: "db/x.nog" },
+    { id: "s0-db-gi-mask-unasked", program: "blastn", query: ["q.fa", Q], db: "db/m", work: { ...DBX, "db/m.nal": Buffer.from("TITLE m\nDBLIST x\nMASKLIST mk\n") }, logfile: "mk.gni" },
+    { id: "s0-db-log", program: "blastn", query: ["q.fa", Q], db: "db/x", work: DBX, logfile: "db/run.log" },
   ];
   const { reactor, close, waitForWorkers } = await engine.open(workDir);
   try {
@@ -1558,8 +1574,10 @@ async function checkLogfileRunFiles(engine, native, scratch) {
         if (c.cliRefuses || c.cliAppends) {
           const targetRel = c.cliRefuses || c.cliAppends;
           const targetPath = path.resolve(cliDir, targetRel);
-          const beforeBytes = fs.readFileSync(targetPath);
-          const beforeMtime = fs.statSync(targetPath, { bigint: true }).mtimeNs;
+          // A refused name may be a missing file that the run would read once `-logfile` made it (D26).
+          const existed = fs.existsSync(targetPath);
+          const beforeBytes = existed || c.cliAppends ? fs.readFileSync(targetPath) : undefined;
+          const beforeMtime = beforeBytes === undefined ? undefined : fs.statSync(targetPath, { bigint: true }).mtimeNs;
           const outPath = path.join(cliDir, "o.txt");
           const cli = nativeOnPipes(native, [...words, "-out", "o.txt"], cliDir);
           if (c.cliRefuses) {
@@ -1571,8 +1589,12 @@ async function checkLogfileRunFiles(engine, native, scratch) {
             } else {
               assert.equal(cliStderr, cliRefusalLine, `${label}: native CLI stderr`);
             }
-            assert.ok(fs.readFileSync(targetPath).equals(beforeBytes), `${label}: ${targetRel} bytes unchanged`);
-            assert.equal(fs.statSync(targetPath, { bigint: true }).mtimeNs, beforeMtime, `${label}: ${targetRel} mtime unchanged`);
+            if (beforeBytes === undefined) {
+              assert.ok(!fs.existsSync(targetPath), `${label}: ${targetRel} not created`);
+            } else {
+              assert.ok(fs.readFileSync(targetPath).equals(beforeBytes), `${label}: ${targetRel} bytes unchanged`);
+              assert.equal(fs.statSync(targetPath, { bigint: true }).mtimeNs, beforeMtime, `${label}: ${targetRel} mtime unchanged`);
+            }
             assert.ok(!fs.existsSync(outPath), `${label}: o.txt not created`);
           } else {
             assert.equal(cli.status, 0, `${label}: native CLI append: ${cli.stderr}`);

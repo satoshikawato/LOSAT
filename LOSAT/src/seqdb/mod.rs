@@ -39,6 +39,7 @@
 pub mod alias;
 pub mod column;
 pub mod date;
+pub(crate) mod db_use;
 pub mod file;
 pub mod filter;
 pub(crate) mod find;
@@ -63,6 +64,7 @@ pub mod taxdb;
 pub type SeqBlockResult = Result<SequenceBlock, SeqDbError>;
 pub mod volume;
 
+pub(crate) use db_use::DbUse;
 pub use filter::{DbList, GiList, ListWarning, PigList, SeqidList, TaxidList};
 pub(crate) use filter::{DbSequence, Oid, OidMap};
 
@@ -1424,17 +1426,32 @@ fn check_lmdb_names(volumes: &[(PathBuf, Option<&[u8]>)]) -> Result<(), SeqDbErr
     Ok(())
 }
 
-/// Resolved volume bases and file paths that reading a BLAST database can open
+/// Resolved volume bases and file paths that reading a BLAST database checks or opens
 /// ([`SeqDb::read_paths`]).
 #[derive(Debug, Default)]
 pub(crate) struct DbReadPaths {
-    /// Resolved volume paths without extension, in NCBI's `FindVolumePaths` order.
+    /// Resolved volume paths without extension, in NCBI's `FindVolumePaths` order (none when
+    /// the name does not resolve).
     pub(crate) volumes: Vec<Vec<u8>>,
-    /// All files that reading the database can open: alias files, alias filter list files
-    /// (`OIDLIST`, `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`), `MASKLIST` GI-mask files,
-    /// volume component files (`VOLUME_EXTENSIONS`, `LMDB_EXTENSIONS`), and for protein databases,
-    /// RPS files (`rps::RPS_EXTENSIONS`).
+    /// Every file that reading the database checks or opens for a run of the given [`DbUse`],
+    /// each once: first the files that the resolution and `ComputeMasks` check or open, in their
+    /// order (the lookup candidates of each name along the search path up to the one found,
+    /// missing ones included, the group alias files, the alias files and their `DBLIST` targets,
+    /// the `OIDLIST` path, and its fallback beside the first volume only where the primary path
+    /// is not a file, and the id lists); then the files of what they found that the run can open:
+    /// each volume's index, header and sequence files, the string index and LMDB file, and as
+    /// the run's options ask the id-lookup files, the column files and `MASKLIST` GI-mask files
+    /// of the masks, and the RPS files (`DbUse`).
     pub(crate) files: Vec<Vec<u8>>,
+    /// How many of the first `files` the resolution and `ComputeMasks` check or open: the files
+    /// whose presence decides what the opening reads, so a file made there changes the run. The
+    /// rest are the files of what they found, which a run that only reads the sequences may
+    /// never open (`windowmasker -out`, `windowmasker::read_files`).
+    pub(crate) looked_up: usize,
+    /// The error that ends the opening: that of the resolution, when the name does not resolve
+    /// (`files` then holds what the resolution checked up to it, and `volumes` is empty), or that
+    /// of `ComputeMasks`, which comes after the volumes are read.
+    pub(crate) error: Option<SeqDbError>,
 }
 
 fn push_mol_extensions(
@@ -1685,54 +1702,101 @@ impl SeqDb {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:929-966
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2629-2668
-    /// Single owner of the files that reading the BLAST database `name` (`seqtype`, `path`) can
-    /// open: calls `alias::resolve_in` once and collects every alias file, every alias filter list
-    /// (`OIDLIST`, `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`), every `MASKLIST` GI-mask file,
-    /// and every volume component file (`VOLUME_EXTENSIONS`, `LMDB_EXTENSIONS`, and for protein
-    /// databases, `rps::RPS_EXTENSIONS`), along with the resolved volume bases in NCBI order.
+    // No NCBI counterpart: the files that `-logfile` must not name (line WQA D23 on the command
+    // line, D19b in LOSAT Web; one producer since D26). `ComputeMasks` runs after the volumes are
+    // opened (`read_alias_tree`), so its error still leaves the volumes' files read.
+    /// Single owner of the files that reading the BLAST database `name` (`seqtype`, `path`) checks
+    /// or opens ([`DbReadPaths`]): the engine's own resolution and `ComputeMasks`
+    /// (`alias::resolve_in_recording`, `alias::compute_masks_recording`), which record what they
+    /// check or open, then the files of the alias files, the GI masks and the volumes found.
     pub(crate) fn read_paths(
         name: &[u8],
         seqtype: SeqType,
         path: &SearchPath,
-    ) -> Result<DbReadPaths, SeqDbError> {
+        db_use: DbUse,
+    ) -> DbReadPaths {
+        let mut recorded = Vec::new();
+        let mut tree = match alias::resolve_in_recording(name, seqtype, path, Some(&mut recorded)) {
+            Ok(tree) => tree,
+            Err(error) => {
+                return DbReadPaths {
+                    volumes: Vec::new(),
+                    looked_up: recorded.len(),
+                    files: recorded,
+                    error: Some(error),
+                }
+            }
+        };
+        let masks = alias::compute_masks_recording(&mut tree.root, Some(&mut recorded));
+        let volumes =
+            Self::sort_volume_set(std::mem::take(&mut tree.volumes).into_iter().collect());
+        let found = Self::found_files(&tree, &volumes, seqtype, path, db_use);
+        let seen: std::collections::HashSet<Vec<u8>> = recorded.iter().cloned().collect();
+        let looked_up = recorded.len();
+        let mut files = recorded;
+        files.extend(found.into_iter().filter(|file| !seen.contains(file)));
+        DbReadPaths {
+            volumes,
+            files,
+            looked_up,
+            error: masks.err(),
+        }
+    }
+
+    /// The files of the resolved alias tree `tree` that [`SeqDb::read_paths`] adds to what the
+    /// resolution recorded and that a run of `db_use` can open: the LMDB files of each alias
+    /// file, the `MASKLIST` GI-mask files, and the component files of each of `volumes`.
+    fn found_files(
+        tree: &alias::AliasTree,
+        volumes: &[Vec<u8>],
+        seqtype: SeqType,
+        path: &SearchPath,
+        db_use: DbUse,
+    ) -> std::collections::BTreeSet<Vec<u8>> {
         use crate::writedb::build_db::{LMDB_EXTENSIONS, VOLUME_EXTENSIONS};
-        let tree = alias::resolve_in(name, seqtype, path)?;
-        let volumes = Self::sort_volume_set(tree.volumes.into_iter().collect());
         let mut alias_files = std::collections::BTreeSet::new();
         alias::collect_alias_files(&tree.root, &mut alias_files);
-
         let mut files = std::collections::BTreeSet::new();
         let mol = seqtype.letter().as_bytes();
         let alias_suffix = match seqtype {
             SeqType::Nucleotide => b".nal".as_slice(),
             SeqType::Protein => b".pal".as_slice(),
         };
+        let read = |extensions: &[&'static str]| -> Vec<&'static str> {
+            extensions
+                .iter()
+                .copied()
+                .filter(|ext| db_use.reads_extension(ext))
+                .collect()
+        };
         for alias in &alias_files {
             files.insert(alias.clone());
             if let Some(stem) = strip_ascii_suffix(alias, alias_suffix) {
-                push_mol_extensions(&mut files, stem, mol, &LMDB_EXTENSIONS);
-                files.insert([stem, b".", mol, b"js"].concat());
+                push_mol_extensions(&mut files, stem, mol, &read(&LMDB_EXTENSIONS));
+                if db_use.reads_alias_metadata() {
+                    files.insert([stem, b".", mol, b"js"].concat());
+                }
             }
         }
-        alias::collect_alias_list_files(&tree.root, &mut files);
-        if let Some(gi_masks) = &tree.gi_masks {
-            for mask_name in gi_masks {
+        if db_use.reads_masks() {
+            for mask_name in tree.gi_masks.iter().flatten() {
                 gi_mask::read_paths(mask_name, path, &mut files);
             }
         }
-        for volume in &volumes {
-            push_mol_extensions(&mut files, volume, mol, &VOLUME_EXTENSIONS);
-            push_mol_extensions(&mut files, volume, mol, &LMDB_EXTENSIONS);
-            if seqtype == SeqType::Protein {
+        let (volume_read, lmdb_read) = (read(&VOLUME_EXTENSIONS), read(&LMDB_EXTENSIONS));
+        for volume in volumes {
+            push_mol_extensions(&mut files, volume, mol, &volume_read);
+            push_mol_extensions(&mut files, volume, mol, &lmdb_read);
+            if db_use.reads_masks() {
+                column::read_paths(&path_of_bytes(volume), seqtype, &mut files);
+            }
+            if db_use.reads_rps() {
                 for ext in rps::RPS_EXTENSIONS {
                     files.insert([volume.as_slice(), b".", ext.as_bytes()].concat());
                 }
             }
         }
-        Ok(DbReadPaths {
-            volumes,
-            files: files.into_iter().collect(),
-        })
+        files
     }
 
     fn sort_volume_set(set: std::collections::BTreeSet<Vec<u8>>) -> Vec<Vec<u8>> {

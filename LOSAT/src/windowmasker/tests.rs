@@ -757,3 +757,41 @@ fn read_files_collects_falist_entries_and_blastdb_lookup_files() {
     assert!(!mask_out.iter().any(|p| p == b"x.nal"));
     assert!(mask_out.iter().any(|p| p == b"u.counts"));
 }
+
+#[test]
+fn out_counts_only_the_files_that_a_database_looks_up() {
+    // `-out` naming a missing component, GI-mask or alias LMDB file of an `-infmt blastdb` input
+    // leaves the command line's counts unchanged (the reading of the sequences never opens it),
+    // so LOSAT Web takes it as a new file; `-logfile` refuses it as the command line does
+    // (line WQA D26).
+    let dir = crate::utils::test_dir::TempDir::unique("losat-d26-wm-out");
+    for ext in ["nin", "nhr", "nsq"] {
+        std::fs::write(dir.join(format!("v.{ext}")), b"x").unwrap();
+    }
+    std::fs::write(
+        dir.join("m.nal"),
+        format!("TITLE m\nDBLIST v\nMASKLIST {}\n", dir.join("mk").display()),
+    )
+    .unwrap();
+    let db = dir.join("m");
+    let (for_log, for_out) = super::read_files(&[
+        "-mk_counts",
+        "-infmt",
+        "blastdb",
+        "-in",
+        db.to_str().unwrap(),
+    ]);
+    let has = |files: &[Vec<u8>], name: &str| {
+        let want = dir.join(name);
+        files
+            .iter()
+            .any(|p| p.as_slice() == want.as_os_str().as_encoded_bytes())
+    };
+    for name in ["m.nal", "index.alx"] {
+        assert!(has(&for_log, name) && has(&for_out, name), "{name}");
+    }
+    for name in ["v.nog", "v.ndb", "m.ndb", "m.njs", "mk.gni", "mk.gno"] {
+        assert!(has(&for_log, name), "{name} in {for_log:?}");
+        assert!(!has(&for_out, name), "{name} in {for_out:?}");
+    }
+}

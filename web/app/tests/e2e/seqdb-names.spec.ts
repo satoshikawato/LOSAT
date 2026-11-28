@@ -193,7 +193,7 @@ test('a database named with a double quote is refused where it is chosen, with t
   // The Masking tab's dustmasker -in of -infmt blastdb (WW4c), a SeqDB name list as WindowMasker's (WW4d R1 probe).
   await page.getByTestId('tab-masking').click();
   await expect(page.getByTestId('ms-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
-  await page.getByTestId('ms-param-infmt').selectOption('blastdb');
+  await page.getByTestId('ms-param-infmt').fill('blastdb');
   await page.getByTestId('ms-in-files').setInputFiles([named('q"ms.nin'), named('q"ms.nsq')]);
   const msRefused = `A database named "q"ms" cannot be in -in: ${REASON}.`;
   await expect(page.getByTestId('ms-in-refused')).toHaveText(msRefused);
@@ -353,7 +353,7 @@ test.describe('real engine: database names with a space are the native command l
       // 4. The Masking tab's dustmasker -infmt blastdb on the database in the folder "my db" (WW4c; WW4d R1).
       await page.getByTestId('tab-masking').click();
       await expect(page.getByTestId('ms-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
-      await page.getByTestId('ms-param-infmt').selectOption('blastdb');
+      await page.getByTestId('ms-param-infmt').fill('blastdb');
       await page.getByTestId('ms-in-folder').setInputFiles(join(work, 'my db'));
       await expect(page.getByTestId('ms-in-name')).toHaveValue('"my db/wm"');
       await expect(page.getByTestId('ms-command')).toContainText(`-in '"my db/wm"'`);

@@ -327,7 +327,6 @@ fn query_strand(resolved: &[ResolvedOptions]) -> crate::algorithm::blastn::args:
 /// queries of one scope with one id stops the run at its batch (`QueryScopes::read_ahead`; line WQA
 /// D10 round 4, 2026-11-20), and the batch that a reader error ends adds nothing (review M3,
 /// 2026-11-20).
-
 #[allow(clippy::too_many_arguments)]
 fn scan_xml_titles(
     resolved: &[ResolvedOptions],

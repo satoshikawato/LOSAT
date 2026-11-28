@@ -9689,16 +9689,16 @@ fn x_debug_output(args: &BlastnArgs) -> bool {
 }
 
 /// Whether the prolog of `format` comes with its reports (or, for a run that stops before any
-/// report, from `write_pairwise_prologs`) and not before the search: the start of the XML2 and
-/// JSON documents of outfmt 16 and 15. NCBI writes that start before the search too
-/// (`PrintProlog`), but LOSAT's refusals of the reports (a title that NCBI crashes on,
-/// `names::Refusal`, DECISIONS 20 as K4h left it) come after the search and before the first
-/// byte, so the start is written with the first report, or by the path of an NCBI error that
-/// stops the run before one. The outfmt 0 to 4 prolog and outfmt 20's line of the field names
-/// (after the taxonomy database's warning of its formatter, `tabular::write_tabular_prolog_warning`)
-/// come before the search for every sink (`write_pairwise_prologs`; a library `File` sink is kept
-/// for the run, `api::local_blast::KeptFile`): LOSAT's refusals of a query batch or of the custom
-/// tabular report come after them, after NCBI's bytes before that point.
+/// report, from `write_pairwise_prologs`) and not before the search: the start of the XML2 and JSON
+/// documents of outfmt 16 and 15. NCBI writes that start before the search too (`PrintProlog`), but
+/// LOSAT's refusals of the reports (a title that NCBI crashes on, `names::Refusal`, DECISIONS 20 as
+/// K4h left it) come after the search and before the first byte, so the start is written with the
+/// first report, or by the path of an NCBI error that stops the run before one. The outfmt 0 to 4
+/// prolog and outfmt 20's line of the field names (after the taxonomy database's warning of its
+/// formatter, `tabular::write_tabular_prolog_warning`) come before the search for every sink
+/// (`write_pairwise_prologs`; a library `File` sink is kept for the run,
+/// `api::local_blast::KeptFile`): LOSAT's refusals of a query batch or of the custom tabular report
+/// come after them, after NCBI's bytes before that point.
 fn prolog_with_report(output_format: BlastnOutputFormat) -> bool {
     matches!(output_format, BlastnOutputFormat::Xml2(_))
 }
@@ -9756,9 +9756,9 @@ fn write_pairwise_prologs(
     Ok(())
 }
 
-/// Writes and flushes the prolog of one sink, for the formats that have one here (outfmt 0, 15,
-/// 16; outfmt 20's is `write_pairwise_prologs`'); `diagnostics` takes the posts of a `-html` prolog's references
-/// (`query_warnings::html_posts_sink`).
+/// Writes and flushes the prolog of one sink, for the formats that have one here (outfmt 0, 15, 16;
+/// outfmt 20's is `write_pairwise_prologs`'); `diagnostics` takes the posts of a `-html` prolog's
+/// references (`query_warnings::html_posts_sink`).
 fn write_format_prolog(
     format: &mut FormatOutput<'_>,
     output_format: BlastnOutputFormat,

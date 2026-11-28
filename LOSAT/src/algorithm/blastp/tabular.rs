@@ -586,10 +586,10 @@ pub(super) fn write_tabular_round_epilog(
 }
 
 /// Writes the report of every query of `hit_lists` (indexed by query) to `writer`, each query's
-/// warnings (and the taxonomy database's warning of its formatter) before its lines, and outfmt
-/// 7's last line after the last query when `tab.epilog`. `probe` marks each row (the format observer). `rows` gives the rendered
-/// alignments of each query's HSPs, in the order of its lists, when a field shows them
-/// (`TabularNeeds::rows`; rpsblast's identities, `needs_rows`).
+/// warnings (and the taxonomy database's warning of its formatter) before its lines, and outfmt 7's
+/// last line after the last query when `tab.epilog`. `probe` marks each row (the format observer).
+/// `rows` gives the rendered alignments of each query's HSPs, in the order of its lists, when a
+/// field shows them (`TabularNeeds::rows`; rpsblast's identities, `needs_rows`).
 pub(super) fn write_blastp_tabular(
     tab: &BlastpTabular<'_>,
     hit_lists: &[Option<BlastpHitList>],

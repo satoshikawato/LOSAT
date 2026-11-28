@@ -619,6 +619,66 @@ fn the_check_fails_where_the_copy_fails_with_its_error() {
     assert!(failed > 100, "{failed} damaged databases fail");
 }
 
+/// NCBI's scan of a database with a sequence of negative length (its ambiguity offset at its
+/// start): with threads (`SeqDb::set_mt_stop_at_negative`, NCBI's multithreaded scan) the stream
+/// ends before it (`count`); at one thread it is a sequence of no bases. The other sequences read
+/// as without the damage, in blocks of several sequences and of one. An ambiguity offset past
+/// the next sequence stays the check's error.
+#[test]
+fn a_negative_length_ends_the_stream_with_threads_and_is_empty_without() {
+    let intact = nucleotides("nucl_v4");
+    let count = intact.num_seqs() as usize;
+    let dir = copied("nucl_v4", "negative");
+    let name = dir.join("nucl_v4");
+    let nin = dir.join("nucl_v4.nin");
+    let original = std::fs::read(&nin).unwrap();
+    // Nucleotide `.nin` ends with 3 arrays of (num_oids + 1) u32s: header, sequence, ambiguity.
+    let stride = 4 * (count + 1);
+    let seq_at = |ordinal: usize| original.len() - 2 * stride + 4 * ordinal;
+    let amb_at = |ordinal: usize| original.len() - stride + 4 * ordinal;
+    for ordinal in [3, count - 1] {
+        let mut bytes = original.clone();
+        let start = original[seq_at(ordinal)..seq_at(ordinal) + 4].to_vec();
+        bytes[amb_at(ordinal)..amb_at(ordinal) + 4].copy_from_slice(&start);
+        std::fs::write(&nin, &bytes).unwrap();
+        for stop in [false, true] {
+            let mut db = SeqDb::open(name.to_str().unwrap(), SeqType::Nucleotide).unwrap();
+            db.set_mt_stop_at_negative(stop);
+            for max_bytes in [0, 64] {
+                let what = format!("negative at {ordinal}, stop {stop}, blocks of {max_bytes}");
+                let stream = stream_of(&db, 2, max_bytes);
+                let whole = stream_of(&intact, 2, max_bytes);
+                assert_eq!(stream.count(), if stop { ordinal } else { count }, "{what}");
+                for oid in 0..stream.count() {
+                    let length = stream.with_block(oid, |sequence| Ok(sequence.len()));
+                    if oid == ordinal {
+                        assert_eq!(length.unwrap(), 0, "{what}");
+                        assert_eq!(stream.length(oid).unwrap(), 0, "{what}");
+                        assert_eq!(stream.read_length(oid).unwrap(), 0, "{what}");
+                        assert_eq!(stored(&stream, oid).1, 0, "{what}");
+                    } else {
+                        assert_eq!(length.unwrap(), whole.length(oid).unwrap(), "{what} {oid}");
+                        assert_eq!(stored(&stream, oid), stored(&whole, oid), "{what} {oid}");
+                    }
+                }
+            }
+        }
+        let next = u32::from_be_bytes(original[seq_at(ordinal + 1)..][..4].try_into().unwrap());
+        bytes[amb_at(ordinal)..amb_at(ordinal) + 4].copy_from_slice(&(next + 4).to_be_bytes());
+        std::fs::write(&nin, &bytes).unwrap();
+        for stop in [false, true] {
+            let mut db = SeqDb::open(name.to_str().unwrap(), SeqType::Nucleotide).unwrap();
+            db.set_mt_stop_at_negative(stop);
+            let error = XDbStream::new(&db, 2, "TBLASTX").map(|_| ()).unwrap_err();
+            assert!(
+                format!("{error:#}").contains("could not get ambiguity data"),
+                "amb > next at {ordinal}, stop {stop}: {error:#}"
+            );
+        }
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 /// A read that fails after the check (`x_failing`) is the error of every thread that asks for
 /// it, the one that reads and those that wait for its read, for a block of several sequences
 /// and for a sequence alone, with NCBI's read error and with LOSAT's refusal; the other blocks

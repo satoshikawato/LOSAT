@@ -746,6 +746,30 @@ fn open_out_file(args: &TblastnArgs) -> Result<Option<std::fs::File>> {
         .transpose()
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:95-168
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:142-154
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+/// Whether NCBI's tblastn searches the database of `-db` (of `total_length` letters) in
+/// multithreaded DB-split mode, so that its scan stops at the first sequence of negative length
+/// (`common::database::ncbi_mt_splits_db`), with tblastn's cutoffs: a database of 280,000,000
+/// letters (350,000,000 above a word size of 4, the compressed lookup table) and a query file of
+/// 200,000 bytes. A PSSM query (`-in_pssm`) has no query file, so it is never split by queries.
+fn splits_db(args: &TblastnArgs, resolved: &ResolvedTblastnArgs, total_length: u64) -> bool {
+    let max_db_size = if resolved.word_size > 4 {
+        350_000_000
+    } else {
+        280_000_000
+    };
+    crate::algorithm::common::database::ncbi_mt_splits_db(
+        resolved.num_threads,
+        args.mt_mode,
+        total_length,
+        resolved.pssm.is_none().then_some(args.query.as_path()),
+        max_db_size,
+        200_000,
+    )
+}
+
 /// What `search_cli` and `run_local_database` do after the options are processed and before the
 /// query: the opening of the database of `-db` (`list`: its taxid or seqid list, `None` for a
 /// search without `-db`), and what the requested reports and requests ask of it, which a run whose
@@ -756,6 +780,7 @@ fn open_out_file(args: &TblastnArgs) -> Result<Option<std::fs::File>> {
 /// a database named `n/a`: line RG D3-1 fix 4).
 fn open_search_database(
     args: &mut TblastnArgs,
+    resolved: &ResolvedTblastnArgs,
     list: Option<&crate::seqdb::DbList>,
     settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
     joins_scope: bool,
@@ -785,6 +810,8 @@ fn open_search_database(
                     outputs.formats.iter().map(|format| format.outfmt),
                 ),
             );
+            let splits_db = splits_db(args, resolved, database.db.total_length());
+            let database = database.with_mt_stop_at_negative(splits_db);
             if !joins_scope {
                 return Ok(Some(database));
             }
@@ -904,7 +931,14 @@ fn search_cli(
         .pssm
         .as_deref()
         .is_none_or(crate::algorithm::pssm_search::PsiSearch::joins_scope);
-    let database = open_search_database(&mut args, list.as_ref(), &settings, joins_scope, outputs)?;
+    let database = open_search_database(
+        &mut args,
+        &resolved,
+        list.as_ref(),
+        &settings,
+        joins_scope,
+        outputs,
+    )?;
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:194-238
     // `-in_pssm` (PSI-TBLASTN): the PSSM's Bioseq is the one query, read with the options; no
     // FASTA input, no `Query is Empty!` and no query batches (one search of the PSSM,
@@ -1315,8 +1349,15 @@ fn search_database(
         .pssm
         .as_deref()
         .is_none_or(crate::algorithm::pssm_search::PsiSearch::joins_scope);
-    let database = open_search_database(&mut args, list.as_ref(), &settings, joins_scope, outputs)?
-        .ok_or_else(crate::blastinput::app::missing_subject_error)?;
+    let database = open_search_database(
+        &mut args,
+        &resolved,
+        list.as_ref(),
+        &settings,
+        joins_scope,
+        outputs,
+    )?
+    .ok_or_else(crate::blastinput::app::missing_subject_error)?;
     // `-in_pssm` (the library API's `Inputs::pssm_database`): the query is the PSSM's. No subject
     // record holds an id (the database's sequences are checked against the query's,
     // `QueryScopes`).

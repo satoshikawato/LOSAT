@@ -1369,6 +1369,14 @@ fn open_search_database(
                 crate::report::db_subject::FormatThrow::record_keeps_scope(
                     outputs.formats.iter().map(|format| format.outfmt),
                 ),
+            )
+            // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:191-194
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:142-154
+            // NCBI's tblastx has no `-mt_mode`: its search runs `-num_threads` (capped at the
+            // host's CPUs) on the database, so at more than one its scan stops at the first
+            // sequence of negative length.
+            .with_mt_stop_at_negative(
+                crate::algorithm::common::database::ncbi_effective_threads(args.num_threads) > 1,
             );
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),

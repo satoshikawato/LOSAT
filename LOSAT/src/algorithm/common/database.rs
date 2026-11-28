@@ -643,18 +643,20 @@ const STORE_BLOCK_BYTES: u64 = 1 << 20;
 /// (`PackedNucleotide::from_stored`): the stored 2-bit data, which a translated search's
 /// preliminary stage translates as NCBI does (makeblastdb's bases for the ambiguous ones),
 /// and the stored ambiguity runs, from which the traceback and the reports read the real
-/// codes. The file is read in blocks of at most `STORE_BLOCK_BYTES`, each dropped once its
-/// sequences are packed, so the database is held packed only. NCBI reads every sequence's
-/// 2-bit data in the first query batch's preliminary search, so a block that cannot be read
-/// is that search's error (`search_read_error`). The searches read their sequences where they
-/// search them (`common::x_db_stream`); this copy is the reference of the unit tests.
+/// codes. The file is read in blocks of at most `STORE_BLOCK_BYTES` as the search reads them
+/// (`SeqDb::read_nucleotide_search_block`: up to NCBI's multithreaded scan's stop, a sequence of
+/// negative length as one of no bases), each dropped once its sequences are packed, so the
+/// database is held packed only. NCBI reads every sequence's 2-bit data in the first query
+/// batch's preliminary search, so a block that cannot be read is that search's error
+/// (`search_read_error`). The searches read their sequences where they search them
+/// (`common::x_db_stream`); this copy is the reference of the unit tests.
 #[cfg(test)]
 pub(crate) fn read_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<PackedNucleotide>> {
     let mut stores = Vec::with_capacity(db.num_seqs() as usize);
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, STORE_BLOCK_BYTES) {
         let block = db
-            .read_block(range)
+            .read_nucleotide_search_block(range)
             .map_err(|error| search_read_error(error, program))?;
         for i in 0..block.len() {
             let ordinal = range.first_ordinal + i as u32;
@@ -664,6 +666,9 @@ pub(crate) fn read_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<Pa
                 length,
                 &runs,
             ));
+        }
+        if block.stopped_at_negative() {
+            break;
         }
         next_ordinal = range.end_ordinal();
     }
@@ -692,22 +697,35 @@ impl XChecked {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:324-373,684-710
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
 /// The checks of `read_nucleotide_stores` without the copy (the `-db` searches of TBLASTN and
 /// TBLASTX, which read their subjects where they search them, `x_read_nucleotide_store`). The
-/// database is read in the same blocks, and every sequence's length and ambiguity runs are read
-/// with the same errors in the same order (a length that does not fit a signed 32-bit integer is
-/// an error of the read); the lengths are summed up (`XChecked`), not kept. The search
-/// fails the query batch that the copy would fail, with the same text. A block of one sequence (one longer than
-/// a block, or the last of its volume) is checked without its 2-bit data
-/// (`SeqDb::x_nucleotide_check`): a human chromosome is not read here only to be dropped.
+/// database is read in the same blocks as the search reads them (`SeqDb::
+/// read_nucleotide_search_block`, NCBI's scan: with [`SeqDb::mt_stop_at_negative`] it stops at
+/// the first sequence of negative length, else that sequence is one of no bases, which the search
+/// skips as NCBI's does), and every sequence's length and ambiguity runs are read with the same
+/// errors in the same order (a length that does not fit a signed 32-bit integer is an error of the
+/// read); the lengths are summed up (`XChecked`), not kept, and the count is that of the sequences
+/// before the scan's stop, the subjects the search reads. The search fails the query batch that
+/// the copy would fail, with the same text. A block of one sequence (one longer than a block, or
+/// the last of its volume) is checked without its 2-bit data where its offsets are in order
+/// (`SeqDb::x_nucleotide_search_check`): a human chromosome is not read here only to be dropped.
 pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<XChecked> {
+    // A list that includes no OID leaves no block, but NCBI's multithreaded scan still reads the
+    // raw OIDs of the iteration range (`SeqDb::mt_check_scan_without_blocks`).
+    db.mt_check_scan_without_blocks()
+        .map_err(|error| search_read_error(error, program))?;
     let mut checked = XChecked::default();
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, STORE_BLOCK_BYTES) {
         if range.len() == 1 {
-            let (length, ambiguity) = db
-                .x_nucleotide_check(range)
-                .map_err(|error| search_read_error(error, program))?;
+            let Some((length, ambiguity)) = db
+                .x_nucleotide_search_check(range)
+                .map_err(|error| search_read_error(error, program))?
+            else {
+                break;
+            };
             // The error of `stored_parts`.
             ambiguity.ambiguity_runs(0).map_err(|error| {
                 refusal(
@@ -723,12 +741,15 @@ pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<XCh
             continue;
         }
         let block = db
-            .read_block(range)
+            .read_nucleotide_search_block(range)
             .map_err(|error| search_read_error(error, program))?;
         for i in 0..block.len() {
             let ordinal = range.first_ordinal + i as u32;
             let (length, _) = stored_parts(&block, i, || db.oid(ordinal), program)?;
             checked.add(length as u32);
+        }
+        if block.stopped_at_negative() {
+            break;
         }
         next_ordinal = range.end_ordinal();
     }
@@ -736,23 +757,29 @@ pub(crate) fn x_check_nucleotide_stores(db: &SeqDb, program: &str) -> Result<XCh
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:312-322
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1817-1841
 /// The length of nucleotide `ordinal` of `db`, read from the index and the last byte of its 2-bit
-/// data (`SeqDb::nucleotide_length`), as NCBI reads the length of a sequence it does not fetch:
-/// the length of the sequence's store, with the error of its read (`search_read_error`).
+/// data (`SeqDb::nucleotide_length_i32`, NCBI's signed length), as NCBI reads the length of a
+/// sequence it does not fetch: the length of the sequence's store (`x_read_nucleotide_store`; a
+/// negative length is a store of no bases), with the error of its read (`search_read_error`).
 pub(crate) fn x_nucleotide_length(db: &SeqDb, ordinal: u32, program: &str) -> Result<usize> {
-    db.nucleotide_length(ordinal)
+    db.nucleotide_length_i32(ordinal)
+        .map(|length| length.max(0) as usize)
         .map_err(|error| search_read_error(error, program))
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1817-1841
 /// Sequence `ordinal` of `db` as `read_nucleotide_stores` packs
 /// it (`PackedNucleotide::from_stored` of the stored 2-bit data, length and ambiguity runs), read
 /// with one read of the sequence file. The errors are those of `read_nucleotide_stores` for the
-/// same sequence. With `mapped`, the bytes are read into a buffer that glibc maps from 1 MiB on,
-/// taken from `utils::x_mapped::X_BYTES` when it holds one (`SeqDb::x_read_sequence_mapped`), and
-/// the store is that buffer cut to the 2-bit data (`PackedNucleotide::x_from_stored_buffer`): a
-/// long sequence read for a while and dropped gives its pages back (a store is not given to the
-/// pool, which forgets the buffer). Without it they are read as `SeqDb::read_sequence` reads
-/// them (the heap of the thread), where a dropped store's pages serve the next read.
+/// same sequence: the search's read of one sequence (`SeqDb::read_nucleotide_search_sequence`,
+/// a negative length a store of no bases). With `mapped`, the bytes are read into a buffer that
+/// glibc maps from 1 MiB on, taken from `utils::x_mapped::X_BYTES` when it holds one
+/// (`SeqDb::x_read_nucleotide_search_sequence_mapped`), and the store is that buffer cut to the
+/// 2-bit data (`PackedNucleotide::x_from_stored_buffer`): a long sequence read for a while and
+/// dropped gives its pages back (a store is not given to the pool, which forgets the buffer).
+/// Without it they are read into the heap of the thread, where a dropped store's pages serve the
+/// next read.
 pub(crate) fn x_read_nucleotide_store(
     db: &SeqDb,
     ordinal: u32,
@@ -760,9 +787,9 @@ pub(crate) fn x_read_nucleotide_store(
     mapped: bool,
 ) -> Result<PackedNucleotide> {
     let block = if mapped {
-        db.x_read_sequence_mapped(ordinal)
+        db.x_read_nucleotide_search_sequence_mapped(ordinal)
     } else {
-        db.read_sequence(ordinal)
+        db.read_nucleotide_search_sequence(ordinal)
     }
     .map_err(|error| search_read_error(error, program))?;
     let (length, runs) = stored_parts(&block, 0, || db.oid(ordinal), program)?;

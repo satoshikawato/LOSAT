@@ -2289,6 +2289,102 @@ fn x_nucleotide_check_reads_what_read_block_gives_one_sequence() {
     assert!(check_as_read_block(&db, range, "past 4 KiB page 4"));
 }
 
+/// `SeqDb::x_nucleotide_search_check` of a block of one sequence gives what the search's read
+/// of the block (`read_nucleotide_search_block`) gives: the same length and ambiguity runs, or
+/// the same errors, and `None` where the search's scan stops at the sequence. With
+/// `mt_stop_at_negative` (NCBI's multithreaded scan) a negative length (the ambiguity offset at
+/// or below the start) stops the scan; without it the sequence has no bases. An ambiguity offset
+/// past the next sequence is NCBI's error of the ambiguity data, with or without the stop.
+#[test]
+fn x_nucleotide_search_check_reads_what_the_search_block_gives() {
+    let dir = temp_dir("x-search-check");
+    copy_database("nucl_v4", &["nin", "nsq", "nhr"], &dir);
+    let name = dir.join("nucl_v4").to_str().unwrap().to_string();
+    let nin_path = dir.join("nucl_v4.nin");
+    let original = std::fs::read(&nin_path).unwrap();
+    let count = SeqDb::open(&name, SeqType::Nucleotide).unwrap().num_seqs() as usize;
+    // Nucleotide `.nin` ends with 3 arrays of (num_oids + 1) u32s: header, sequence, ambiguity.
+    let stride = 4 * (count + 1);
+    let word = |at: usize| u32::from_be_bytes(original[at..at + 4].try_into().unwrap());
+    let seq_at = |ordinal: usize| original.len() - 2 * stride + 4 * ordinal;
+    let amb_at = |ordinal: usize| original.len() - stride + 4 * ordinal;
+    let text = |error: SeqDbError| error.to_string();
+    // Sequence 3 has no ambiguity data, the last one has some.
+    for ordinal in [3, count - 1] {
+        let start = word(seq_at(ordinal));
+        let next = word(seq_at(ordinal + 1));
+        for (what, amb) in [
+            ("intact", None),
+            ("amb = start", Some(start)),
+            ("amb < start", Some(start - 4)),
+            ("amb > next", Some(next + 4)),
+        ] {
+            let mut nin = original.clone();
+            if let Some(amb) = amb {
+                nin[amb_at(ordinal)..amb_at(ordinal) + 4].copy_from_slice(&amb.to_be_bytes());
+            }
+            std::fs::write(&nin_path, &nin).unwrap();
+            for stop in [false, true] {
+                let what = format!("{what} at {ordinal}, stop {stop}");
+                let mut db = SeqDb::open(&name, SeqType::Nucleotide).unwrap();
+                db.set_mt_stop_at_negative(stop);
+                let range = db.next_block(ordinal as u32, 0).unwrap();
+                assert_eq!(range.len(), 1, "{what}");
+                let search = db.read_nucleotide_search_block(range).unwrap();
+                let check = db.x_nucleotide_search_check(range).unwrap();
+                let negative = amb.is_some_and(|amb| amb <= start);
+                assert_eq!(check.is_none(), stop && negative, "{what}");
+                assert_eq!(search.stopped_at_negative(), check.is_none(), "{what}");
+                let Some((length, ambiguity)) = check else {
+                    continue;
+                };
+                assert_eq!(Ok(length), search.nucleotide_len(0).map_err(text), "{what}");
+                if negative {
+                    assert_eq!(length, 0, "{what}");
+                }
+                let runs = search.ambiguity_runs(0).map_err(text);
+                assert_eq!(ambiguity.ambiguity_runs(0).map_err(text), runs, "{what}");
+                assert_eq!(
+                    runs.is_err(),
+                    amb.is_some_and(|amb| amb > next),
+                    "{what}: {runs:?}"
+                );
+            }
+        }
+    }
+    // A sequence file of no bytes, whose first sequence starts at offset 0: the check is the
+    // search's read (with `mt_stop_at_negative` the scan stops at offset 0; the other reads
+    // fail with the read's error).
+    let mut nin = original.clone();
+    nin[seq_at(0)..seq_at(0) + 4].copy_from_slice(&0u32.to_be_bytes());
+    std::fs::write(&nin_path, &nin).unwrap();
+    std::fs::write(dir.join("nucl_v4.nsq"), b"").unwrap();
+    for stop in [false, true] {
+        let mut db = SeqDb::open(&name, SeqType::Nucleotide).unwrap();
+        db.set_mt_stop_at_negative(stop);
+        for ordinal in [0, 1] {
+            let what = format!("empty file at {ordinal}, stop {stop}");
+            let range = db.next_block(ordinal, 0).unwrap();
+            let search = db.read_nucleotide_search_block(range).map_err(text);
+            let check = db.x_nucleotide_search_check(range).map_err(text);
+            assert_eq!(
+                check.is_ok(),
+                stop && ordinal == 0,
+                "{what}: {:?}",
+                check.as_ref().err()
+            );
+            match (search, check) {
+                (Ok(block), Ok(check)) => {
+                    assert!(block.stopped_at_negative() && check.is_none(), "{what}")
+                }
+                (search, check) => {
+                    assert_eq!(search.map(|_| ()), check.map(|_| ()), "{what}")
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn x_check_range_gives_the_errors_of_read_range() {
     let dir = temp_dir("x-check-range");

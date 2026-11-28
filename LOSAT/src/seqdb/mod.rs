@@ -2977,24 +2977,23 @@ impl SeqDb {
     }
 
     /// [`Self::mt_check_trailing_excluded`] after the block `range` that holds the last included
-    /// ordinal id (`range.end_ordinal()` is the number of included OIDs) and read `block`
-    /// without stopping at a negative length: NCBI reads on from the OID after the block.
+    /// ordinal id (`range.end_ordinal()` is the number of included OIDs), read without stopping
+    /// at a negative length (`stopped` false): NCBI reads on from the OID after the block.
     fn mt_check_after_last_block(
         &self,
         range: BlockRange,
         first_oid: u32,
-        block: SequenceBlock,
-    ) -> SeqBlockResult {
-        if block.stopped_at_negative()
+        stopped: bool,
+    ) -> Result<(), SeqDbError> {
+        if stopped
             || self
                 .filter
                 .as_deref()
                 .is_none_or(|filter| range.end_ordinal() != filter.count())
         {
-            return Ok(block);
+            return Ok(());
         }
-        self.mt_check_trailing_excluded(first_oid + range.len())?;
-        Ok(block)
+        self.mt_check_trailing_excluded(first_oid + range.len())
     }
 
     /// The errors of NCBI's multithreaded DB-split scan of a list-filtered nucleotide database
@@ -3012,21 +3011,88 @@ impl SeqDb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:324-373,684-710
+    /// NCBI's multithreaded DB-split scan over the block `range`: `stopped` of the volume and the
+    /// OID of the block's first sequence where the excluded OIDs before the block stop the scan
+    /// (`mt_gap_stopped_before_at`), else what `read` reads of the block, with the errors of
+    /// NCBI's reads of the excluded OIDs after the last included one where `read` did not stop at
+    /// a negative length (`is_stopped`, `mt_check_after_last_block`). The one owner of the scan's
+    /// order around a block, for the search's blocks (`mt_search_block`) and the check of one
+    /// nucleotide (`x_nucleotide_search_check`).
+    fn mt_scan<T>(
+        &self,
+        range: BlockRange,
+        read: impl FnOnce(&Volume, u32) -> Result<T, SeqDbError>,
+        stopped: impl FnOnce(&Volume, u32) -> T,
+        is_stopped: impl FnOnce(&T) -> bool,
+    ) -> Result<T, SeqDbError> {
+        let (volume, first_oid) = self.volume_and_first_oid(range)?;
+        if self.mt_gap_stopped_before_at(range, first_oid)? {
+            return Ok(stopped(volume, first_oid));
+        }
+        let read = read(volume, first_oid)?;
+        self.mt_check_after_last_block(range, first_oid, is_stopped(&read))?;
+        Ok(read)
+    }
+
     /// The search block of `range` that `read` reads from the volume (given the OID of the
-    /// block's first sequence): empty and stopped where the excluded OIDs before it stop NCBI's
-    /// scan (`mt_gap_stopped_before_at`), else `read`'s block, with the errors of NCBI's reads of
-    /// the excluded OIDs after the last included one (`mt_check_after_last_block`).
+    /// block's first sequence), in NCBI's scan (`mt_scan`): empty and stopped where the excluded
+    /// OIDs before it stop the scan.
     fn mt_search_block(
         &self,
         range: BlockRange,
         read: impl FnOnce(&Volume, u32) -> SeqBlockResult,
     ) -> SeqBlockResult {
+        self.mt_scan(
+            range,
+            read,
+            |volume, first_oid| volume.empty_stopped_block(range.first_ordinal, first_oid),
+            SequenceBlock::stopped_at_negative,
+        )
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1817-1841
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:324-373,684-710
+    /// The check of the one nucleotide of `range` as the search reads it
+    /// ([`Self::read_nucleotide_search_block`], honoring [`Self::mt_stop_at_negative`]) without
+    /// its 2-bit data where its offsets are in order (`Volume::x_nucleotide_search_check`): its
+    /// length and a block whose `ambiguity_runs(0)` is the search block's, or `None` where NCBI's
+    /// scan stops at it or before it (`mt_scan`).
+    pub fn x_nucleotide_search_check(
+        &self,
+        range: BlockRange,
+    ) -> Result<Option<(usize, SequenceBlock)>, SeqDbError> {
+        self.mt_scan(
+            range,
+            |volume, first_oid| {
+                volume.x_nucleotide_search_check(
+                    range.first,
+                    range.end,
+                    range.first_ordinal,
+                    first_oid,
+                    self.mt_stop_at_negative,
+                )
+            },
+            |_, _| None,
+            Option::is_none,
+        )
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1817-1841
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:699-707
+    /// The block of `range` as the volume's search read gives it
+    /// (`Volume::read_nucleotide_search_block_mt`, which stops at a negative length with
+    /// [`Self::mt_stop_at_negative`]), without the scan's checks of the excluded OIDs around it
+    /// (`mt_scan`): the reads of a database whose scan was checked once for the run
+    /// (`algorithm::common::x_db_stream`, whose check reads [`Self::read_nucleotide_search_block`]).
+    pub fn x_read_nucleotide_scanned_block(&self, range: BlockRange) -> SeqBlockResult {
         let (volume, first_oid) = self.volume_and_first_oid(range)?;
-        if self.mt_gap_stopped_before_at(range, first_oid)? {
-            return Ok(volume.empty_stopped_block(range.first_ordinal, first_oid));
-        }
-        let block = read(volume, first_oid)?;
-        self.mt_check_after_last_block(range, first_oid, block)
+        volume.read_nucleotide_search_block_mt(
+            range.first,
+            range.end,
+            range.first_ordinal,
+            first_oid,
+            self.mt_stop_at_negative,
+        )
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1784-1804

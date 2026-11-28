@@ -80,6 +80,14 @@ impl TblastxDatabase {
         self
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+    /// Sets whether the search's scan of the database stops at the first sequence of negative
+    /// length (NCBI's multithreaded DB-split scan, `SeqDb::set_mt_stop_at_negative`).
+    pub(crate) fn with_mt_stop_at_negative(mut self, stop: bool) -> Self {
+        self.db.set_mt_stop_at_negative(stop);
+        self
+    }
+
     /// The database of a call of the run after other calls whose loads its record does not hold
     /// where `unrecorded` (`shared::TaxdbRun::note_calls_before`: the call's first query is not the
     /// run's first, `first_query_ordinal` above 0).

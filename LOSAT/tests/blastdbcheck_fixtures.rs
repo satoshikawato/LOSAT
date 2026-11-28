@@ -1418,8 +1418,8 @@ fn nonasc_cross_program_parity() {
 
     // 3. n4_amb_eq_start (n4.nin@100 = 00000020 -> amb[1] = seq[1] = 32; length = -4 inside mapping).
     // Deterministic in blastn, blastdbcmd, and blastdbcheck; blastn -t 4 stops at OID 1 via
-    // x_FillSeqBuffer (even when a GI list excludes OID 1). tblastn and tblastx refuse out-of-order
-    // ambiguity offsets (documented in refusals.md).
+    // x_FillSeqBuffer (even when a GI list excludes OID 1). tblastn and tblastx read the same scan
+    // (`nonasc_translated_scan_stop_parity`).
     let d_ambeq = root.join("n4_amb_eq_start");
     cp_db(&d_ambeq, "n4", true);
     poke(d_ambeq.join("n4.nin"), 100, "00000020");
@@ -2219,6 +2219,328 @@ fn nonasc_empty_later_volume_sequence_file_parity() {
             refused >= 20 && completed >= 80,
             "{refused} refused, {completed} completed"
         );
+    } else {
+        assert!(refused + completed > 0, "every row skipped");
+    }
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// The queries of the TBLASTN and TBLASTX rows on `mv3db` (`mv3t_rows.tsv`, `mv3z_rows.tsv`),
+/// written in `root` (`translated_query`).
+fn write_translated_queries(root: &Path) {
+    fs::write(
+        translated_query(root, "tblastn"),
+        b">qp\nRQLHNNPGLNPGLNPGLNPGLNPGLIHVSTK\n",
+    )
+    .unwrap();
+    fs::write(
+        translated_query(root, "tblastx"),
+        b">qn\nAATCCAGGCTTGAATCCAGGCTTGAATCCAGGCTTGAATCCAGGCTTGAATCCAGGCTTG\n",
+    )
+    .unwrap();
+}
+
+/// The path of `program`'s query in `root` (`write_translated_queries`).
+fn translated_query(root: &Path, program: &str) -> PathBuf {
+    match program {
+        "tblastn" => root.join("qp.faa"),
+        _ => root.join("qn.fna"),
+    }
+}
+
+/// A copy of `nonasc_xprog/mv3db` in `root/run_{name}`, with the alias `n` of its three volumes.
+fn mv3_copy(root: &Path, name: &str) -> PathBuf {
+    let dir = root.join(format!("run_{name}"));
+    fs::create_dir_all(&dir).unwrap();
+    for entry in fs::read_dir(fixtures().join("nonasc_xprog/mv3db")).unwrap() {
+        let entry = entry.unwrap();
+        fs::copy(entry.path(), dir.join(entry.file_name())).unwrap();
+    }
+    fs::write(dir.join("n.nal"), "TITLE n\nDBLIST v0 v1 v2\n").unwrap();
+    dir
+}
+
+/// Calls `check` with every row of `rows`, four rows at a time (a TBLASTX run takes about a
+/// second in the test profile).
+fn for_each_row_in_parallel(rows: &[Vec<&str>], check: impl Fn(&[&str]) + Sync) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let next = AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        for _ in 0..4 {
+            scope.spawn(|| {
+                while let Some(row) = rows.get(next.fetch_add(1, Ordering::Relaxed)) {
+                    check(row);
+                }
+            });
+        }
+    });
+}
+
+/// What a row of NCBI's frozen TBLASTN or TBLASTX results asks of LOSAT (`ncbi_rc`, and the
+/// files of `nonasc_xprog/` that hold NCBI's standard output and error, `-` for none): a crash
+/// (`SIGSEGV`, `SIGABRT`) is refused, anything else is byte-identical (`assert_tail_row`).
+/// Returns whether NCBI crashed.
+fn assert_translated_row(
+    label: &str,
+    got: &(Vec<u8>, Vec<u8>, i32),
+    ncbi_rc: i32,
+    stdout_file: &str,
+    stderr_file: &str,
+) -> bool {
+    if matches!(ncbi_rc, -11 | -6) {
+        assert_tail_refusal(label, got);
+        return true;
+    }
+    let file = |name: &str| {
+        if name == "-" {
+            Vec::new()
+        } else {
+            fs::read(fixtures().join("nonasc_xprog").join(name)).unwrap()
+        }
+    };
+    assert_tail_row(
+        label,
+        got,
+        (ncbi_rc, &file(stdout_file), &file(stderr_file)),
+    );
+    false
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:684-710
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:95-168
+/// RG-D2 item 1 (finding 5): TBLASTN and TBLASTX `-db` searches of `mv3db` (three volumes, OIDs
+/// 0..4, 5..10 and 11..14) with sequences of negative length (the ambiguity offset at or below
+/// the start). NCBI's multithreaded DB-split scan stops at the first one, and at one thread, or
+/// with TBLASTN's `-mt_mode 1`, the search skips them. `mv3t_rows.tsv` holds NCBI BLAST+
+/// 2.17.0's results (`mv3t_o*.out`, frozen 2026-11-28 with `D/d2/tt/probe/freeze_mv3t.py`) for
+/// `stop` (OID 2), `stopcrash` (also OID 6 with its last byte `2^28` past the file: NCBI crashes
+/// at one thread, and its scan stops before it with threads), `first` (OID 0), `v1neg` (OID 6),
+/// `v2last` (OID 14), `negs` (OIDs 2 and 8), `lt` (OID 2, the offset 4 below its start),
+/// `negemptyv1` (OID 2, and `v1.nsq` of 0 bytes: NCBI crashes at one thread, and its scan stops
+/// before `v1` with threads) and `v1negemptyv2` (OID 6, and `v2.nsq` of 0 bytes), on the whole
+/// database `n` and the alias ranges `r_head` (OIDs 1..7), `r_tail` (12..15) and `r_pre` (1..5),
+/// at 1, 2 and 4 threads. A crash is refused; every other row is byte-identical. A row at more
+/// threads than the host's CPUs runs the threads that run (`effective_threads`) against their
+/// row, where one was frozen.
+#[test]
+fn nonasc_translated_scan_stop_parity() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let root = scratch("mv3-translated");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    write_translated_queries(&root);
+    let pokes = |shape: &str| -> &'static [(&'static str, usize, &'static str)] {
+        match shape {
+            "stop" => &[("v0", 2, "neg")],
+            "stopcrash" => &[("v0", 2, "neg"), ("v1", 1, "crash")],
+            "first" => &[("v0", 0, "neg")],
+            "v1neg" => &[("v1", 1, "neg")],
+            "v2last" => &[("v2", 3, "neg")],
+            "negs" => &[("v0", 2, "neg"), ("v1", 3, "neg")],
+            "lt" => &[("v0", 2, "lt")],
+            "negemptyv1" => &[("v0", 2, "neg"), ("v1", 0, "empty")],
+            "v1negemptyv2" => &[("v1", 1, "neg"), ("v2", 0, "empty")],
+            other => panic!("unknown shape {other}"),
+        }
+    };
+    let table = fs::read_to_string(fixtures().join("nonasc_xprog/mv3t_rows.tsv")).unwrap();
+    let rows: Vec<Vec<&str>> = table
+        .lines()
+        .skip(1)
+        .map(|line| line.split('\t').collect())
+        .collect();
+    let mut shapes: Vec<&str> = rows.iter().map(|row| row[1]).collect();
+    shapes.dedup();
+    let dirs: Vec<(&str, PathBuf)> = shapes
+        .iter()
+        .map(|&shape| {
+            let dir = mv3_copy(&root, shape);
+            for (name, first, last) in [("r_head", 1, 7), ("r_tail", 12, 15), ("r_pre", 1, 5)] {
+                let head = format!("TITLE {name}\nDBLIST n\nFIRST_OID {first}\nLAST_OID {last}\n");
+                fs::write(dir.join(format!("{name}.nal")), head).unwrap();
+            }
+            for &(volume, oid, kind) in pokes(shape) {
+                let nin = dir.join(format!("{volume}.nin"));
+                if kind == "empty" {
+                    fs::write(dir.join(format!("{volume}.nsq")), b"").unwrap();
+                } else if kind == "lt" {
+                    let mut bytes = fs::read(&nin).unwrap();
+                    let (_, _, seq, amb) = nin_v4_layout(&bytes);
+                    let start = u32::from_be_bytes(bytes[seq + 4 * oid..][..4].try_into().unwrap());
+                    bytes[amb + 4 * oid..][..4].copy_from_slice(&(start - 4).to_be_bytes());
+                    fs::write(&nin, bytes).unwrap();
+                } else {
+                    poke_amb_offset(&nin, oid, kind == "crash");
+                }
+            }
+            (shape, dir)
+        })
+        .collect();
+    let (refused, completed, skipped) = (
+        AtomicUsize::new(0),
+        AtomicUsize::new(0),
+        AtomicUsize::new(0),
+    );
+    for_each_row_in_parallel(&rows, |row| {
+        let (label, shape, program, db, mode) = (row[0], row[1], row[2], row[3], row[4]);
+        let run = effective_threads(row[5].parse().unwrap()).to_string();
+        let Some(cell) = rows
+            .iter()
+            .find(|other| other[1..5] == row[1..5] && other[5] == run)
+        else {
+            skipped.fetch_add(1, Ordering::Relaxed);
+            return;
+        };
+        let query = translated_query(&root, program);
+        let mut args = vec![
+            "-query",
+            query.to_str().unwrap(),
+            "-db",
+            db,
+            "-outfmt",
+            "6",
+            "-num_threads",
+            &run,
+        ];
+        if program == "tblastn" {
+            args.extend(["-seg", "no"]);
+        }
+        if mode == "mt1" {
+            args.extend(["-mt_mode", "1"]);
+        }
+        let dir = &dirs.iter().find(|(s, _)| *s == shape).unwrap().1;
+        let got = run_losat_sub(&root, dir, program, &args);
+        let crash = assert_translated_row(label, &got, cell[6].parse().unwrap(), cell[7], cell[8]);
+        if crash { &refused } else { &completed }.fetch_add(1, Ordering::Relaxed);
+    });
+    let (refused, completed, skipped) = (
+        refused.into_inner(),
+        completed.into_inner(),
+        skipped.into_inner(),
+    );
+    assert_eq!(refused + completed + skipped, rows.len());
+    if effective_threads(4) == 4 {
+        assert_eq!((refused, completed), (28, 260));
+    } else {
+        assert!(refused + completed > 0, "every row skipped");
+    }
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// Rows of `mv3z_rows.tsv` where NCBI completes and LOSAT still refuses: at one thread NCBI's
+/// search skips the sequence at offset 0 of the empty `v1.nsq` (the null pointer's length -1)
+/// and completes, where LOSAT's reader at one thread refuses a read of the empty file (it takes
+/// offset 0 as NCBI does only where the multithreaded scan stops there). The rule belongs to the
+/// shared reader's owner of an empty sequence file (`x_empty_file_nucleotide`, line RG-D2 tail
+/// R5, not on this branch); the test asserts the refusal, so the fix of the rows updates this
+/// list.
+const MV3Z_OPEN: [&str; 2] = [
+    "mv3z_zero_posv1first_tblastn_t1",
+    "mv3z_zero_posv1first_tblastx_t1",
+];
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1817-1838
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:684-710
+/// TBLASTN and TBLASTX on `mv3db` with `v1.nsq` of 0 bytes (`empty`), and also the first
+/// sequence offset of `v1` set to 0 (`zero`), without a list (`none`), with `-gilist` of OID 5,
+/// the first of `v1` (`posv1first`), or of OIDs 5 and 6 (`posv1first2`), and with
+/// `-negative_gilist` of OID 0 (`negv0`), at 1, 2 and 4 threads. `mv3z_rows.tsv` holds NCBI
+/// BLAST+ 2.17.0's results (`mv3z_o*.out`, frozen 2026-11-28 with `D/d2/tt/probe/tt_zero.py`):
+/// NCBI maps the empty file as a null pointer, so a sequence at offset 0 has the length -1,
+/// which stops its multithreaded scan, and it crashes where it reads any other offset. A crash
+/// is refused; every other row is byte-identical, except the rows of `MV3Z_OPEN`. A row at more
+/// threads than the host's CPUs runs the threads that run (`effective_threads`) against their
+/// row, where one was frozen.
+#[test]
+fn nonasc_translated_empty_volume_parity() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let root = scratch("mv3-translated-empty");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    write_translated_queries(&root);
+    let dirs: Vec<(&str, PathBuf)> = ["zero", "empty"]
+        .into_iter()
+        .map(|kind| {
+            let dir = mv3_copy(&root, kind);
+            fs::write(dir.join("v1.nsq"), b"").unwrap();
+            if kind == "zero" {
+                let mut nin = fs::read(dir.join("v1.nin")).unwrap();
+                let (_, _, seq, _) = nin_v4_layout(&nin);
+                nin[seq..seq + 4].copy_from_slice(&0u32.to_be_bytes());
+                fs::write(dir.join("v1.nin"), nin).unwrap();
+            }
+            for (list, gis) in [("posv1first", "606\n"), ("posv1first2", "606\n607\n")] {
+                fs::write(dir.join(format!("{list}.txt")), gis).unwrap();
+            }
+            fs::write(dir.join("negv0.txt"), "601\n").unwrap();
+            (kind, dir)
+        })
+        .collect();
+    let table = fs::read_to_string(fixtures().join("nonasc_xprog/mv3z_rows.tsv")).unwrap();
+    let rows: Vec<Vec<&str>> = table
+        .lines()
+        .skip(1)
+        .map(|line| line.split('\t').collect())
+        .collect();
+    let (refused, completed, open, skipped) = (
+        AtomicUsize::new(0),
+        AtomicUsize::new(0),
+        AtomicUsize::new(0),
+        AtomicUsize::new(0),
+    );
+    for_each_row_in_parallel(&rows, |row| {
+        let (label, kind, list, program) = (row[0], row[1], row[2], row[3]);
+        let run = effective_threads(row[4].parse().unwrap()).to_string();
+        let Some(cell) = rows
+            .iter()
+            .find(|other| other[1..4] == row[1..4] && other[4] == run)
+        else {
+            skipped.fetch_add(1, Ordering::Relaxed);
+            return;
+        };
+        let dir = &dirs.iter().find(|(k, _)| *k == kind).unwrap().1;
+        let query = translated_query(&root, program);
+        let list_path = dir.join(format!("{list}.txt"));
+        let mut args = vec![
+            "-query",
+            query.to_str().unwrap(),
+            "-db",
+            "n",
+            "-outfmt",
+            "6",
+            "-num_threads",
+            &run,
+        ];
+        match list {
+            "none" => {}
+            "negv0" => args.extend(["-negative_gilist", list_path.to_str().unwrap()]),
+            _ => args.extend(["-gilist", list_path.to_str().unwrap()]),
+        }
+        if program == "tblastn" {
+            args.extend(["-seg", "no"]);
+        }
+        let got = run_losat_sub(&root, dir, program, &args);
+        if MV3Z_OPEN.contains(&cell[0]) {
+            assert_eq!(cell[5], "0", "{label}: NCBI completes");
+            assert_tail_refusal(label, &got);
+            open.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+        let crash = assert_translated_row(label, &got, cell[5].parse().unwrap(), cell[6], cell[7]);
+        if crash { &refused } else { &completed }.fetch_add(1, Ordering::Relaxed);
+    });
+    let (refused, completed, open, skipped) = (
+        refused.into_inner(),
+        completed.into_inner(),
+        open.into_inner(),
+        skipped.into_inner(),
+    );
+    assert_eq!(refused + completed + open + skipped, rows.len());
+    if effective_threads(4) == 4 {
+        assert_eq!((refused, completed, open), (30, 16, 2));
     } else {
         assert!(refused + completed > 0, "every row skipped");
     }

@@ -9,9 +9,13 @@
 //! The stream:
 //!
 //! - `XDbStream::new` reads the database once in blocks of `STORE_BLOCK_BYTES`, with the checks
-//!   of the copy in its order (`common::database::x_check_nucleotide_stores`). A block of one
+//!   of the copy in its order (`common::database::x_check_nucleotide_stores`), as the search
+//!   reads them: where NCBI's multithreaded scan stops at a sequence of negative length
+//!   (`SeqDb::mt_stop_at_negative`, which each program sets from NCBI's choice of the split),
+//!   the check stops there and the search reads the sequences before it only; else a sequence of
+//!   negative length is one of no bases, which the search skips. A block of one
 //!   sequence (a long one) is checked without its 2-bit data: its last 2-bit byte and its
-//!   ambiguity data only (`SeqDb::x_nucleotide_check`). Its error is the error that the copy
+//!   ambiguity data only (`SeqDb::x_nucleotide_search_check`). Its error is the error that the copy
 //!   gave, which fails the same query batch with the same text. The check keeps the number of
 //!   sequences, the longest, the sum of the lengths and the first length (`XChecked`), not a
 //!   length per sequence (a `u32` each was 529 MB on core_nt, held through the search; NCBI maps
@@ -472,7 +476,9 @@ impl<'a> XDbStream<'a> {
         })
     }
 
-    /// The number of sequences.
+    /// The number of sequences that the search reads: those before the stop of NCBI's
+    /// multithreaded scan at a negative length (`common::database::x_check_nucleotide_stores`),
+    /// every sequence without it.
     pub(crate) fn count(&self) -> usize {
         self.checked.count
     }
@@ -695,7 +701,12 @@ impl<'a> XDbStream<'a> {
         Err(XReadError(error).into())
     }
 
-    /// The block of the sequences `first..end` of the grid (`XReadError` if it cannot be read).
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1817-1841
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:699-707
+    /// The block of the sequences `first..end` of the grid (`XReadError` if it cannot be read), as
+    /// the search reads it (`SeqDb::x_read_nucleotide_scanned_block`: a sequence of negative
+    /// length is one of no bases, and the block ends at it where NCBI's multithreaded scan stops
+    /// there; the check, `XDbStream::new`, made the scan's checks of the excluded OIDs once).
     fn read_grid_block(&self, first: u32, end: u32) -> Result<SequenceBlock> {
         #[cfg(test)]
         self.block_reads.fetch_add(1, Ordering::Relaxed);
@@ -706,7 +717,7 @@ impl<'a> XDbStream<'a> {
             .x_block_range(first, end)
             .expect("a block of the grid is a range of the database");
         self.db
-            .read_block(range)
+            .x_read_nucleotide_scanned_block(range)
             .map_err(|error| XReadError(shared::search_read_error(error, self.program)).into())
     }
 

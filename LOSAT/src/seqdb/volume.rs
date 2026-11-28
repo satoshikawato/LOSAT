@@ -1237,6 +1237,72 @@ impl Volume {
         self.check_range(first, end)?;
         let seq_offsets = self.index.sequence_offsets(first, end)?;
         let amb_offsets = self.index.ambiguity_offsets(first, end)?;
+        self.x_nucleotide_check_offsets(first, first_ordinal, first_oid, &seq_offsets, &amb_offsets)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1817-1841,2350-2363
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:699-707
+    /// What `read_nucleotide_search_block_mt(first, end, first_ordinal, first_oid,
+    /// stop_at_negative)` of one nucleotide (`end == first + 1`) gives `nucleotide_len(0)` and
+    /// `ambiguity_runs(0)`, or `None` where that read stops (`stopped_at_negative`). A sequence
+    /// whose ambiguity offset lies inside its data, in a sequence file with bytes, is checked as
+    /// `x_nucleotide_check` checks it, without its 2-bit data; any other is that read itself (a
+    /// negative length is a sequence of no bases, which NCBI's search skips, an ambiguity offset
+    /// past the next sequence gives ambiguity data that cannot be read, and a sequence file of no
+    /// bytes is read as NCBI maps it), so the rules of the irregular offsets have one owner.
+    pub fn x_nucleotide_search_check(
+        &self,
+        first: u32,
+        end: u32,
+        first_ordinal: u32,
+        first_oid: u32,
+        stop_at_negative: bool,
+    ) -> Result<Option<(usize, SequenceBlock)>, SeqDbError> {
+        assert!(
+            self.index.seqtype == SeqType::Nucleotide && end == first.wrapping_add(1),
+            "the check of one nucleotide"
+        );
+        self.check_range(first, end)?;
+        let seq_offsets = self.index.sequence_offsets(first, end)?;
+        let amb_offsets = self.index.ambiguity_offsets(first, end)?;
+        if seq_offsets[0] < amb_offsets[0]
+            && amb_offsets[0] <= seq_offsets[1]
+            && !self.seq_file()?.is_empty()
+        {
+            return self
+                .x_nucleotide_check_offsets(
+                    first,
+                    first_ordinal,
+                    first_oid,
+                    &seq_offsets,
+                    &amb_offsets,
+                )
+                .map(Some);
+        }
+        let block = self.read_nucleotide_search_block_mt(
+            first,
+            end,
+            first_ordinal,
+            first_oid,
+            stop_at_negative,
+        )?;
+        if block.stopped_at_negative() {
+            return Ok(None);
+        }
+        let length = block.nucleotide_len(0)?;
+        Ok(Some((length, block)))
+    }
+
+    /// `x_nucleotide_check` of the one nucleotide `first` whose offsets `seq_offsets` (its start
+    /// and the next one's) and `amb_offsets` (its ambiguity offset) the index gave.
+    fn x_nucleotide_check_offsets(
+        &self,
+        first: u32,
+        first_ordinal: u32,
+        first_oid: u32,
+        seq_offsets: &[u32],
+        amb_offsets: &[u32],
+    ) -> Result<(usize, SequenceBlock), SeqDbError> {
         let (start, amb_start, next) = (seq_offsets[0], amb_offsets[0], seq_offsets[1]);
         if start > next {
             return Err(self.index.sequence_changed(first, seq_offsets.len()));

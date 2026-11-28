@@ -97,3 +97,27 @@ Frozen outputs of official NCBI BLAST+ 2.17.0 (`blastdbcmd`, `blastp`, `blastx`,
   `repa` with its ambiguity offset 4 bytes past the next start: the search of the repeats cannot
   read its ambiguity data, and NCBI stops with `BLAST engine error: Warning: File error: could not
   get ambiguity data. ` (exit status 3) at both thread counts.
+- `mv3t_rows.tsv` (RG-D2 item 1, review finding 5, 2026-11-28; test
+  `nonasc_translated_scan_stop_parity`, probe `D/d2/tt/probe/freeze_mv3t.py`): NCBI `tblastn`
+  (`-seg no`, query `RQLHNNPGLNPGLNPGLNPGLNPGLIHVSTK`) and `tblastx` (the query of `mv3e`) on
+  `mv3db` with the aliases `n`, `r_head`, `r_tail` and `r_pre`, at 1, 2 and 4 threads, `tblastn`
+  also with `-mt_mode 1`. Columns: label, shape, program, database, mode (`plain` or `mt1`),
+  threads, NCBI's exit status, standard output and error files (`mv3t_o*.out`; `-` for none).
+  Shapes: `stop` (OID 2 of `v0` with signed length `-4`), `stopcrash` (also OID 1 of `v1` with
+  `amb = 2^28`), `first` (OID 0), `v1neg` (OID 1 of `v1`), `v2last` (OID 3 of `v2`, the last),
+  `negs` (OID 2 of `v0` and OID 3 of `v1`), `lt` (OID 2 of `v0` with `amb = start - 4`),
+  `negemptyv1` (OID 2 of `v0`, and `v1.nsq` of 0 bytes) and `v1negemptyv2` (OID 1 of `v1`, and
+  `v2.nsq` of 0 bytes). NCBI's scan stops at the first negative length where the threads split
+  the database, and skips it at one thread and with `-mt_mode 1`; the 28 rows where NCBI crashes
+  (`SIGSEGV`) are refused by LOSAT, and LOSAT matches the other 260 byte for byte.
+- `mv3z_rows.tsv` (RG-D2 item 1, 2026-11-28; test `nonasc_translated_empty_volume_parity`,
+  probe `D/d2/tt/probe/tt_zero.py`): NCBI `tblastn` and `tblastx` (the queries of `mv3t`) on
+  `mv3db` (alias `n`) with `v1.nsq` of 0 bytes (`empty`), and also the first sequence offset of
+  `v1` set to 0 (`zero`), without a list (`none`), with `-gilist` of GI 606 (`posv1first`, OID 5)
+  or GIs 606 and 607 (`posv1first2`), and with `-negative_gilist` of GI 601 (`negv0`), at 1, 2
+  and 4 threads. Columns: label, kind, list, program, threads, NCBI's exit status, standard
+  output and error files (`mv3z_o*.out`; `-` for none). NCBI maps the empty file as a null
+  pointer: a sequence at offset 0 has the length -1 (the multithreaded scan stops there, one
+  thread skips it), any other offset crashes (30 rows, refused by LOSAT). LOSAT matches 16 of the
+  18 other rows byte for byte; `mv3z_zero_posv1first_{tblastn,tblastx}_t1` (one thread skips
+  OID 5 and completes) are still refused (`MV3Z_OPEN`).

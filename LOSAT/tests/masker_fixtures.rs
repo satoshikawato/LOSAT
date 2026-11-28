@@ -1002,7 +1002,9 @@ fn blast_formatter_standard_output_failure_aborts() {
 /// blast_formatter where a stream of NCBI's fails: the rows of `tests/blast_formatter/streams.tsv`
 /// give NCBI's exit status, standard output and error (in LOSAT's words) and the file of `-out`.
 /// The file under a size limit fails where NCBI's buffer meets the limit (the pieces of the
-/// serial stream's tokens); a standard error that failed before standard output flushes no tie,
+/// serial stream's tokens: a Seq-annot's of `-outfmt 8`, the Blast4-archive's of `-outfmt 11`,
+/// whose failed `Close` ends the run or, where only its flush fails, posts and goes on); a
+/// standard error that failed before standard output flushes no tie,
 /// so the failure ends the run as on a file, where a good one's tie aborts it
 /// (`blast_formatter_standard_output_failure_aborts`). Needs `/dev/full`, `sh` and `prlimit`.
 #[cfg(target_os = "linux")]
@@ -1095,12 +1097,21 @@ fn blast_formatter_failed_streams_give_ncbis_results() {
                 "{name}: standard error"
             );
         }
+        // NCBI's file of `-out` in LOSAT's words (an archive's `ident`, exception 14), cut where
+        // the row's size limit cut NCBI's.
         let file = fs::read(out.join("o.txt")).ok();
-        assert_eq!(file, ncbi("o.txt").ok(), "{name}: the file of -out");
+        let want = ncbi("o.txt").ok().map(|bytes| {
+            let mut mapped = losat::wording::losat_output_bytes(&bytes).into_owned();
+            if let Ok(limit) = limit.parse::<usize>() {
+                mapped.truncate(limit);
+            }
+            mapped
+        });
+        assert_eq!(file, want, "{name}: the file of -out");
         fs::remove_dir_all(&out).unwrap();
         checked += 1;
     }
-    assert_eq!(checked, 3);
+    assert_eq!(checked, 5);
 }
 
 // `run_dustmasker`, `run_segmasker`, `run_windowmasker`, `run_convert2blastmask` and

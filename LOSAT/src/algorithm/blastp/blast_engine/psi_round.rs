@@ -11,9 +11,9 @@
 //! blastp's search of the FASTA query (with `-in_pssm` the PSSM search of the input PSSM), a later
 //! round the PSSM search (`algorithm::pssm_search`) of the PSSM that the engine made from the round
 //! before (`PsiSearch::from_engine`), whose query stays the round-1 query. The outfmt 0 to 4
-//! prolog is the driver's, before the first batch and so before a PSSM query's request and files
-//! (`write_pairwise_prologs`); the prologs that come with the first report come with the first
-//! call (`x_prolog`); every call writes no epilog, which the driver writes after the last query
+//! prolog and outfmt 20's line of the field names are the driver's, before the first batch and so
+//! before a PSSM query's request and files (`write_pairwise_prologs`); the prologs that come with
+//! the first report come with the first call (`x_prolog`); every call writes no epilog, which the driver writes after the last query
 //! (outfmt 7's count is that of the rounds). The PSSM files are written between
 //! the calls, where NCBI writes them, after the report of the round before (with `-in_pssm` the
 //! input PSSM before round 1, `algorithm::psiblast::in_pssm_files`).

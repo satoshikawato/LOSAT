@@ -695,7 +695,9 @@ fn a_search_space_overflow_is_refused_after_the_batches_before() {
 // Review M2 of item bp-SF1: a refusal that the call's first batch meets follows the prolog of
 // outfmt 0 to 4 (the program, the references and the database), which NCBI writes before it sets
 // the first batch up; outfmt 5 and 7 write nothing before it (rows `db.ak.bp.rej.l55.b1.*`,
-// `db.ak.bp.rej.nseq0.oldfsc.one.0`).
+// `db.ak.bp.rej.nseq0.oldfsc.one.0`). Outfmt 20's line of the field names comes before it too
+// (line RG F1c-2 fix 3): NCBI BLAST+ 2.17.0 writes and flushes it there, and its run of the count-0
+// case (`OLD_FSC=1`, `p_nseq0`, `q_hba.faa`) writes that line and then dies of SIGFPE.
 #[test]
 fn a_first_batch_refusal_follows_the_pairwise_prolog() {
     // The prolog ends before the first query's report, which starts with two line ends (NCBI's
@@ -728,9 +730,15 @@ fn a_first_batch_refusal_follows_the_pairwise_prolog() {
     ];
     for (db, env, near_query, query, refusal) in cases {
         let db = ["-db", db];
-        for outfmt in ["0", "3", "5", "7"] {
+        for outfmt in ["0", "3", "5", "7", "20"] {
             let before = match outfmt {
                 "0" | "3" => prolog(&search_in("blastp", near_query, &db, outfmt, 1, env)),
+                "20" => {
+                    let near = search_in("blastp", near_query, &db, outfmt, 1, env);
+                    assert_eq!(near.code, Some(0), "near run: {}", near.stderr);
+                    let end = near.stdout.find('\n').expect("the line of the field names");
+                    near.stdout[..=end].to_string()
+                }
                 _ => String::new(),
             };
             for blocks in BLOCKS {

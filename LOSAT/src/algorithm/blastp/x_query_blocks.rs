@@ -53,8 +53,8 @@
 //!   warnings come before its part in both (`QueryWarnings`, the block's reader messages).
 //! - what is not per query: the outfmt 0 prolog (the program, the `Database:` header of the
 //!   subject set or the database: fixed inputs) is written before the search, as on the reference
-//!   path (`write_pairwise_prologs`), and the other formats' prologs by the first block only
-//!   (`BlastpReports::x_prolog`); the outfmt 0 epilog (the database lines, the gapped
+//!   path (`write_pairwise_prologs`, with outfmt 20's line of the field names), and the other
+//!   formats' prologs by the first block only (`BlastpReports::x_prolog`); the outfmt 0 epilog (the database lines, the gapped
 //!   Karlin-Altschul and Gumbel blocks of the scoring and the database length, the options: fixed
 //!   inputs) by the last block only, as before; outfmt 7's last line counts the queries formatted
 //!   (NCBI's `m_QueriesFormatted`), so the last block adds the queries of the blocks before

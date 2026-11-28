@@ -186,8 +186,8 @@ fn karlin_blocks<const UNGAPPED: bool>(
             if !first_batch {
                 return Err(after_batch_reports(karlin_error(&message, empty_queries)));
             }
-            // The prologs that come with the first report (outfmt 0 to 4's were written before
-            // the search).
+            // The prologs that come with the first report (outfmt 0 to 4's and outfmt 20's were
+            // written before the search).
             let (outputs, output_formats) = outputs.expect(FIRST_BATCH_OUTPUTS);
             for (format, &output_format) in outputs.formats.iter_mut().zip(output_formats) {
                 if prolog_with_report(output_format) {

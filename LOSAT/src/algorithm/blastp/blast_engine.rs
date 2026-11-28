@@ -6406,8 +6406,8 @@ fn search(
     }
     // `PrintProlog`: outfmt 20's formatter warns here when its field list asks for a name of the
     // taxonomy database that it cannot find (`tabular::write_tabular_prolog_warning`); its line
-    // of the field names comes with the first report (or `write_pairwise_prologs`), after LOSAT's
-    // refusals.
+    // of the field names comes with outfmt 0 to 4's prolog (`write_pairwise_prologs`), after
+    // LOSAT's refusals of the set-up below and before those of a query batch or its report.
     for format in outputs.formats.iter() {
         if let Some(spec) = super::tabular::custom_tabular_spec(format.outfmt, args.app)
             .filter(|spec| spec.checks_taxdb())
@@ -6461,8 +6461,8 @@ fn search(
     if let Some(observer) = outputs.observer.as_deref_mut() {
         observer.queries_begin();
     }
-    // The outfmt 0 to 4 prolog, before the first batch is read and its request written
-    // (`write_pairwise_prologs`), as in every program.
+    // The outfmt 0 to 4 prolog and outfmt 20's line of the field names, before the first batch is
+    // read and its request written (`write_pairwise_prologs`), as in every program.
     write_pairwise_prologs(&args, subject_source, subject_label, outputs, true)?;
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`); with
     // `-in_pssm`, of the PSSM's query when the reports show its ids (`PsiSearch::query_record`).
@@ -6544,8 +6544,8 @@ fn search(
     // search writes the requests where its call ends, after the searches, which would hold the
     // reports). A batch that stops with LOSAT's refusal of an id is read first too.
     if batches.first_request_end().is_some() {
-        // NCBI's prologs come before that request (`StrategyExport::refused`): outfmt 0 to 4 was
-        // written before the search above; `false` writes the remaining formats' (XML2/JSON, 20).
+        // NCBI's prologs come before that request (`StrategyExport::refused`): outfmt 0 to 4's and
+        // outfmt 20's were written before the search above; `false` writes XML2/JSON's.
         let refused = crate::report::archive::strategy::StrategyExport::refused;
         if args.strategy.as_ref().is_some_and(refused) {
             write_pairwise_prologs(&args, subject_source, subject_label, outputs, false)?;
@@ -7998,15 +7998,16 @@ fn blastp_subject_tag(args: &ResolvedBlastpArgs, subject_label: &str) -> Vec<u8>
 // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:191-199
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
 /// Writes the prologs of the formats (`PrintProlog`). `before_search`: the outfmt 0 to 4 prolog
-/// (`blastp_pairwise_view_of`) of every sink (a library `File` sink is kept for the run,
-/// `api::local_blast::KeptFile`), where NCBI writes it in blastp, psiblast and rpsblast: before
-/// the first query batch and its search strategy request, so that the prolog's error (a malformed
-/// `./.ncbirc` under `-html`) and a failed write end the run there, before LOSAT's refusal of a
-/// strategy file on the report stream; written through `cli::NcbiOstream::sink`, whose `NcbiEndl`
-/// pair flushes NCBI's stream. Otherwise, for a run that stops at its first query batch, the
-/// prologs that come with the first report, written and flushed: the start of the XML2 and JSON
-/// documents, and outfmt 20's line of the field names (its formatter's warning came before the
-/// search, `search`).
+/// (`blastp_pairwise_view_of`) and outfmt 20's line of the field names
+/// (`report::tabular::write_field_names`; its formatter's warning came before, `search`) of every
+/// sink (a library `File` sink is kept for the run, `api::local_blast::KeptFile`), where NCBI
+/// writes them in blastp, psiblast and rpsblast: before the first query batch and its search
+/// strategy request, so that the prolog's error (a malformed `./.ncbirc` under `-html`) and a
+/// failed write end the run there, before LOSAT's refusal of a strategy file on the report stream;
+/// written through `cli::NcbiOstream::sink` and flushed as NCBI flushes its stream (the outfmt 0
+/// prolog's `NcbiEndl` pair, the destructor of outfmt 20's formatter). Otherwise, for a run that
+/// stops at its first query batch, the prologs that come with the first report, written and
+/// flushed: the start of the XML2 and JSON documents.
 fn write_pairwise_prologs(
     args: &ResolvedBlastpArgs,
     subject_source: BlastpSubjectSource<'_>,
@@ -8042,18 +8043,21 @@ fn write_pairwise_prologs(
                 }),
             )?;
             writer.flush()?;
+        } else if let (Some(spec), true) = (
+            super::tabular::custom_tabular_spec(format.outfmt, args.app),
+            before_search,
+        ) {
+            crate::report::tabular::write_field_names(
+                spec,
+                crate::blastinput::app::Program::Blastp,
+                &mut format.sink,
+            )?;
         } else if before_search {
             // The other formats' prologs come with the first report.
         } else if let Some(kind) = blastp_xml2_kind(format.outfmt) {
             // The XML2 and JSON documents start with their prolog too.
             let mut writer = format.sink.open()?;
             writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
-            writer.flush()?;
-        } else if let Some(spec) = super::tabular::custom_tabular_spec(format.outfmt, args.app)
-            .filter(|spec| spec.kind == crate::report::tabular::TabularKind::CsvWithHeader)
-        {
-            let mut writer = format.sink.open()?;
-            super::tabular::write_tabular_prolog(spec, &mut writer)?;
             writer.flush()?;
         }
     }
@@ -8090,8 +8094,9 @@ fn write_reports_without_queries(
             writer.flush()?;
             continue;
         }
-        // The custom tabular reports: outfmt 20's line of the field names, outfmt 7's count of 0
-        // queries (`tabular::write_tabular_without_queries`).
+        // The custom tabular reports: outfmt 7's count of 0 queries
+        // (`tabular::write_tabular_without_queries`; outfmt 20's line of the field names came
+        // before, `write_pairwise_prologs`).
         if let Some(spec) = super::tabular::custom_tabular_spec(format.outfmt, args.app) {
             let taxdb_found = spec.checks_taxdb()
                 && match subject_source.database() {
@@ -8903,8 +8908,8 @@ struct BlastpReports<'a> {
     identity_warned: usize,
     epilog: bool,
     /// EXPERIMENT (LOSAT_X_BPQBLOCK): whether the call's reports start with the prologs that
-    /// come with the first report (the start of the XML2 and JSON documents, the tabular
-    /// reports' header lines; outfmt 0 to 4's came before the search, `write_pairwise_prologs`):
+    /// come with the first report (the start of the XML2 and JSON documents; outfmt 0 to 4's and
+    /// outfmt 20's line of the field names came before the search, `write_pairwise_prologs`):
     /// false for the blocks after the first of the block search (`x_query_blocks.rs`).
     x_prolog: bool,
     /// EXPERIMENT (LOSAT_X_BPQBLOCK): the queries of the blocks before this one, which outfmt

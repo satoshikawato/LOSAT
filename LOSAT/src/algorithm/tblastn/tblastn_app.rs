@@ -1452,14 +1452,15 @@ fn run_local_formats(
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:270-280
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
 /// The prologs of the formats (`formatter.PrintProlog()`). `before_search`: the outfmt 0 to 4
-/// prolog of every sink (a library `File` sink is kept for the run,
-/// `api::local_blast::KeptFile`), where NCBI writes it: before it reads the first query batch and
-/// writes its search strategy request, so that the prolog's error (a malformed `./.ncbirc` under
-/// `-html`) and a failed write end the run there, before LOSAT's refusal of a strategy file on
-/// the report stream; written through `cli::NcbiOstream::sink`, whose `NcbiEndl` pair flushes
-/// NCBI's stream. Otherwise, for a run that fails in its first query batch, the prologs that come
-/// with the first report, written and flushed: the start of the XML2 and JSON documents, and
-/// outfmt 20's line of the field names with its formatter's warning. `subject_path` names a FASTA
+/// prolog and outfmt 20's line of the field names with its formatter's warning
+/// (`tabular::write_tabular_prolog`) of every sink (a library `File` sink is kept for the run,
+/// `api::local_blast::KeptFile`), where NCBI writes them: before it reads the first query batch
+/// and writes its search strategy request, so that the prolog's error (a malformed `./.ncbirc`
+/// under `-html`) and a failed write end the run there, before LOSAT's refusal of a strategy file
+/// on the report stream; written through `cli::NcbiOstream::sink` and flushed as NCBI flushes its
+/// stream (the outfmt 0 prolog's `NcbiEndl` pair, the destructor of outfmt 20's formatter).
+/// Otherwise, for a run that fails in its first query batch, the prologs that come with the first
+/// report, written and flushed: the start of the XML2 and JSON documents. `subject_path` names a FASTA
 /// subject set of `num_subjects` records (`subject_letters`); a database search shows its
 /// `Database:` lines (`database`).
 #[allow(clippy::too_many_arguments)]
@@ -1507,23 +1508,23 @@ pub(super) fn write_first_batch_prologs(
                 }),
             )?;
             writer.flush()?;
+        } else if let (Some(spec), true) =
+            (super::tabular::tabular_spec(format.outfmt), before_search)
+        {
+            // Outfmt 20's line of the field names and its formatter's warning (nothing for the
+            // other tabular kinds).
+            super::tabular::write_tabular_prolog(
+                &spec,
+                taxdb_found,
+                &mut format.sink,
+                &mut *outputs.diagnostics,
+            )?;
         } else if before_search {
             // The other formats' prologs come with the first report.
         } else if let Some(kind) = super::stage_e_report::xml2_kind(format.outfmt) {
             // The XML2 and JSON documents start with their prolog too.
             let mut writer = format.sink.open()?;
             writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
-            writer.flush()?;
-        } else if let Some(spec) = super::tabular::tabular_spec(format.outfmt) {
-            // Outfmt 20's line of the field names and its formatter's warning (nothing for the
-            // other tabular kinds).
-            let mut writer = format.sink.open()?;
-            super::tabular::write_tabular_prolog(
-                &spec,
-                taxdb_found,
-                &mut writer,
-                &mut *outputs.diagnostics,
-            )?;
             writer.flush()?;
         }
     }
@@ -1755,8 +1756,8 @@ fn search(
     } else {
         "TBLASTN"
     };
-    // The outfmt 0 to 4 prolog, before the first batch is read and its request written
-    // (`write_first_batch_prologs`), as in every program.
+    // The outfmt 0 to 4 prolog and outfmt 20's line of the field names, before the first batch is
+    // read and its request written (`write_first_batch_prologs`), as in every program.
     write_first_batch_prologs(
         outputs,
         subject_path.map(|path| path.as_path()),

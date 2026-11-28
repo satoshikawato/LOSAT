@@ -1,4 +1,5 @@
 use super::*;
+use crate::api::local_blast::OutputSink;
 use crate::report::tabular::taxdb_warning_line;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:348-357: outfmt 20's line of the field names, after the warning of its
@@ -14,7 +15,7 @@ fn outfmt_20_writes_its_line_and_its_formatter_s_warning() {
         spec("20 qseqid sscinames"),
         false,
         "tblastx",
-        &mut out,
+        &mut OutputSink::Writer(&mut out),
         &mut err,
     )
     .unwrap();
@@ -25,7 +26,7 @@ fn outfmt_20_writes_its_line_and_its_formatter_s_warning() {
         spec("20 delim=| qseqid"),
         true,
         "tblastx",
-        &mut out,
+        &mut OutputSink::Writer(&mut out),
         &mut err,
     )
     .unwrap();
@@ -34,7 +35,14 @@ fn outfmt_20_writes_its_line_and_its_formatter_s_warning() {
         (&b"qseqid\n"[..], &b""[..])
     );
     let (mut out, mut err) = (Vec::new(), Vec::new());
-    write_tabular_prolog(spec("10 sscinames"), false, "tblastx", &mut out, &mut err).unwrap();
+    write_tabular_prolog(
+        spec("10 sscinames"),
+        false,
+        "tblastx",
+        &mut OutputSink::Writer(&mut out),
+        &mut err,
+    )
+    .unwrap();
     assert!(out.is_empty() && err.is_empty());
 }
 

@@ -18,7 +18,7 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::report::db_subject::ParsedSubject;
 use crate::report::tabular::{
     DeflineIds, TabularField, TabularKind, TabularNames, TabularSpec, TabularSubject,
-    TabularTaxonomy, TabularWriter,
+    TabularTaxonomy,
 };
 use crate::seqdb::SeqDb;
 
@@ -674,12 +674,12 @@ pub(crate) fn tabular_taxonomy(
     Ok(taxonomy)
 }
 
-/// Writes outfmt 20's line of the field names (`PrintProlog`, before NCBI reads the first query
-/// batch), after the taxonomy database's warning of the formatter that NCBI makes for it when the
-/// field list checks it and `taxdb.bti` is not found (`x_CheckTaxDB`); nothing for the other
-/// kinds. `program` is the program's name in the warning (lower case), `program_version` the
-/// report's (`TBLASTN 2.17.0+`). A run that finds the taxonomy database writes no warning, so
-/// LOSAT's refusals (made before) come before the line.
+/// Writes outfmt 20's line of the field names on `sink` (`PrintProlog`, before NCBI reads the
+/// first query batch: `report::tabular::write_field_names`, flushed), after the taxonomy
+/// database's warning of the formatter that NCBI makes for it when the field list checks it and
+/// `taxdb.bti` is not found (`x_CheckTaxDB`); nothing for the other kinds. `program` is the
+/// program's name in the warning (lower case). The programs write it with outfmt 0 to 4's
+/// prolog, after LOSAT's refusals of the set-up and before those of a query batch or its report.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:348-357
 pub(crate) fn write_tabular_prolog(
@@ -687,19 +687,17 @@ pub(crate) fn write_tabular_prolog(
     taxdb_found: bool,
     program_kind: crate::blastinput::app::Program,
     program: &str,
-    program_version: &str,
-    writer: &mut dyn Write,
+    sink: &mut crate::api::local_blast::OutputSink<'_>,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
     if spec.kind != TabularKind::CsvWithHeader {
         return Ok(());
     }
     if let Some(line) = spec.formatter_warning(taxdb_found, program) {
-        writer.flush()?;
         diagnostics.write_all(line.as_bytes())?;
         diagnostics.flush()?;
     }
-    TabularWriter::new(spec, program_kind, program_version, None).prolog(writer)?;
+    crate::report::tabular::write_field_names(spec, program_kind, sink)?;
     Ok(())
 }
 

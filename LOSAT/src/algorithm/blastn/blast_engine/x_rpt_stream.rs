@@ -41,9 +41,8 @@
 //!   delimiter and outfmt 10 and 20 (`algorithm::blastn::tabular`) write per query like 6 and 7
 //!   (the delimiter and the kind change only how a row is written; `qcovs` and `qcovus` are a
 //!   query's and a subject's; the texts of the rows' lookups of the taxonomy database are a
-//!   taxid's), and outfmt 20's line of the field names comes with the first report
-//!   (`queries_before` 0: the first batch's call), or, where an error of NCBI's stops the first
-//!   batch, from `write_before_failed_batch` as without the switch. The texts of opening the
+//!   taxid's), and outfmt 20's line of the field names comes before the search in both paths
+//!   (`write_pairwise_prologs`, line RG F1c-2 fix 3). The texts of opening the
 //!   taxonomy database that a batch's rows keep (`TaxdbRun::open_for_rows`) go to the first
 //!   report call whose rows look a name up (`common::database::tabular_names`), as they go to the
 //!   first such row of the one call.

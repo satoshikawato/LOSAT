@@ -90,9 +90,9 @@ pub(super) fn subject_start_exception(
 }
 
 /// Writes what NCBI has written when `subject_start_exception` ends the run and the driver has not
-/// written before the search: the prolog of the format (`PrintProlog`: outfmt 20's field names,
-/// the opening of the XML2 and JSON documents) and nothing more. Outfmt 0 to 4's banner and
-/// database line were written before the search (`write_pairwise_prologs`), so the pairwise report,
+/// written before the search: the prolog of the format (`PrintProlog`: the opening of the XML2 and
+/// JSON documents) and nothing more. Outfmt 0 to 4's banner and database line and outfmt 20's
+/// field names were written before the search (`write_pairwise_prologs`), so the pairwise report,
 /// written for no query (`ReportView::prolog_only`), adds no byte. The BLAST archive's error
 /// document is the run's own (`write_run_error_archive`).
 ///
@@ -118,12 +118,6 @@ pub(super) fn write_exception_prolog(
             rows_of,
             None,
         ),
-        BlastpReport::CustomTabular(spec) => {
-            let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
-            crate::algorithm::blastp::tabular::write_tabular_prolog(spec, &mut writer)?;
-            writer.flush()?;
-            Ok(())
-        }
         BlastpReport::Xml2(kind) => {
             let mut writer = format.sink.open()?;
             if view.reports.x_prolog {
@@ -133,6 +127,7 @@ pub(super) fn write_exception_prolog(
             Ok(())
         }
         BlastpReport::Xml
+        | BlastpReport::CustomTabular(_)
         | BlastpReport::Text(_)
         | BlastpReport::Seqalign(_)
         | BlastpReport::Archive => Ok(()),

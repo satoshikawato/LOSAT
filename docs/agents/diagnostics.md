@@ -5394,8 +5394,8 @@ Scheduling (each value computed by one thread with the original function; order 
   query of 2^30 letters or more, whose refusals come after the reports of the batches before in both
   paths since line RG series D's follow-up of D1c-1c-b PR 2b) are gone. The tabular reports with a field list or a delimiter and outfmt 10 and 20 are
   streamed too (since 2026-11-03, NCMEM1; before, `off=custom_tabular`). Outfmt 20's line of the field names
-  comes with the first batch's
-  report (or, where an error of NCBI's stops the first batch, from the call of the off path). With `LOSAT_TIMING` the `[TIMING]` blocks are printed
+  comes before the search with outfmt 0's prolog, flushed (`write_pairwise_prologs`,
+  `report::tabular::write_field_names`; since line RG F1c-2 fix 3, before which it came with the first batch's report). With `LOSAT_TIMING` the `[TIMING]` blocks are printed
   when the loop takes a batch, as before, so with the switch a block comes after the query warnings of the
   batches before it (the same lines in another order). Memory: a batch's lists, flags, masks, blocks,
   search spaces and its queries' warnings are dropped after its write; kept for the whole search, as without

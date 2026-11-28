@@ -1,4 +1,5 @@
 use super::*;
+use crate::api::local_blast::OutputSink;
 use crate::report::tabular::taxdb_warning_line;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786: every tabular kind goes to `CBlastTabularInfo`; LOSAT's
@@ -36,11 +37,11 @@ fn only_a_field_list_a_delimiter_and_10_and_20_take_the_shared_writer() {
 fn outfmt_20_writes_its_line_and_its_formatter_s_warning() {
     let spec = tabular_spec("20 qseqid sscinames").unwrap();
     let (mut out, mut err) = (Vec::new(), Vec::new());
-    write_tabular_prolog(&spec, false, &mut out, &mut err).unwrap();
+    write_tabular_prolog(&spec, false, &mut OutputSink::Writer(&mut out), &mut err).unwrap();
     assert_eq!(out, b"qseqid,sscinames\n");
     assert_eq!(err, taxdb_warning_line("tblastn").as_bytes());
     let (mut out, mut err) = (Vec::new(), Vec::new());
-    write_tabular_prolog(&spec, true, &mut out, &mut err).unwrap();
+    write_tabular_prolog(&spec, true, &mut OutputSink::Writer(&mut out), &mut err).unwrap();
     assert_eq!(
         (out.as_slice(), err.as_slice()),
         (&b"qseqid,sscinames\n"[..], &b""[..])
@@ -49,7 +50,7 @@ fn outfmt_20_writes_its_line_and_its_formatter_s_warning() {
     write_tabular_prolog(
         &tabular_spec("10 sscinames").unwrap(),
         false,
-        &mut out,
+        &mut OutputSink::Writer(&mut out),
         &mut err,
     )
     .unwrap();

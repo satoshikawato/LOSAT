@@ -152,14 +152,15 @@ pub(super) fn tabular_spec(outfmt: impl AsRef<[u8]>) -> Option<TabularSpec> {
     )
 }
 
-/// Writes outfmt 20's line of the field names and its formatter's warning
-/// (`common::tabular::write_tabular_prolog`); nothing for the other kinds.
+/// Writes outfmt 20's line of the field names on `sink` and its formatter's warning
+/// (`common::tabular::write_tabular_prolog`), before the search
+/// (`tblastn_app::write_first_batch_prologs`); nothing for the other kinds.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:348-357
 pub(super) fn write_tabular_prolog(
     spec: &TabularSpec,
     taxdb_found: bool,
-    writer: &mut dyn Write,
+    sink: &mut crate::api::local_blast::OutputSink<'_>,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
     crate::algorithm::common::tabular::write_tabular_prolog(
@@ -167,8 +168,7 @@ pub(super) fn write_tabular_prolog(
         taxdb_found,
         crate::blastinput::app::Program::Tblastn,
         "tblastn",
-        PROGRAM_VERSION,
-        writer,
+        sink,
         diagnostics,
     )
 }
@@ -313,15 +313,8 @@ pub(super) fn write_tblastn_tabular(
         }
         Ok(())
     };
-    // Outfmt 20's line and its formatter's warning, before the first query's warnings (NCBI's
-    // `PrintProlog` comes before it reads the first query batch).
-    // (`render` gives the diagnostics wherever the warning is written.)
-    let mut no_diagnostics = std::io::sink();
-    let diagnostics: &mut dyn Write = match warnings.as_deref_mut() {
-        Some(warnings) => &mut *warnings.sink,
-        None => &mut no_diagnostics,
-    };
-    write_tabular_prolog(spec, tab.inputs.taxdb_found, writer, diagnostics)?;
+    // (Outfmt 20's line and its formatter's warning came before the search,
+    // `write_tabular_prolog`.)
     // The bytes of one comment block or one row, written to the report stream as soon as they
     // are made (as NCBI's insertions reach its stream): nothing of a query's report is held.
     let mut buf: Vec<u8> = Vec::new();

@@ -94,7 +94,6 @@ fn report(
         },
         unsearched: &[false, true],
         hits_found: None,
-        prolog: true,
         epilog: Some(2),
         taxdb_found: false,
         names: None,
@@ -149,8 +148,10 @@ fn rows_and_comment_lines_are_ncbis() {
     );
     let warning = taxdb_warning_line("psiblast");
     assert_eq!(err, format!("Warning: q1\n{warning}{warning}{warning}"));
+    // Outfmt 20's line of the field names is the driver's, before the search
+    // (`report::tabular::write_field_names`): the report writes the rows.
     let (out, _) = report(20, "qseqid evalue", BlastpApp::Blastp, &lists);
-    assert_eq!(out, "qseqid,evalue\nq1,1.00e-10\nq1,1.00e-10\n");
+    assert_eq!(out, "q1,1.00e-10\nq1,1.00e-10\n");
 }
 
 // NCBI 2.17.0 (line RG F/d36 probes bp.f20at, bp.f6at, ps.f20at, ps.f6at, ps.f7comma,

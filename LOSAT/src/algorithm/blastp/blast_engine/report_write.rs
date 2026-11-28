@@ -1379,7 +1379,6 @@ pub(super) fn write_custom_tabular(
         subjects: tabular_subjects,
         unsearched: no_alignment_set,
         hits_found: psiblast_hits_found.as_deref(),
-        prolog: reports.x_prolog,
         epilog: reports
             .epilog
             .then_some(reports.x_queries_before + query_titles.len()),
@@ -1418,14 +1417,10 @@ pub(super) fn write_custom_tabular(
     // tabular report of each of its occurrences in turn (`write_phi_text`), each as a report of
     // its own (the values of the batch's first query repeated for each of its occurrences, the
     // rows its query with letters', `PhiBatch`; without NCBI's Karlin block one result without a
-    // Seq-align set); outfmt 20's line of the field names once, and outfmt 7's last line counts 0
-    // queries. The texts of the subjects' loads are not written there (an open point of PS8a:
-    // they are keyed by query).
+    // Seq-align set); outfmt 7's last line counts 0 queries (outfmt 20's line of the field names
+    // came before the search, `write_pairwise_prologs`). The texts of the subjects' loads are not
+    // written there (an open point of PS8a: they are keyed by query).
     if let Some(phi) = phi.as_ref() {
-        // Outfmt 20's line of the field names is the prolog's, before the first query's messages.
-        if tab.prolog {
-            tabular::write_tabular_prolog(spec, &mut writer)?;
-        }
         for (batch_index, batch) in phi.call.batches.iter().enumerate() {
             if let Some(warnings) = warnings.as_mut() {
                 for q_idx in batch.queries.clone() {
@@ -1507,7 +1502,6 @@ pub(super) fn write_custom_tabular(
                 searched_lengths: &lengths,
                 unsearched: &unsearched,
                 hits_found: None,
-                prolog: false,
                 epilog: (reports.epilog && last).then_some(0),
                 ..tab
             };

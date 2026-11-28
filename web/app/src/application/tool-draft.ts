@@ -304,9 +304,19 @@ export class ToolDraft extends FastaToolDraft<ToolDraftState> {
     return [...this.fastaCheckInputs(state), ...(state.stage === 'mask' ? counts(state.ustatSource) : [])];
   }
 
-  /** A help or version word anywhere in the argv of the stage (`toolPrintsKind`), its input names left out. */
+  /**
+   * A help or version word anywhere in the argv of the stage (`toolPrintsKind`), its input names left out; of the words of
+   * Additional options alone where the argv cannot be built with them (a NUL; the check says why), as the Masking tab reads
+   * them, so that the count, the check and the press never throw here (R3 L1).
+   */
   protected printsKindOf(state: ToolDraftState, extra: readonly string[]): PrintedKind | null {
-    return toolPrintsKind(this.buildArgv(state, extra));
+    let argv: readonly string[];
+    try {
+      argv = this.buildArgv(state, extra);
+    } catch {
+      argv = ['windowmasker', ...extra];
+    }
+    return toolPrintsKind(argv);
   }
 
   protected async buildRequests(state: ToolDraftState, extra: readonly string[]): Promise<readonly ToolRequest[]> {

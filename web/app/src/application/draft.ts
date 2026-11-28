@@ -1462,6 +1462,9 @@ export class SearchDraft {
     try {
       argv = this.currentArgv();
     } catch {
+      // Words that the argv cannot be built with (a word that the form sets, `--`) start no run and print nothing: the
+      // answer for them, so that the line, the label and the press read one answer (the check says why; R3 M1).
+      this.noteStart(key, null);
       return;
     }
     this.askingStart = true;
@@ -1480,7 +1483,8 @@ export class SearchDraft {
    * for a search: the engine's latest answer of its start (`answered`), the answer that the count of runs (`runCount`) reads,
    * so that the line and the button's label change in one render (line WQA's D33, R2 L-c; `printsKind` waits for the
    * validation's pause). Between an edit and its answer the older answer stands, as it does for `printsKind` (D20 round 4);
-   * words that cannot be read print nothing (no run starts; the check says why).
+   * words that cannot be read, or that the argv cannot be built with (`askStart`), print nothing (no run starts; the check
+   * says why).
    */
   shownPrintsKind(): PrintedKind | null {
     return this.extraKey() === undefined ? null : (this.answered?.prints ?? null);
@@ -2454,7 +2458,8 @@ export class SearchDraft {
     try {
       argv = this.currentArgv();
     } catch (error) {
-      // No argv, so no start of one: the -conffile row goes with the words that named the file.
+      // No argv, so no start of one: the -conffile row goes with the words that named the file, and the words print nothing.
+      if (extraKey !== undefined) this.noteStart(extraKey, null);
       this.set({ validation: { state: 'invalid', message: messageOf(error) }, start: undefined });
       return;
     }

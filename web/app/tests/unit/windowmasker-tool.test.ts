@@ -326,6 +326,25 @@ describe('ToolDraft and SearchDraft.useCounts', () => {
     expect(submitted.at(-1)).toHaveLength(1);
   });
 
+  // Line WQA's D33 R3 (L1): words that the argv cannot be built with (a NUL) leave the count to the words alone, as the Masking tab
+  // reads them, and never throw (WindowMaskerPanel's computed reads the count); the check says why and the press starts nothing.
+  it('counts without throwing when the argv cannot be built with the words of Additional options (a NUL)', async () => {
+    const { draft, submitted } = setupDraft();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    draft.addFastaFiles([new File(['>a\nACGT\n'], 'a.fa'), new File(['>b\nTGCA\n'], 'b.fa')]);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    draft.setFastaMode('separate');
+    for (const [words, count] of [['-xyz a\0b', 2], ['-version a\0b', 1]] as const) {
+      draft.setExtra(words);
+      expect(draft.runCount(), JSON.stringify(words)).toBe(count);
+      await vi.waitFor(() =>
+        expect(draft.state.get().validation, JSON.stringify(words)).toMatchObject({ state: 'invalid', message: expect.stringContaining('NUL') }),
+      );
+      expect((await draft.submit()).ok, JSON.stringify(words)).toBe(false);
+    }
+    expect(submitted).toHaveLength(0);
+  });
+
   // Line WQA's D33 R2 (H2): a name that comes from a file reaches the argv as the run directory holds it, a space at its start or
   // end included, so the run opens it (and the shown command, quoted, runs on the command line with the same bytes): the FASTA
   // input, a file chosen for -ids, -ustat and Convert's -in. Only text that the user types is trimmed.

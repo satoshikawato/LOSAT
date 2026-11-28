@@ -1681,6 +1681,30 @@ describe('SearchDraft submit', () => {
     expect([draft.runCount(), draft.shownPrintsKind()]).toEqual([2, null]);
   });
 
+  // Line WQA's D33 R3 (M1): words that the argv cannot be built with (a word that the form sets, `--`) start no run and print
+  // nothing: the line under Run LOSAT no longer says the version of the words before them, at once and after the check.
+  it('shows no print for words that the argv cannot be built with, after -version', async () => {
+    const { draft } = setup({
+      start: (argv) => ({
+        ok: true,
+        start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: argv.includes('-version') ? 'version' : null, database: false },
+      }),
+    });
+    draft.addFiles('query', [file('a.fa', '>a\nACGT\n'), file('b.fa', '>b\nACGT\n')]);
+    draft.setPaste('subject', '>s\nACGT\n');
+    draft.setMode('query', 'separate');
+    for (const words of ['-out r.txt', '-mt_mode 1', '-version -out r.txt', '--']) {
+      draft.setExtra('-version');
+      await draft.idle();
+      expect([draft.runCount(), draft.shownPrintsKind(), draft.printsKind()], words).toEqual([1, 'version', 'version']);
+      draft.setExtra(words);
+      expect([draft.runCount(), draft.shownPrintsKind()], words).toEqual([2, null]);
+      await draft.idle();
+      expect([draft.runCount(), draft.shownPrintsKind(), draft.printsKind()], words).toEqual([2, null, null]);
+      expect(draft.state.get().validation.state, words).toBe('invalid');
+    }
+  });
+
   // Line WQA's D33 R1: a press in the gap between the word and the engine's answer starts the one run that prints (the
   // validation settles first), whatever the button said.
   it('starts one run for a print word pressed before the engine has answered', async () => {

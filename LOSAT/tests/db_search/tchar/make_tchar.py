@@ -24,11 +24,11 @@ NCBI BLAST+ 2.17.0's makeblastdb), the version 4 databases of `tests/db_search/t
   warns once; OID 1 such a byte; OID 2 a UTF8String with such a byte);
 - `tc_tax_p` / `tc_tax_n`: the subjects of `tc` with `-taxid 9606` (the loads' taxonomy lookups);
 - `tc_fam_p` / `tc_fam_n`: FAM (14 titles with such a byte in three families, one query each:
-  `tc_qbac`, `tc_qacb`, `tc_qaba`, the batches' order of NCBI's cache of 10 released sequences);
+  `tc_qabc`, `tc_qbac`, `tc_qacb`, `tc_qaba`, the batches' order of NCBI's cache of 10 released sequences);
 - `tc_du_p` / `tc_du_n`: DU (a UTF8String title, such a byte and a title NCBI cannot read, one query
   `tc_qdu` hits them in that order);
-- the queries `tc_q260` (BIG's OIDs 0 to 259 in one query) and `tc_qslotu` (BIG's OID 258 with OIDs
-  4 to 13, then OIDs 2 and 258);
+- the queries `tc_q260` (BIG's OIDs 0 to 259 in one query), `tc_qslotu` (BIG's OID 258 with OIDs
+  4 to 13, then OIDs 2 and 258) and `tc_qslotu1` (its first query);
 - the queries `tc_q1.faa` (one protein), `tc_q2.faa` (two), `tc_qslot.faa` (eight: OID 0's and OID
   256's letters, which read their slot in both orders, OID 2's, OID 258's and OID 2's again, OID 3's,
   BIG2's OID 215's and OID 3's again), `tc_qu8.faa` (U8's OID 0, then OID 1), and their
@@ -137,11 +137,14 @@ DATABASES = {"tc": SUBJECTS, "tc_b": DBB, "tc_big": BIG, "tc_big2": BIG2, "tc_x"
              "tc_ps": PS, "tc_u8": U8, "tc_tax": SUBJECTS, "tc_fam": FAM, "tc_du": DU}
 # More queries: one of the letters of BIG's OIDs 0 to 259 (a batch of 260 Seq-align ids, NCBI's prefetch in
 # pieces of 100, 100 and 60); BIG's OID 258 with OIDs 4 to 13 (11 loads, more than NCBI's cache of 10 keeps),
-# then OID 2 and OID 258 (OID 2 posts in the header cache slot of OID 258); the families in the orders B A C,
-# A C B and A B A; DU's v0 and v1 letters.
+# then OID 2 and OID 258 (OID 2 posts in the header cache slot of OID 258), and its first query alone (the
+# rows that LOSAT writes before it refuses the second batch); the families in the orders A B C, B A C, A C B and
+# A B A; DU's v0 and v1 letters.
 MORE_QUERIES = {
     "tc_q260": [(b"q260 big", "".join(BIG[i][2] for i in range(260)))],
     "tc_qslotu": [(b"qsu1 dee and ten", D + "".join(BIG[i][2] for i in range(4, 14))), (b"qsu2 cee dee", C + D)],
+    "tc_qslotu1": [(b"qsu1 dee and ten", D + "".join(BIG[i][2] for i in range(4, 14)))],
+    "tc_qabc": [FAM_QUERIES[c] for c in "ABC"],
     "tc_qbac": [FAM_QUERIES[c] for c in "BAC"],
     "tc_qacb": [FAM_QUERIES[c] for c in "ACB"],
     "tc_qaba": [FAM_QUERIES[c] for c in "ABA"],
@@ -193,9 +196,7 @@ def retag(path, titles, old, new):
     open(path, "wb").write(data)
 
 
-def main():
-    ncbi_bin = sys.argv[1]
-    stems = sys.argv[2:] or list(DATABASES)
+def write_queries():
     os.makedirs(HERE, exist_ok=True)
     for suffix, encode in ((".faa", lambda p: p), (".fna", nuc)):
         open(os.path.join(HERE, "tc_q1" + suffix), "wb").write(fasta([(QUERIES[0][0], encode(QUERIES[0][1]))]))
@@ -204,6 +205,12 @@ def main():
         open(os.path.join(HERE, "tc_qu8" + suffix), "wb").write(fasta([(t, encode(s)) for t, s in U8_QUERIES]))
         for name, records in MORE_QUERIES.items():
             open(os.path.join(HERE, name + suffix), "wb").write(fasta([(t, encode(s)) for t, s in records]))
+
+
+def main():
+    ncbi_bin = sys.argv[1]
+    stems = sys.argv[2:] or list(DATABASES)
+    write_queries()
     for stem in stems:
         subjects = DATABASES[stem]
         for mol, dbtype, encode in (("p", "prot", lambda p: p), ("n", "nucl", nuc)):

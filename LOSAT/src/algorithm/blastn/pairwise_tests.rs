@@ -293,7 +293,14 @@ fn masked_positions_are_lowercase_in_the_row_direction() {
     let mut row = b"AC-GT".to_vec();
     let mut masks = crate::report::query_anchored::HspMasks::default();
     let shown = subject_mask_seek([MaskedInterval { start: 7, end: 9 }].into_iter());
-    set_subject_row_masks(&mut masks, &row, 10, -1, &shown);
+    set_subject_row_masks(
+        &mut masks,
+        &row,
+        10,
+        -1,
+        &shown,
+        crate::report::query_anchored::NO_ROW,
+    );
     masks.lower_row(1, &mut row);
     assert_eq!(row, b"Ac-gT");
 }

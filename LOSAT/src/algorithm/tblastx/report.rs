@@ -1112,7 +1112,7 @@ impl<'a> PairwiseRows<'a> {
             record_frame(hsp.subject_frame > 0, hit.s_start - 1, subject_length) as i8;
         // The row holds its masks in lower case; the lists are left to the next row
         // (`query_anchored::output_seq`).
-        let subject = self
+        let subject_loc = self
             .pairs
             .matches(q_idx as u32, s_idx as u32)
             .then_some(SubjectRow {
@@ -1127,7 +1127,7 @@ impl<'a> PairwiseRows<'a> {
             low,
             high,
             &self.query_masks[q_idx],
-            subject,
+            subject_loc,
             row_masks,
         );
         hit.num_ident = identities;

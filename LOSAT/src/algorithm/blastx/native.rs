@@ -154,6 +154,7 @@ fn run_inner(
     output: &mut Option<crate::cli::NcbiOstream<'static>>,
     archive_slot: &mut Option<crate::report::archive::ArchiveHandle>,
     strategy_slot: &mut Option<crate::report::archive::strategy::StrategyExport>,
+    held_slot: &mut Option<super::blast_xml::HeldOutput>,
 ) -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1044
     // NCBI's application layer reads its environment and registry files before blastx's own
@@ -334,6 +335,8 @@ fn run_inner(
         debug_assert!(archive.is_none());
         stderr = Box::new(held.stderr(Box::new(crate::cli::CliStderr::process())));
     }
+    // The caller writes it when the run ends with an error (`HeldOutput::end_with_error`).
+    held_slot.clone_from(&held);
     // The run keeps its output in the caller's slot: an error of NCBI's own is followed by the
     // error archive in the same output (`run`).
     let writer = output.insert(stream);
@@ -2518,7 +2521,22 @@ pub fn run(
     let mut output: Option<crate::cli::NcbiOstream<'static>> = None;
     let mut archive: Option<crate::report::archive::ArchiveHandle> = None;
     let mut strategy = None;
-    let result = run_inner(args, settings, &mut output, &mut archive, &mut strategy);
+    let mut held = None;
+    let result = run_inner(
+        args,
+        settings,
+        &mut output,
+        &mut archive,
+        &mut strategy,
+        &mut held,
+    );
+    // A held document that the error does not drop is written with the posts queued in it, whose
+    // marks release the search strategy requests that NCBI wrote before the error (a batch's
+    // search error after its request: rpstblastn's composition-based statistics with outfmt 5,
+    // 15 and 16).
+    if let (Err(_), Some(held)) = (&result, held.take()) {
+        held.end_with_error();
+    }
     // A post of the search strategy left unwritten is LOSAT's internal error (`end_run`).
     let result = crate::report::archive::strategy::end_run(strategy.as_ref(), result);
     // `~CBlastFormat` and `CATCH_ALL`: a failed report ends the run as NCBI's does.

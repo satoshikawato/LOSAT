@@ -600,6 +600,14 @@ impl HeldOutput {
         state.drain_stderr_on_discard();
     }
 
+    /// Writes what the run held when it ends with an error (`HeldState::write_unless_discarded`),
+    /// before the run's search strategy ends (`strategy::end_run`, which drops the requests that
+    /// no post released): NCBI wrote the requests of the batches whose posts are queued here
+    /// (`push_posts`) before the error.
+    pub(super) fn end_with_error(&self) {
+        self.0.borrow_mut().write_unless_discarded();
+    }
+
     /// Writes what is held and passes the bytes on again: the side files first (in order), then
     /// the master file. A side file that cannot be opened stops the run there, as NCBI's does
     /// (`Cannot open output file`, exit status 1): the side files before it stay and the master
@@ -690,8 +698,12 @@ impl crate::report::ostream::ReportWrite for HeldOutput {
     }
 }
 
-impl Drop for HeldState {
-    fn drop(&mut self) {
+impl HeldState {
+    /// Writes what is held, with the texts and the search strategy posts queued with it, unless
+    /// the run dropped it (`HeldOutput::discard`): a run that ends with any other error leaves the
+    /// bytes of the batches before it, as NCBI's run does. A failure to write is the report
+    /// stream's own (`ReportStream::finish`).
+    fn write_unless_discarded(&mut self) {
         let texts = self
             .stderr
             .as_ref()
@@ -699,6 +711,12 @@ impl Drop for HeldState {
         if !self.discarded && (!self.held.is_empty() || texts) {
             let _ = self.write_held();
         }
+    }
+}
+
+impl Drop for HeldState {
+    fn drop(&mut self) {
+        self.write_unless_discarded();
     }
 }
 

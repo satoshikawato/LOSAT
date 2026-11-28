@@ -8315,7 +8315,7 @@ fn preliminary_search_error(
 /// (`phi_hooks::PhiStart::EngineError`). psiblast searches one query with letters per batch, and
 /// PHI-BLAST searches every batch (`phi_hooks::phi_lookup`): the first batch's error follows the
 /// prolog (`preliminary_search_error`); a later batch's follows the reports of the batches before
-/// it, without the epilog (`reports_then_engine_error`).
+/// it, without the epilog (`reports_then_batch_error`).
 #[allow(clippy::too_many_arguments)]
 fn phi_setup_error(
     args: &ResolvedBlastpArgs,
@@ -8355,7 +8355,7 @@ fn phi_setup_error(
             text.as_bytes(),
         );
     }
-    reports_then_engine_error(
+    reports_then_batch_error(
         args,
         query_records,
         subject_source,
@@ -8365,7 +8365,7 @@ fn phi_setup_error(
         ranges,
         reports,
         batch,
-        text.as_bytes(),
+        crate::blastinput::app::engine_error(text.as_bytes()),
     )
 }
 
@@ -8804,7 +8804,7 @@ fn unsearched_batches_then_engine_error(
             args.app.name()
         );
     };
-    reports_then_engine_error(
+    reports_then_batch_error(
         args,
         query_records,
         subject_source,
@@ -8814,15 +8814,18 @@ fn unsearched_batches_then_engine_error(
         ranges,
         reports,
         batch,
-        text,
+        crate::blastinput::app::engine_error(text),
     )
 }
 
-/// The engine error of the search of `batch` (`text`, `unsearched_batches_then_engine_error`),
-/// after the reports of the batches before it, which the search of that prefix of the queries
-/// writes without the epilog.
+/// NCBI's `error` of the search of `batch`, which is not the call's first searched batch: an
+/// engine error (`unsearched_batches_then_engine_error`, `phi_setup_error`) or the Seq-loc
+/// mapper's exception of a `-subject` search (`empty_alignments::subject_start_exception`). It
+/// follows the reports of the batches before it, which the search of that prefix of the queries
+/// writes without the epilog, then the batch's reader messages and its search strategy request
+/// with NCBI's posts of the bytes replaced in it (NCBI writes the request before the search).
 #[allow(clippy::too_many_arguments)]
-fn reports_then_engine_error(
+fn reports_then_batch_error(
     args: &ResolvedBlastpArgs,
     query_records: &[FastaRecord],
     subject_source: BlastpSubjectSource<'_>,
@@ -8832,7 +8835,7 @@ fn reports_then_engine_error(
     ranges: &BlastpRanges<'_>,
     reports: &BlastpReports<'_>,
     batch: &seq_range::RangedBatch,
-    text: &[u8],
+    error: anyhow::Error,
 ) -> anyhow::Error {
     let (searched_end, input_end) = (batch.searched.start, batch.input.start);
     let input = ranges.query_input;
@@ -8911,7 +8914,7 @@ fn reports_then_engine_error(
     if let Err(error) = write_request_posts(args, &mut *outputs.diagnostics) {
         return error;
     }
-    crate::blastinput::app::engine_error(text)
+    error
 }
 
 /// What the reports of the searched batches need besides the search: the reader's
@@ -10957,7 +10960,7 @@ fn run_call(
         crate::blastinput::app::ErrorAfterBatchReports::after_reads(error, reads.utf8())
     })?;
     // An ungapped HSP of length 0 at the first letter of a `-subject`'s searched part ends the call
-    // with NCBI's exception after the formats' prologs (`empty_alignments`).
+    // with NCBI's exception in the search of its query's batch (`empty_alignments`).
     let subject_start_exception = empty_alignments::subject_start_exception(
         &hit_lists,
         ranges.subject_placements,
@@ -10976,6 +10979,32 @@ fn run_call(
         &ranges.query_input.placements,
     )?;
     unreportable?;
+    // The batch whose search throws `subject_start_exception`. A batch after the call's first
+    // follows the reports of the batches before it (`reports_then_batch_error`); the call's first
+    // follows the formats' prologs (`ReportView::prolog_only`), then its reader messages and its
+    // search strategy request (below).
+    let subject_start_batch = subject_start_exception.as_ref().map(|thrown| {
+        query_batches
+            .iter()
+            .find(|batch| batch.searched.contains(&thrown.query))
+            .expect("every query is in a batch")
+    });
+    if let (Some(thrown), Some(batch)) = (&subject_start_exception, subject_start_batch) {
+        if batch.searched.start > 0 {
+            return Err(reports_then_batch_error(
+                &args,
+                query_records,
+                subject_source,
+                subject_label,
+                outputs,
+                blastp_parallel_pool,
+                ranges,
+                reports,
+                batch,
+                crate::cli::NativeError::exception(&thrown.exception).into(),
+            ));
+        }
+    }
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPQBLOCK): the block
     // search's IDs made once for all blocks (`x_subject_meta`).
@@ -11159,18 +11188,20 @@ fn run_call(
     // The search strategy's requests of the call's batches (`-export_search_strategy`): NCBI has
     // written every one of them before it formats them, so they are written here (`CallRequests`;
     // a matrix name that the XML formats do not know stops them after the batch whose formatting
-    // fails, `search`).
+    // fails, `search`), or up to the batch whose search throws `subject_start_exception`.
     if let Some(call) = reports.call_requests {
-        call.end_at(query_records.len())?;
+        call.end_at(subject_start_batch.map_or(query_records.len(), |batch| batch.searched.end))?;
     }
     // The posts before each query's report: NCBI's posts of the bytes replaced in the search
     // strategy request of each of the call's batches follow the reader's messages of the batch
     // (after psiblast's warnings of the PSSM reads of the query before), in its first query
-    // (`query_warnings::query_posts`).
+    // (`query_warnings::query_posts`). Those of the batch whose search throws follow its reader
+    // messages after the formats' prologs (below).
     let mut query_posts = crate::report::query_warnings::query_posts(
         query_warning_lines,
         reports
             .call_requests
+            .filter(|_| subject_start_batch.is_none())
             .map_or_else(Vec::new, CallRequests::take_posts),
         prefetched.posts,
         |query| reports.reader_warnings.get(query).map_or(0, Vec::len),
@@ -11350,9 +11381,20 @@ fn run_call(
     // Diagnostic (LOSAT_TIMING): the same interval for the common line (utils/xtiming.rs): the
     // formatting and writing of every report, after the search. No NCBI counterpart.
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, output_format_start);
-    if let Some(exception) = subject_start_exception {
-        output_result =
-            output_result.and(Err(crate::cli::NativeError::exception(&exception).into()));
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
+    // NCBI read the batch (its reader messages) and wrote its search strategy request (NCBI's
+    // posts of the bytes replaced in it, `write_request_posts`) before the search that throws.
+    if let (Some(thrown), Some(batch)) = (subject_start_exception, subject_start_batch) {
+        output_result = output_result
+            .and_then(|()| {
+                if let Some(messages) = reports.reader_warnings.get(batch.searched.start) {
+                    outputs.diagnostics.write_all(messages)?;
+                }
+                write_request_posts(&args, &mut *outputs.diagnostics)
+            })
+            .and(Err(
+                crate::cli::NativeError::exception(&thrown.exception).into()
+            ));
     }
     output_result?;
     pssm_posts_after.write(&mut *outputs.diagnostics, args.archive.as_ref())?;

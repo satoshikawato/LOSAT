@@ -8,8 +8,9 @@
 //!   (NCBI crashes), which LOSAT refuses by name where `query_anchored::section_frees` finds it
 //!   (`refuse_merge_frees`);
 //! - `-subject`: an HSP at the first letter of the searched part of a subject makes the Seq-loc
-//!   mapper throw an exception before any query's report (`subject_start_exception`), with the
-//!   formats' prologs before it (`write_exception_prolog`).
+//!   mapper throw an exception in the search of its query's batch (`subject_start_exception`),
+//!   after the reports of the batches before it, or with the formats' prologs before it in the
+//!   call's first batch (`write_exception_prolog`).
 
 use std::collections::BTreeSet;
 use std::io::Write;
@@ -64,34 +65,51 @@ fn bad_alignment() -> NcbiException {
     )
 }
 
+/// `subject_start_exception`: NCBI's exception and where NCBI throws it.
+pub(super) struct SubjectStartException {
+    /// The first of the call's queries whose final hit list shows such an HSP: NCBI throws in the
+    /// search of its batch, after the batch's search strategy request and the reports of the
+    /// batches before it.
+    pub(super) query: usize,
+    pub(super) exception: NcbiException,
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1541-1547
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:1403-1437
 /// The exception that ends a `-subject` search (also with `-subject_loc`) whose final hit lists
 /// show an HSP of length 0 at the first letter of the searched part of its subject: NCBI's
 /// `s_RemapToSubjectLoc` maps each subject's Dense-diags into the subject's record, and the row
-/// of a segment of length 0 at start 0 wraps. It is thrown for the first such HSP while the
-/// results are made, before any query's report. `hit_lists` are in record coordinates
-/// (`shift_hsp_to_records`), `placements` the subjects' searched parts; a database search maps
-/// nothing.
+/// of a segment of length 0 at start 0 wraps. It is thrown while the results of the first batch
+/// with such an HSP are made, before that batch's reports. `hit_lists` (one per query of the
+/// call) are in record coordinates (`shift_hsp_to_records`), `placements` the subjects' searched
+/// parts; a database search maps nothing.
 pub(super) fn subject_start_exception(
     hit_lists: &[Option<BlastpHitList>],
     placements: &Placements,
     subject_set: bool,
-) -> Option<NcbiException> {
+) -> Option<SubjectStartException> {
     if !subject_set {
         return None;
     }
     hit_lists
         .iter()
-        .flatten()
-        .flat_map(shown_hsps)
-        .any(|hsp| hsp.length == 0 && hsp.s_start - 1 == placements.offset(hsp.s_idx as usize))
-        .then(bad_alignment)
+        .position(|hit_list| {
+            hit_list.as_ref().is_some_and(|list| {
+                shown_hsps(list).any(|hsp| {
+                    hsp.length == 0 && hsp.s_start - 1 == placements.offset(hsp.s_idx as usize)
+                })
+            })
+        })
+        .map(|query| SubjectStartException {
+            query,
+            exception: bad_alignment(),
+        })
 }
 
-/// Writes what NCBI has written when `subject_start_exception` ends the run and the driver has not
-/// written before the search: the prolog of the format (`PrintProlog`: the opening of the XML2 and
-/// JSON documents) and nothing more. Outfmt 0 to 4's banner and database line and outfmt 20's
+/// Writes what NCBI has written when `subject_start_exception` ends the run in the call's first
+/// batch and the driver has not written before the search: the prolog of the format
+/// (`PrintProlog`: the opening of the XML2 and JSON documents) and nothing more (the batch's
+/// reader messages and its search strategy request follow, `run_call`). Outfmt 0 to 4's banner and database line and outfmt 20's
 /// field names were written before the search (`write_pairwise_prologs`), so the pairwise report,
 /// written for no query (`ReportView::prolog_only`), adds no byte. The BLAST archive's error
 /// document is the run's own (`write_run_error_archive`).

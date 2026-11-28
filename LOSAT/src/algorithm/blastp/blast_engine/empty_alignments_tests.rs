@@ -50,12 +50,15 @@ fn lists(hsps: Vec<BlastpHsp>) -> Vec<Option<BlastpHitList>> {
 #[test]
 fn a_length_zero_hsp_at_the_start_of_a_subject_throws_the_mappers_exception() {
     let root = crate::ncbi_exception::NCBI_BUILD_ROOT;
-    let exception = subject_start_exception(
+    let thrown = subject_start_exception(
         &lists(vec![hsp((5, 4), (1, 0), 0)]),
         &Placements::default(),
         true,
     )
     .expect("an HSP of length 0 at the first letter");
+    // The second query's list shows it: NCBI throws in the search of that query's batch.
+    assert_eq!(thrown.query, 1);
+    let exception = thrown.exception;
     // LOSAT's words of NCBI's text (`crate::wording`, as `what` gives it).
     let ncbi = format!(
         "NCBI C++ Exception:\n    T0 \"{root}/src/objects/seq/seq_align_mapper_base.cpp\", line 1292: Error: (CAnnotMapperException::eBadAlignment) Mapped alignment contains gaps and can not be converted to dense-diag.\n"

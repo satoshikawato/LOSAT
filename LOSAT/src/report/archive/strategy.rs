@@ -467,18 +467,18 @@ fn not_in_the_browser(path: &Path, what: &str) -> String {
 /// and no `-out`), the file that the command line on Linux makes of the name in the run's
 /// directory (`RunFiles::strategy_target`, read against the run's files as `-logfile` and a tool's
 /// output are), in the run's file in memory (`ReceivedFile`) under the command line's file name
-/// (`s.asn` for `./s.asn` and `in/../s.asn`; line RG item F1w-r2), with the command line's error
-/// and refusals: NCBI's error at once for a name that the command line cannot open (a folder that
-/// the run's files do not have, a folder of them, a name in a directory of root's); `-` and the
-/// standard output (`/dev/stdout`), which the run does not have (its report is the caller's),
-/// refused at NCBI's first request; no file for the null device
-/// (`/dev/null`, `/dev/stdin`). LOSAT Web refuses, at the same point, a name whose command line
-/// run writes where the run has no file: the standard error, a device whose writes fail or wait
-/// for a reader, a file of the system (procfs, a message queue), the file of another option of the
-/// run (`others`: `-query`, `-subject`, the PSSM files, `-logfile`, `-window_masker_db`, the files
-/// that the search reads from the run's folder, `web_adapter::open_strategy_file`), whose bytes
-/// the command line's strategy file replaces or mixes with its own, and any other file of the
-/// run's files or file that the search reads, which LOSAT Web does not write.
+/// (`s.asn` for `./s.asn` and `in/../s.asn`; line RG item F1w-r2), with the command line's error:
+/// NCBI's error at once for a name that the command line cannot open (a folder that the run's files
+/// do not have, a folder of them, a name in a directory of root's); LOSAT Web's refusal, at NCBI's
+/// first request, of `-` and the standard output (`/dev/stdout`), which the run does not have (its
+/// report is the caller's); no file for the null device (`/dev/null`, `/dev/stdin`). LOSAT Web
+/// refuses, at the same point, a name whose command line run writes where the run has no file: the
+/// standard error, a device whose writes fail or wait for a reader, a file of the system (procfs, a
+/// message queue), the file of another option of the run (`others`: `-query`, `-subject`, the PSSM
+/// files, `-logfile`, `-window_masker_db`, the files that the search reads from the run's folder,
+/// `web_adapter::open_strategy_file`), whose bytes the command line's strategy file replaces or
+/// mixes with its own, and any other file of the run's files or file that the search reads, which
+/// LOSAT Web does not write.
 pub fn create_strategy_file_in(
     files: &RunFiles,
     path: &Path,
@@ -534,20 +534,20 @@ pub fn create_strategy_file_in(
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:250-262 (the same order in
 // blastn_app.cpp:255-282, blastx_app.cpp:251-264, tblastn_app.cpp:267-280, tblastx_app.cpp:170-181,
 // psiblast_app.cpp:503-517 and :340, rpsblast_app.cpp:188-199, rpstblastn_app.cpp:185-196)
-/// LOSAT's refusal of the run's strategy file (`create_strategy_file_in`: `-`, standard output, or
-/// non-run files in LOSAT Web), raised where NCBI writes its first request: after its formatter
-/// and its prolog, once the first batch is read and before it is searched (`SaveSearchStrategy`).
-/// Every stop of NCBI's before that point (an empty query, a database or option error, a query
-/// that cannot be read, a bad `BATCH_SIZE`, psiblast's `-in_pssm` with `-subject`, a device
-/// that fails at the prolog's flush) comes first with NCBI's own bytes, because the run's report
-/// stream is NCBI's until here. Here the stream makes NCBI's writes so far while the formatter
-/// lives (`RequestPoint::make_writes`): a write that fails ends the run as NCBI's failed write
-/// ends it (`BLAST failed to write output`, exit code 6, on `/dev/full`), before any request.
-/// Otherwise the run refuses; what the stream holds then is written before the refusal, as at
-/// LOSAT's other refusals (NCBI's prolog, which NCBI writes before its request too). The
-/// programs call it where they make the first batch's request (`StrategyExport::write_with`
-/// calls it too, so no request is ever written to such a file) and, where they write that
-/// request after searching, at NCBI's point (BLASTP's `search`).
+/// LOSAT Web's refusal of the run's strategy file (`create_strategy_file_in`: `-`, the standard
+/// output, or a file that is not the run's), raised where NCBI writes its first request: after its
+/// formatter and its prolog, once the first batch is read and before it is searched
+/// (`SaveSearchStrategy`). Every stop of NCBI's before that point (an empty query, a database or
+/// option error, a query that cannot be read, a bad `BATCH_SIZE`, psiblast's `-in_pssm` with
+/// `-subject`, a device that fails at the prolog's flush) comes first with NCBI's own bytes,
+/// because the run's report stream is NCBI's until here. Here the stream makes NCBI's writes so far
+/// while the formatter lives (`RequestPoint::make_writes`): a write that fails ends the run as
+/// NCBI's failed write ends it (`BLAST failed to write output`, exit code 6, on `/dev/full`),
+/// before any request. Otherwise the run refuses; what the stream holds then is written before the
+/// refusal, as at LOSAT's other refusals (NCBI's prolog, which NCBI writes before its request too).
+/// The programs call it where they make the first batch's request (`StrategyExport::write_with`
+/// calls it too, so no request is ever written to such a file) and, where they write that request
+/// after searching, at NCBI's point (BLASTP's `search`).
 pub fn check_report_stream(strategy: Option<&StrategyExport>) -> Result<()> {
     let Some(strategy) = strategy else {
         return Ok(());

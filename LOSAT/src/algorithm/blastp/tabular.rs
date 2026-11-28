@@ -173,6 +173,7 @@ impl<'a> SubjectValues<'a> {
     fn thrown(
         subject: &ParsedSubject,
         exception: &'a crate::ncbi_exception::NcbiException,
+        length: usize,
     ) -> Self {
         SubjectValues {
             id: &[],
@@ -181,7 +182,11 @@ impl<'a> SubjectValues<'a> {
             gi: 0,
             all_ids: Vec::new(),
             titles: None,
-            length: 0,
+            length: if subject.bioseq_load_throws() {
+                length
+            } else {
+                0
+            },
             taxonomy: Cow::Owned(TabularTaxonomy::default()),
             failed: Some(FailedValues::thrown(subject, exception)),
         }
@@ -391,7 +396,12 @@ impl<'a> TabularSubjects<'a> {
                     loads.thrown(s_idx),
                     parsed.get(s_idx).and_then(Option::as_deref),
                 ) {
-                    return Ok(SubjectValues::thrown(subject, exception));
+                    let slen = if shows_length && subject.bioseq_load_throws() {
+                        length(s_idx)
+                    } else {
+                        0
+                    };
+                    return Ok(SubjectValues::thrown(subject, exception, slen));
                 }
                 // `None`: the lookup throws (`common::tabular::SubjectId`).
                 let found = ids.get(s_idx).and_then(Option::as_deref);

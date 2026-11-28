@@ -1,0 +1,138 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: pdbndual
+           4 sequences; 2,640 total letters
+
+
+
+Query= pdq query of the duplicated record
+
+Length=220
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AB600003.1 after                                                      464     2e-173
+AB600001.1 first                                                      462     7e-173
+1AB1_A Unknown                                                        462     9e-173
+AB600004.1 alt                                                        15.8    2.8   
+
+
+>AB600003.1 after
+Length=660
+
+ Score = 464 bits (1194),  Expect = 2e-173, Method: Compositional matrix adjust.
+ Identities = 219/220 (99%), Positives = 220/220 (100%), Gaps = 0/220 (0%)
+ Frame = +1
+
+Query  1    MNQDKEFGQDAYVPTEFFDNGDCRSWSFHGWHTYDTLKGWIYECMPHEKRKEWAFLNAWH  60
+            MNQDKEFGQDAYVPTEFFDNGDCRSWSFHG+HTYDTLKGWIYECMPHEKRKEWAFLNAWH
+Sbjct  1    MNQDKEFGQDAYVPTEFFDNGDCRSWSFHGYHTYDTLKGWIYECMPHEKRKEWAFLNAWH  180
+
+Query  61   TLTYKTGHRSHCDRYCIFFGHAFPIPGMSHMPFCPPGGGEPSARQTIANFNVYKSIVFYC  120
+            TLTYKTGHRSHCDRYCIFFGHAFPIPGMSHMPFCPPGGGEPSARQTIANFNVYKSIVFYC
+Sbjct  181  TLTYKTGHRSHCDRYCIFFGHAFPIPGMSHMPFCPPGGGEPSARQTIANFNVYKSIVFYC  360
+
+Query  121  HWMSWCPCTTDYASASPAGTCQHWDCVKFEKCIREVYFLPHTSYAPWDVQRFFFKWDSSM  180
+            HWMSWCPCTTDYASASPAGTCQHWDCVKFEKCIREVYFLPHTSYAPWDVQRFFFKWDSSM
+Sbjct  361  HWMSWCPCTTDYASASPAGTCQHWDCVKFEKCIREVYFLPHTSYAPWDVQRFFFKWDSSM  540
+
+Query  181  CHMYAMEWMPDMVDDLRKNKQQNGHDCRFVFRALTTEVPM  220
+            CHMYAMEWMPDMVDDLRKNKQQNGHDCRFVFRALTTEVPM
+Sbjct  541  CHMYAMEWMPDMVDDLRKNKQQNGHDCRFVFRALTTEVPM  660
+
+
+ Score = 18.1 bits (35),  Expect = 0.60, Method: Compositional matrix adjust.
+ Identities = 7/14 (50%), Positives = 9/14 (64%), Gaps = 0/14 (0%)
+ Frame = -1
+
+Query  5   KEFGQDAYVPTEFF  18
+           +EFG+   V  EFF
+Sbjct  54  EEFGRHVSVLAEFF  13
+
+
+>AB600001.1 first
+Length=660
+
+ Score = 462 bits (1190),  Expect = 7e-173, Method: Compositional matrix adjust.
+ Identities = 219/220 (99%), Positives = 219/220 (99%), Gaps = 0/220 (0%)
+ Frame = +1
+
+Query  1    MNQDKEFGQDAYVPTEFFDNGDCRSWSFHGWHTYDTLKGWIYECMPHEKRKEWAFLNAWH  60
+            MNQDKEFGQD YVPTEFFDNGDCRSWSFHGWHTYDTLKGWIYECMPHEKRKEWAFLNAWH
+Sbjct  1    MNQDKEFGQDWYVPTEFFDNGDCRSWSFHGWHTYDTLKGWIYECMPHEKRKEWAFLNAWH  180
+
+Query  61   TLTYKTGHRSHCDRYCIFFGHAFPIPGMSHMPFCPPGGGEPSARQTIANFNVYKSIVFYC  120
+            TLTYKTGHRSHCDRYCIFFGHAFPIPGMSHMPFCPPGGGEPSARQTIANFNVYKSIVFYC
+Sbjct  181  TLTYKTGHRSHCDRYCIFFGHAFPIPGMSHMPFCPPGGGEPSARQTIANFNVYKSIVFYC  360
+
+Query  121  HWMSWCPCTTDYASASPAGTCQHWDCVKFEKCIREVYFLPHTSYAPWDVQRFFFKWDSSM  180
+            HWMSWCPCTTDYASASPAGTCQHWDCVKFEKCIREVYFLPHTSYAPWDVQRFFFKWDSSM
+Sbjct  361  HWMSWCPCTTDYASASPAGTCQHWDCVKFEKCIREVYFLPHTSYAPWDVQRFFFKWDSSM  540
+
+Query  181  CHMYAMEWMPDMVDDLRKNKQQNGHDCRFVFRALTTEVPM  220
+            CHMYAMEWMPDMVDDLRKNKQQNGHDCRFVFRALTTEVPM
+Sbjct  541  CHMYAMEWMPDMVDDLRKNKQQNGHDCRFVFRALTTEVPM  660
+
+
+ Score = 16.9 bits (32),  Expect = 1.2, Method: Compositional matrix adjust.
+ Identities = 7/14 (50%), Positives = 9/14 (64%), Gaps = 0/14 (0%)
+ Frame = -1
+
+Query  5   KEFGQDAYVPTEFF  18
+           +EFG+   V  EFF
+Sbjct  54  EEFGRHVPVLAEFF  13
+
+
+Sequence with id 1AB1_A no longer exists in database...alignment skipped
+Sequence with id 1AB1_A no longer exists in database...alignment skipped
+>AB600004.1 alt
+Length=660
+
+ Score = 15.8 bits (29),  Expect = 2.8, Method: Compositional matrix adjust.
+ Identities = 5/6 (83%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+ Frame = -3
+
+Query  25   SWSFHG  30
+             WSFHG
+Sbjct  103  GWSFHG  86
+
+
+ Score = 14.2 bits (25),  Expect = 8.6, Method: Compositional matrix adjust.
+ Identities = 5/10 (50%), Positives = 7/10 (70%), Gaps = 0/10 (0%)
+ Frame = +1
+
+Query  121  HWMSWCPCTT  130
+            +W+S  PCT 
+Sbjct  34   YWISKQPCTN  63
+
+
+
+Lambda      K        H        a         alpha
+   0.327    0.139    0.522    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 142884
+
+
+  Database: pdbndual
+    Posted date:  Nov 27, 2026  2:01 PM
+  Number of letters in database: 2,640
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

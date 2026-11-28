@@ -1042,6 +1042,12 @@
   1.122, line NP item M4b-3d, then
   1.124 at the merge of dev of 2026-11-27 that brought 1.123, line RG-KB item 18b, then 1.126 at the merge
   of dev of 2026-11-27 that brought 1.124 and 1.125, line RG-D2 items D2b-2..5 and exception 36);
+  1.127 2026-11-27 (a database sequence whose Bioseq's build throws where no definition line
+  holds its pdb Seq-align id's handle as NCBI's load reads the ids, of 1.121: NCBI's stop of the
+  prefetch and each format's catch of the throw written, the refusals left named; line DBID item
+  pfoff-9, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after
+  1.126 at the merge of dev f6326e36a that brought 1.123 to 1.126, line RG-KB item 18b, line RG-D2
+  and line RG item T4b-f; first 1.126);
   1.128 2026-11-27 (every program, line DBID item rf-1 and its review 1 of 2026-11-28: the
   rejection of rule 3 of a lookup that reads a record of an empty `taxdb.btd` (version 1.43), where
   NCBI crashes, comes at the query batch whose loads (its prefetch, or its report's) make that
@@ -1054,10 +1060,9 @@
   RPSBLAST and PSIBLAST lost the field line of outfmt 20 where the first batch failed, every program
   but PSIBLAST lost the files of the batches before in outfmt 13 and 14, and BLASTP, BLASTN, BLASTX,
   TBLASTN, TBLASTX, RPSBLAST and RPSTBLASTN lost the prologs of outfmt 15 and 16 (which PSIBLAST
-  rejects) where the first batch failed; Owner-delegated, standing
-  instruction 2026-09-29, restated 2026-10-07; numbered after 1.127, line DBID item pfoff-9, which
-  lands first; first 1.126, then 1.127 at the merge of dev 74f94b820a that brought line RG item
-  T4b-f's 1.126);
+  rejects) where the first batch failed; Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07; numbered after 1.127, line DBID item pfoff-9, which lands first; first
+  1.126, then 1.127 at the merge of dev 74f94b820a that brought line RG item T4b-f's 1.126);
   1.129 2026-11-28 (BLASTX and TBLASTN, line DBID item rf-2 and item rf-1's review 1 M1: the place
   of 1.128 also for a reported sequence with parsed Seq-ids whose title NCBI makes from its taxid,
   which TBLASTN's outfmt 0 to 4 and `-html` rejected before the reports of the batches before, and one text of
@@ -3642,14 +3647,29 @@ file would differ, and NCBI's programs still could not open the database).
   standing instruction 2026-09-29, restated 2026-10-07). Where another definition line than the
   Seq-align id's holds it, the reports show that line's title as NCBI's (rule 2 above; review 1
   refused the description line and the organism report, review 2 writes them). Where no definition
-  line holds it as NCBI's load reads the ids, NCBI stops with "BLAST Database error: Error: oid
-  headers do not contain target gi/seq_id." (exit status 2, in the same bytes in each run, after
-  the prolog of outfmt 0 to 4, 15 and 16, before any byte of outfmt 5): LOSAT refuses (exit 1,
-  "... its load throws: BLAST Database error: Error: oid headers do not contain target
-  gi/seq_id.") in the formats that read the Bioseq or prefetch it
-  (`ParsedSubject::handle_load_refusal`), not NCBI's error and exit status: NCBI's throw comes
-  from the batch's prefetch, whose stop LOSAT makes in line DBID's `prefetch_stop`, which item 12
-  leaves to that line (open point of review 1, R6; line DBID's item pfoff-9 after item 12). Item
+  line holds it as NCBI's load reads the ids, NCBI's build of its Bioseq throws
+  (`CSeqDBVol::GetBioseq`, "Error: oid headers do not contain target gi/seq_id."). Since version
+  1.127 (line DBID item pfoff-9, Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07) LOSAT writes NCBI's bytes there, from the owner of the prefetch's stop
+  (`ParsedSubject::prefetch_stops`, `common::database::batch_prefetch`): a batch whose prefetch
+  loads it stops with "BLAST Database error: Error: oid headers do not contain target
+  gi/seq_id." (exit status 2) after what each format wrote before (the prolog of outfmt 0 to 4,
+  the start of outfmt 15 and 16, nothing of outfmt 5; the reports of the batches before), as does
+  a batch that loads another sequence whose Seq-align id's lookup gives that sequence
+  (`ScopeResolution::gives_throws`); outfmt 8, 9, 11 and 12 prefetch nothing (exit 0) but with
+  `PRE_FETCH_SEQS_LIMIT=2147483647`. With the prefetch off, each format writes NCBI's catch of the
+  throw as for a lookup that fails on a file (line DBID item pfoff-7), but where NCBI's
+  `GetSequenceLength` reads the length without the Bioseq: the tabular `slen` and the `Hit`s of
+  outfmt 13 to 16 have the real length (outfmt 5 `Hit_len` 0); psiblast's PSSM read warns
+  `Failed to retrieve sequence`. A query read with `-parse_deflines` that holds the Seq-align id
+  takes the sequence's place at the prefetch (`ParsedSubject::hidden_by_query`). LOSAT refuses
+  (exit 1, "... whose Bioseq load in the database throws ...") where it does not know NCBI's
+  bytes: outfmt 17 with the prefetch off (the refusal of every thrown load of SAM), a call of the
+  library whose formats end apart after that throw alone, a batch with another stop or a lookup
+  that throws on the id whose order to it LOSAT does not know, and, with the prefetch off, the
+  sequence whose lookup gives it (NCBI's formats catch that throw each in its own way); the
+  tabular rows at which NCBI stops with its null pointer exception or prints an uninitialised
+  taxid keep the refusal of rule 3 (1.37, 1.121 and 1.123). Item
   12 keys a pdb id by its handle in NCBI's scope (`defline_set::scope_keys`), so a query
   `pdb|1AB1|A` read with `-parse_deflines` holds the Seq-align id of a sequence whose pdb id has
   the chain 321 and no chain-id: the refusal of a sequence with the id of a query

@@ -24,7 +24,7 @@ import type { MakeblastdbCase, MakeblastdbResult } from './harness/engine';
 import { buildHarness } from './support/browser';
 import { ENGINE, NO_ENGINE_REASON } from './support/engine';
 import { openHarness, REPOSITORY, startHarnessServer, type HarnessServer } from './support/harness-server';
-import { asNative, maskedOf, nativeMakeblastdb, treeOf, type Written } from './support/makeblastdb-native';
+import { asNative, maskedOf, nativeRun, treeOf, type Written } from './support/makeblastdb-native';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
 import { test } from './support/test';
 
@@ -118,9 +118,9 @@ for (const zone of ZONES) {
       const page = await openHarness(context, server);
       for (const item of CASES) {
         const label = `${browserName} ${zone} ${item.id}`;
-        const before = nativeMakeblastdb(item.argv, inputsOf(item), zone);
+        const before = nativeRun(item.argv, inputsOf(item), zone);
         const [result]: MakeblastdbResult[] = await page.evaluate((list) => window.losatHarness!.engine.makeblastdbRuns(list), [item]);
-        const after = nativeMakeblastdb(item.argv, inputsOf(item), zone);
+        const after = nativeRun(item.argv, inputsOf(item), zone);
         expect(result!.error, label).toBeUndefined();
         expect(ZONE_NAMES[zone], `${label}: the page's zone`).toContain(result!.zone);
         const browser: Written = {

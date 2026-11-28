@@ -1060,6 +1060,20 @@ impl SeqDbError {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1352-1355
+/// The message of the `CSeqDBException` that `CSeqDBVol::GetBioseq` throws where no definition
+/// line of the OID holds an id that matches the target Seq-id (`blastdbcmd -target_only`, the
+/// data loader's Bioseq of a search's subject, `report::db_subject::ParsedSubject::
+/// bioseq_load_throws`), at [`GET_BIOSEQ_SITE`].
+pub(crate) const NO_TARGET_IN_HEADERS: &str = "Error: oid headers do not contain target gi/seq_id.";
+
+/// The place of the throw of [`NO_TARGET_IN_HEADERS`].
+pub(crate) const GET_BIOSEQ_SITE: ThrowSite = seqdb_site(
+    "src/objtools/blast/seqdb_reader/seqdbvol.cpp",
+    1353,
+    "BLASTDB::ncbi::CSeqDBVol::GetBioseq",
+);
+
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:167-172
 /// The place of NCBI's throw where its lookup of a Seq-align id fails with the message `message`
 /// (a text of `report::db_subject::LookupFailure::ncbi_message`), for the texts that NCBI's

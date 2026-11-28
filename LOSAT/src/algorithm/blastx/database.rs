@@ -545,12 +545,6 @@ pub(crate) struct ReportedSubjects {
     seen: crate::report::query_bioseq::QueryBioseqs,
     /// The run's searched query of the reader batch's first query (`refuse_ids_of_queries`).
     seen_first: usize,
-    /// Whether `check_handle_loads` checks `ParsedSubject::handle_load_refusal` after
-    /// `refuse_ids_of_queries` (`reports && (reads || prefetched)` in `for_batch`).
-    checks_handle_loads: bool,
-    /// Whether the batch's reports read only through the prefetch (`reports && !reads && prefetched`),
-    /// for `check_handle_loads`'s refusal suffix (`PREFETCH_READS_IT`).
-    handle_loads_prefetch_only: bool,
 }
 
 /// The values of a custom tabular report's fields that read more of the reported sequences than
@@ -801,6 +795,7 @@ impl ReportedSubjects {
             crate::report::db_subject::FormatThrow,
             Option<crate::report::pairwise::PairwiseReading>,
         ),
+        prefetch_scope: &dyn Fn() -> crate::blastinput::query_batch::QueryScope,
     ) -> Result<Self> {
         let BatchTitles {
             listed,
@@ -808,13 +803,14 @@ impl ReportedSubjects {
             mut sources,
             utf8: _,
         } = titles;
-        // A batch whose prefetch looks up a Seq-align id whose lookup fails on a file stops the
-        // run there (`shared::batch_prefetch`), before any of its reports: none of their checks
-        // and reads is made.
+        // A batch whose prefetch looks up a Seq-align id whose lookup or Bioseq load fails stops
+        // the run there (`shared::batch_prefetch`), before any of its reports: none of their
+        // checks and reads is made.
+        let scope = std::cell::OnceCell::new();
         let reports = !(prefetched
             && parsed
                 .values()
-                .any(|subject| subject.prefetch_stops().is_some()));
+                .any(|subject| subject.prefetch_stops_in(|| scope.get_or_init(prefetch_scope))));
         if reports && joined && !parsed.is_empty() {
             for batch in batches.iter() {
                 for (qidx, lists) in batch.queries.iter().enumerate() {
@@ -935,8 +931,6 @@ impl ReportedSubjects {
         let reads = tabular_reads || pairwise || structured || taxids || taxonomy;
         let mut reported = ReportedSubjects {
             resolves_subjects: reads || prefetched,
-            checks_handle_loads: reports && (reads || prefetched),
-            handle_loads_prefetch_only: reports && !reads && prefetched,
             ..ReportedSubjects::default()
         };
         for (&oid, title) in &listed {
@@ -952,11 +946,12 @@ impl ReportedSubjects {
                 )?;
             }
             if let Some(subject) = parsed.get(&oid) {
+                // A query of the batch's scope takes its place
+                // (`ParsedSubject::hidden_by_query`).
+                let seen_by_scope = subject.hidden_by_query(|| scope.get_or_init(prefetch_scope));
                 if reports && reads {
-                    // `handle_load_refusal` is checked in `check_handle_loads` after
-                    // `refuse_ids_of_queries` has populated `seen`.
                     subject
-                        .fetched_with_scope(taxonomy, loads.load(oid), true)
+                        .fetched_with_scope(taxonomy, loads.load(oid), seen_by_scope)
                         .map_err(|reason| {
                             shared::parsed_refusal(
                                 database.db.oid(ordinal),
@@ -970,7 +965,7 @@ impl ReportedSubjects {
                         subject,
                         loads.load(oid),
                         ordinal,
-                        subject.load_throws(),
+                        seen_by_scope,
                         database.program,
                     )?;
                 }
@@ -1603,78 +1598,6 @@ impl ReportedSubjects {
                         run,
                         PROGRAM,
                     )?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Checks `ParsedSubject::handle_load_refusal` after `refuse_ids_of_queries` has populated
-    /// `self.seen`: a subject resolved to a noted query Bioseq by every reporting query in
-    /// `batches` never reaches the BLAST database data loader (`scope_impl.cpp:3288-3297`).
-    pub(crate) fn check_handle_loads(
-        &self,
-        database: &BlastxDatabase,
-        batches: &[BatchResults],
-        gapped: bool,
-    ) -> Result<()> {
-        if !self.checks_handle_loads || self.parsed.is_empty() {
-            return Ok(());
-        }
-        for (rank, subject) in self.parsed.iter().enumerate() {
-            let Some(subject) = subject.as_deref() else {
-                continue;
-            };
-            if !subject.load_throws() {
-                continue;
-            }
-            if !self.handle_loads_prefetch_only
-                && matches!(
-                    self.loads.load(rank),
-                    crate::report::db_subject::HitLoad::Unread
-                        | crate::report::db_subject::HitLoad::Throws
-                )
-            {
-                continue;
-            }
-            let ordinal = self.ordinals[rank];
-            let seen_by_scope = !self.seen.is_empty()
-                && self.seen.hides_ordinal(
-                    batches.iter().flat_map(|batch| {
-                        batch
-                            .queries
-                            .iter()
-                            .enumerate()
-                            .filter_map(move |(qidx, lists)| {
-                                lists
-                                    .iter()
-                                    .any(|list| {
-                                        list.oid == rank && super::report::reported(list, gapped)
-                                    })
-                                    .then_some(self.seen_first + batch.query_ordinal + qidx)
-                            })
-                    }),
-                    ordinal,
-                );
-            if seen_by_scope {
-                continue;
-            }
-            if let Some(reason) = subject.handle_load_refusal() {
-                if self.handle_loads_prefetch_only {
-                    shared::check_prefetched_parsed(
-                        &database.db,
-                        subject,
-                        crate::report::db_subject::HitLoad::Loaded,
-                        ordinal,
-                        false,
-                        database.program,
-                    )?;
-                } else {
-                    return Err(shared::parsed_refusal(
-                        self.oids[rank],
-                        &reason,
-                        database.program,
-                    ));
                 }
             }
         }

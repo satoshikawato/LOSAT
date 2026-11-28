@@ -92,7 +92,8 @@ describe('makeblastdb domain helpers', () => {
     expect(toolOutputDownloadName(run, { key: 'f1', name: 'db/mydb.nin' })).toBe('mydb.nin');
     expect(toolOutputDownloadName(run, { key: 'stdout', name: 'stdout' })).toMatch(/run.*3.*stdout\.txt$/);
     expect(toolPrintsKind(['makeblastdb', '-help-full'])).toBe('help');
-    expect(toolPrintsKind(['windowmasker', '-help-full'])).toBeNull();
+    // Every tool's reader takes -help-full (review of WW4c, F4: NCBI BLAST+ 2.17.0 and LOSAT print the help, exit 0).
+    expect(toolPrintsKind(['windowmasker', '-help-full'])).toBe('help');
   });
 
   it('prints what the command line prints: a version flag anywhere wins, else the first help flag, in FakeEngine too (line WW, WW4b2 R3 F8)', async () => {
@@ -111,7 +112,7 @@ describe('makeblastdb domain helpers', () => {
     expect(await printed(['makeblastdb', '-help', '-xmlhelp'])).toEqual({ status: 0, text: expect.stringMatching(/^USAGE\n/) });
     expect(await printed(['makeblastdb', '-xmlhelp', '-help'])).toEqual({ status: 0, text: expect.stringMatching(/^<\?xml/) });
     expect((await engine.validateTool(['makeblastdb', '-help-full', '-no_such_option'])).ok).toBe(true);
-    expect((await engine.validateTool(['windowmasker', '-help-full'])).ok).toBe(false);
+    expect((await engine.validateTool(['windowmasker', '-help-full'])).ok).toBe(true);
   });
 
   it("offers a masking run's maskinfo output as -mask_data: the -out file, or the standard output under a name", () => {

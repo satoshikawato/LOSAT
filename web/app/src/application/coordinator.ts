@@ -138,6 +138,8 @@ export interface ToolRequest {
   readonly argv: readonly string[];
   readonly directory: readonly ToolDirectoryFile[];
   readonly prints?: PrintedKind;
+  /** A masking run's `-outfmt` default from `-xmlhelp` (`maskOutfmtDefault`); the run keeps it for its mask data. */
+  readonly outfmtDefault?: string;
   /** OPFS-backed inflated session file tokens read by this run (directly or inside combined_input.fa). */
   readonly sessionTokens?: readonly string[];
 }
@@ -233,7 +235,7 @@ export interface CoordinatorDeps {
   readonly dataWorkerEnded?: Promise<Error>;
   /** Runtime path and build identifier recorded on completed/failed tool runs. */
   readonly toolRuntime?: { readonly path: 'serial' | 'fake'; readonly engineBuild: string };
-  /** Shared holder tracker for inflated session files used by WindowMasker tool runs. */
+  /** Shared holder tracker for inflated session files used by WindowMasker and Masking tool runs. */
   readonly sessionFiles?: SessionFiles;
   /**
    * The taxonomy IDs' locks on saved counts: a run that reads a saved copy holds its ID's lock in shared mode from
@@ -380,6 +382,7 @@ export class Coordinator {
           ),
         ),
         ...(request.prints === undefined ? {} : { prints: request.prints }),
+        ...(request.outfmtDefault === undefined ? {} : { outfmtDefault: request.outfmtDefault }),
         queuedAt,
         ...(groupId === undefined ? {} : { group: Object.freeze({ groupId, position: index + 1, size: requests.length }) }),
       }),
@@ -1178,7 +1181,11 @@ export class Coordinator {
         void commit.then(() => this.deps.data.deleteRun(runId)).catch(() => undefined);
         throw error;
       });
-      const stdout: ToolOutputEntry = Object.freeze({ key: 'stdout', name: 'stdout', size: summary.stdoutSize });
+      const stdout: ToolOutputEntry = Object.freeze({
+        key: 'stdout',
+        name: 'stdout',
+        size: summary.stdoutSize,
+      });
       const stderr: ToolOutputEntry = Object.freeze({ key: 'stderr', name: 'stderr', size: summary.stderrSize });
       const files: ToolOutputEntry[] = summary.files.map((file) => {
         const option = toolFileOptionLabel(snapshot.argv, file.name);

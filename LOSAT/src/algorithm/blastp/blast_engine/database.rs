@@ -2344,6 +2344,7 @@ impl ListedTitles<'_> {
         batches: &[std::ops::Range<usize>],
         prefetch: &shared::BatchPrefetch,
         ranks: impl Fn(std::ops::Range<usize>) -> I,
+        batch_scope: &dyn Fn(&std::ops::Range<usize>) -> crate::blastinput::query_batch::QueryScope,
     ) -> Option<std::ops::Range<usize>> {
         if self.parsed.is_empty() {
             return None;
@@ -2351,12 +2352,15 @@ impl ListedTitles<'_> {
         batches
             .iter()
             .find(|span| {
-                !span.is_empty()
-                    && prefetch.prefetches(span.start)
-                    && ranks((*span).clone()).into_iter().any(|rank| {
-                        self.parsed_subject(rank)
-                            .is_some_and(|subject| subject.prefetch_stops().is_some())
+                if span.is_empty() || !prefetch.prefetches(span.start) {
+                    return false;
+                }
+                let scope = std::cell::OnceCell::new();
+                ranks((*span).clone()).into_iter().any(|rank| {
+                    self.parsed_subject(rank).is_some_and(|subject| {
+                        subject.prefetch_stops_in(|| scope.get_or_init(|| batch_scope(span)))
                     })
+                })
             })
             .cloned()
     }
@@ -2414,10 +2418,11 @@ impl ListedTitles<'_> {
     /// those it finds as themselves, and one whose lookup throws on its id
     /// (`ParsedSubject::prefetch_fails`: the batch's prefetch fails there, and its reports load
     /// the subjects one by one after it, `shared::BatchPrefetch::loads_one_by_one`, line DBID
-    /// pfoff-7); one that it finds nowhere is left out (the prefetch reads nothing for it). One
-    /// whose lookup fails on a file
-    /// with NCBI's exception (`ParsedSubject::prefetch_stops`) is kept: the batch's prefetch stops
-    /// there (`shared::batch_prefetch`). A lookup that fails on a file with LOSAT's error and
+    /// pfoff-7); one that it finds nowhere, or that a query of the batch's scope `scope` takes the
+    /// place of (`ParsedSubject::hidden_by_query`), is left out (the prefetch reads nothing for
+    /// it). One whose load throws NCBI's exception (`ParsedSubject::prefetch_stops`: a lookup that
+    /// fails on a file, a Bioseq's build) is kept: the batch's prefetch stops there
+    /// (`shared::batch_prefetch`). A lookup that fails on a file with LOSAT's error and
     /// another sequence that NCBI can read for one and whose definition lines do not hold its
     /// Seq-align id (NCBI stops) are refused. With `taxids`
     /// (`taxdb.bti` on the search path), one for which the prefetch reads another sequence that
@@ -2436,6 +2441,7 @@ impl ListedTitles<'_> {
         scope: &dyn Fn() -> crate::blastinput::query_batch::QueryScope,
     ) -> Result<Vec<usize>> {
         let mut kept = Vec::with_capacity(ranks.len());
+        let held = std::cell::OnceCell::new();
         for &rank in ranks {
             let Some(subject) = self.parsed_subject(rank) else {
                 kept.push(rank);
@@ -2459,12 +2465,15 @@ impl ListedTitles<'_> {
                     ));
                 }
             }
+            // A query of the batch's scope takes its place: the prefetch reads nothing of it
+            // (`ParsedSubject::hidden_by_query`).
+            if subject.hidden_by_query(|| held.get_or_init(scope)) {
+                continue;
+            }
             if subject.prefetch_fails() || subject.prefetch_stops().is_some() {
                 kept.push(rank);
                 continue;
             }
-            let seen_by_scope =
-                subject.load_throws() && scope().has_key(&subject.query_scope_keys().own);
             // Another sequence's blob that NCBI's places give is refused where its taxonomy texts
             // can differ (`shared::check_prefetched_parsed`).
             if let Some(load @ crate::report::db_subject::HitLoad::Shown(_)) =
@@ -2475,7 +2484,7 @@ impl ListedTitles<'_> {
                     subject,
                     load,
                     self.listed.ordinals[rank],
-                    seen_by_scope,
+                    false,
                     self.program,
                 )?;
             }
@@ -2484,7 +2493,7 @@ impl ListedTitles<'_> {
                 self.listed.ordinals[rank],
                 subject,
                 taxids,
-                seen_by_scope,
+                false,
                 self.program,
             )? {
                 Ok(Some(_)) => kept.push(rank),

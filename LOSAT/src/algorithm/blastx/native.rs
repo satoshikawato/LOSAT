@@ -1540,6 +1540,7 @@ pub(super) fn reported_batch(
     let unfetched = prefetch.off || prefetch.fails;
     let read = prefetch.report_read(&titles, queries_before);
     let x_t = super::x_timing::lap();
+    let prefetch_scope = || prefetch_queries.query_scope();
     let reported = ReportedSubjects::for_batch(
         database,
         search_subjects,
@@ -1562,6 +1563,7 @@ pub(super) fn reported_batch(
             // The pairwise report reads the subjects that it shows as its writer reads them.
             options.pairwise_reading(),
         ),
+        &prefetch_scope,
     );
     super::x_timing::run(XRun::Titles, x_t);
     let mut reported = reported.map_err(reported_error)?;
@@ -1594,7 +1596,6 @@ pub(super) fn reported_batch(
         };
         reported.refuse_ids_of_queries(results, options.gapped, scopes, &run)?;
     }
-    reported.check_handle_loads(database, results, options.gapped)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-291
     // Before the reports of a batch NCBI fetches every subject that the batch
     // reports, and with `taxdb.bti` on the search path the taxonomy database

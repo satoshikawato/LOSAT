@@ -67,7 +67,7 @@ pub struct ParsedSubject {
     scope_finds_none: bool,
     /// Whether the data loader's build of the Bioseq throws: another id of the sequence holds the
     /// Seq-id of the Seq-align id's handle, but no definition line does as the load reads the
-    /// ids (`HandleLookup::Throws`, `handle_load_refusal`).
+    /// ids (`HandleLookup::Throws`, `bioseq_load_throws`).
     load_throws: bool,
     /// The sequence of the database that this subject is (`in_database`; `None` for a `-subject`
     /// record), by which the run's loads name it ([`ScopeWalk`]).
@@ -250,6 +250,11 @@ pub struct ScopeResolution {
     /// The keys of the sequence that the lookup gives where its record differs
     /// (`FoundInstead::Sequence`: its blob registers its own lines, `ParsedSubject::shown_keys`).
     pub gives_keys: Option<std::sync::Arc<BlobKeys>>,
+    /// Whether NCBI's data loader keeps the sequence that the lookup gives where its record
+    /// differs (`FoundInstead::Sequence`) and the build of its Bioseq then throws: none of its
+    /// definition lines holds the Seq-align id as the load reads the ids
+    /// (`common::database::scope_bioseq`'s `throws`; `ParsedSubject::prefetch_stops`).
+    pub gives_throws: bool,
     pub utf8: Option<DbSequence>,
     pub unrecorded: ScopeHolders,
 }
@@ -1164,22 +1169,23 @@ impl ScopeRecord {
     ) {
         let mut loads: Vec<(&ParsedSubject, LoadedBlobRef)> = Vec::new();
         let mut unresolved: Vec<HandleKey> = Vec::new();
+        let mut throwing: Vec<(HandleKey, DbSequence)> = Vec::new();
         for subject in subjects {
             match subject.loaded_blob_ref() {
                 Some(blob) => loads.push((subject, blob)),
-                None if !matches!(
-                    subject.resolution.found,
-                    Some(FoundInstead::Failed(_) | FoundInstead::ThrowsOnId(_))
-                ) =>
-                {
-                    unresolved.extend(subject.id_handle());
-                }
-                None => {}
+                // The lookup adds the handle, then the Bioseq's build throws (`throwing_blob`).
+                None => match subject.id_handle().zip(subject.throwing_blob()) {
+                    Some(thrown) => throwing.push(thrown),
+                    None if !subject.load_throws_by_id() => {
+                        unresolved.extend(subject.id_handle());
+                    }
+                    None => {}
+                },
             }
         }
         // Neither before the note nor after it may `m_Ids` hold the handle.
         unresolved.retain(|&handle| self.ids.held(handle) == Held::Absent);
-        if loads.is_empty() && unresolved.is_empty() {
+        if loads.is_empty() && unresolved.is_empty() && throwing.is_empty() {
             return;
         }
         let note = self.notes;
@@ -1211,6 +1217,9 @@ impl ScopeRecord {
                 })
                 .or_insert(registrant);
         };
+        for &(handle, sequence) in &throwing {
+            record_use(handle, Registrant::of(sequence));
+        }
         for (subject, blob) in &loads {
             let sequence = blob.sequence();
             let requested = subject.id_handle();
@@ -1968,6 +1977,10 @@ impl ScopeWalk {
                 if !registrant.sure {
                     return Some(Resolved::Unknown(Some(registrant.sequence), ShownBy::Order));
                 }
+                if subject.mine(registrant.sequence) && subject.bioseq_load_throws() {
+                    // Added by a load before whose Bioseq's build threw: it throws again.
+                    return Some(Resolved::Throws);
+                }
                 if subject.mine(registrant.sequence) {
                     // The subject's own blob, loaded before in the run: its Bioseq enters this
                     // scope by the line of the handle, where a later load finds it (review 4 of
@@ -1987,10 +2000,11 @@ impl ScopeWalk {
                 return Some(Resolved::Unknown(holder, ShownBy::Calls));
             }
         }
-        if matches!(
-            subject.resolution.found,
-            Some(FoundInstead::Failed(_) | FoundInstead::ThrowsOnId(_))
-        ) {
+        if subject.load_throws_by_id() {
+            // A lookup that gives the record whose Bioseq's build throws adds the handle first.
+            if let Some((handle, sequence)) = handle.zip(subject.throwing_blob()) {
+                self.ids.use_now(handle, Registrant::of(sequence));
+            }
             return Some(Resolved::Throws);
         }
         let blob = subject.loaded_blob_ref()?;
@@ -2017,11 +2031,9 @@ impl ScopeWalk {
         if self.before.unrecorded && subject.resolution.unrecorded.loader.first().is_some() {
             return None;
         }
-        if matches!(
-            subject.resolution.found,
-            Some(FoundInstead::Failed(_) | FoundInstead::ThrowsOnId(_))
-        ) {
-            return None;
+        if subject.load_throws_by_id() {
+            // The record whose Bioseq's build throws, where the lookup gives it.
+            return subject.throwing_blob();
         }
         subject.loaded_blob_ref().map(|blob| blob.sequence())
     }
@@ -2360,6 +2372,10 @@ impl ScopeWalk {
             }
             if let Held::Present(registrant) | Held::Maybe(registrant) = self.ids.held(handle) {
                 if subject.mine(registrant.sequence) {
+                    if subject.bioseq_load_throws() {
+                        // Its Bioseq's build throws again: no blob (`load_throws_by_id`).
+                        return None;
+                    }
                     let line = subject.line_of_handle(handle)?;
                     return Some(LoadedBlobRef::Own {
                         sequence: registrant.sequence,
@@ -2375,10 +2391,10 @@ impl ScopeWalk {
                 });
             }
         }
-        match subject.resolution.found {
-            Some(FoundInstead::Failed(_) | FoundInstead::ThrowsOnId(_)) => None,
-            _ => subject.loaded_blob_ref(),
+        if subject.load_throws_by_id() {
+            return None;
         }
+        subject.loaded_blob_ref()
     }
 
     /// The keys of the sequence `sequence` where LOSAT holds them (the walk's blobs, or the
@@ -2523,6 +2539,14 @@ impl ScopeWalk {
                         blob_load: None,
                     };
                 }
+                if subject.mine(registrant.sequence) && subject.bioseq_load_throws() {
+                    // Added by a load before whose Bioseq's build threw: it throws again.
+                    return AloneResult {
+                        resolved: Some(Resolved::Throws),
+                        requested_use: Some((handle, registrant, false)),
+                        blob_load: None,
+                    };
+                }
                 let blob_load = if subject.mine(registrant.sequence) {
                     let line = subject.line_of_handle(handle).unwrap_or(subject.target);
                     Some(self.plan_alone_blob(registrant.sequence, line, Some(handle), None))
@@ -2553,13 +2577,13 @@ impl ScopeWalk {
                 };
             }
         }
-        if matches!(
-            subject.resolution.found,
-            Some(FoundInstead::Failed(_) | FoundInstead::ThrowsOnId(_))
-        ) {
+        if subject.load_throws_by_id() {
+            // A lookup that gives the record whose Bioseq's build throws adds the handle first.
             return AloneResult {
                 resolved: Some(Resolved::Throws),
-                requested_use: None,
+                requested_use: handle
+                    .zip(subject.throwing_blob())
+                    .map(|(handle, sequence)| (handle, Registrant::of(sequence), false)),
                 blob_load: None,
             };
         }
@@ -3147,6 +3171,9 @@ impl ParsedSubject {
     /// loads where no place before the lookup answers (step 4 of [`ScopeWalk::load`]).
     fn loaded_blob_ref(&self) -> Option<LoadedBlobRef> {
         use FoundInstead as F;
+        if self.bioseq_load_throws() {
+            return None;
+        }
         match &self.resolution.found {
             Some(F::Failed(_) | F::ThrowsOnId(_) | F::Nothing) => None,
             Some(F::Sequence(_)) => {
@@ -3459,25 +3486,55 @@ impl ParsedSubject {
         self.scope_finds_none && self.show_gis
     }
 
-    /// Whether the data loader's build of the Bioseq throws (`load_throws`): another id of the
-    /// sequence holds the Seq-id of the Seq-align id's handle, while no definition line holds it
-    /// as NCBI's load reads the ids.
-    pub fn load_throws(&self) -> bool {
+    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:379-424
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1328-1355
+    /// Whether NCBI's lookup finds this record (or a copy of it) and `CSeqDBVol::GetBioseq` then
+    /// throws `crate::seqdb::NO_TARGET_IN_HEADERS` (`load_throws` not superseded by a
+    /// `SeqidToOid` failure, miss, or another sequence; line DBID pfoff-9). `GetSequenceLength`
+    /// still succeeds on the OID without calling `GetBioseq`.
+    pub fn bioseq_load_throws(&self) -> bool {
         self.load_throws
+            && matches!(
+                self.resolution.found,
+                None | Some(FoundInstead::OtherTaxids(_) | FoundInstead::CopyApart(..))
+            )
     }
 
-    /// LOSAT's refusal of a read of the subject's Bioseq where NCBI's load of it throws
-    /// (`load_throws`): the formats that read the Bioseq (`fetched`), the prefetch
-    /// (`prefetched`) and psiblast's PSSM (`pssm_read`); the Seq-annots and the archive (outfmt 8,
-    /// 9, 11, 12) read nothing of it.
-    pub(crate) fn handle_load_refusal(&self) -> Option<String> {
-        self.load_throws.then(|| {
-            format!(
-                "has the Seq-align id {}, whose Seq-id NCBI BLAST+'s data loader looks up with another chain that another of its ids matches, while no definition line holds it as NCBI BLAST+ 2.17.0's load reads the ids (its load throws: {} Error: oid headers do not contain target gi/seq_id.)",
-                String::from_utf8_lossy(&self.alignment_fasta()),
-                crate::wording::NCBI_DATABASE_ERROR
-            )
-        })
+    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:379-424
+    /// The sequence that NCBI's lookup gives where the build of its Bioseq then throws
+    /// (`bioseq_load_throws`): `x_GetOid` adds the id's handle to `m_Ids` with it before the
+    /// build, so a later load by the handle finds it and throws again ([`ScopeWalk`]).
+    fn throwing_blob(&self) -> Option<DbSequence> {
+        self.bioseq_load_throws()
+            .then(|| self.resolution.gives.or(self.sequence))
+            .flatten()
+    }
+
+    /// Whether NCBI's load of the Seq-align id by the loader throws, whatever the cause and
+    /// whether LOSAT knows the exception (`lookup_throws`): the lookup fails on a file or throws
+    /// on the id (`FoundInstead::Failed`, `FoundInstead::ThrowsOnId`), or it gives this record,
+    /// whose Bioseq build throws (`bioseq_load_throws`). The one test of the walk's places
+    /// ([`ScopeWalk`]: `Resolved::Throws`, no blob).
+    fn load_throws_by_id(&self) -> bool {
+        matches!(
+            self.resolution.found,
+            Some(FoundInstead::Failed(_) | FoundInstead::ThrowsOnId(_))
+        ) || self.bioseq_load_throws()
+    }
+
+    /// The reason of LOSAT's refusal where NCBI's build of the Bioseq throws
+    /// (`bioseq_load_throws`) and a run's formats refuse it (`refused`: `FormatThrow::Refused`,
+    /// such as outfmt 17 or mixed formats with prefetch off).
+    fn bioseq_load_throws_reason(&self, refused: Option<ThrowRefusal>) -> String {
+        let does = match refused {
+            Some(refused) => format!("{}; {}", LookupFailure::NCBI_THROWS, refused.words()),
+            None => LookupFailure::NCBI_THROWS.to_owned(),
+        };
+        format!(
+            "has the Seq-align id {}, whose Bioseq load in the database throws ({}; {does})",
+            String::from_utf8_lossy(&self.alignment_fasta()),
+            crate::seqdb::NO_TARGET_IN_HEADERS,
+        )
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:389-411
@@ -3611,7 +3668,7 @@ impl ParsedSubject {
     /// `fetched` with `seen_by_scope`: whether every reporting query's scope resolves this subject
     /// to a noted query Bioseq (`report::query_bioseq::QueryBioseqs::hides_ordinal`), in which
     /// case NCBI's scope returns the query Bioseq before calling the BLAST database data loader
-    /// (`handle_load_refusal` does not apply).
+    /// (`bioseq_load_throws` does not apply).
     pub fn fetched_with_scope(
         &self,
         taxonomy: bool,
@@ -3666,18 +3723,24 @@ impl ParsedSubject {
     // lookup throws on the file there, and again in the `catch` (`GetLength` loads by the same id),
     // outside any `catch` of the hit; the report function of outfmt 15 and 16 catches it, 13 and 14
     // end the program with it (probe of line DBID mixdb, `PU.off`; DECISIONS 62 (2)).
-    /// The exception that NCBI's lookup of the Seq-align id throws where a formatter loads the
+    /// The exception that NCBI's load of the Seq-align id throws where a formatter loads the
     /// subject one by one (a batch whose prefetch is off, or fails): a lookup that fails on a file
     /// with NCBI's `CSeqDBException` whose place LOSAT knows (`FoundInstead::Failed`,
     /// `LookupFailure::exception`; where the batch prefetches, its prefetch throws first and
-    /// stops the run, `prefetch_stops`), or one that throws on the id itself
-    /// (`FoundInstead::ThrowsOnId`, whose prefetch catches it, `prefetch_fails`). The one owner of
-    /// "the load by this id throws": the walk of the reports' loads (`HitLoads`) and every
-    /// writer's answer to it (`FormatThrow`) take it, whatever the cause.
+    /// stops the run, `prefetch_stops`), one that throws on the id itself
+    /// (`FoundInstead::ThrowsOnId`, whose prefetch catches it, `prefetch_fails`), or the build of
+    /// this record's Bioseq after a lookup that gives it (`bioseq_load_throws`,
+    /// `crate::seqdb::GET_BIOSEQ_SITE`). The one owner of "the load by this id throws": the walk
+    /// of the reports' loads (`HitLoads`) and every writer's answer to it (`FormatThrow`) take it,
+    /// whatever the cause.
     pub fn lookup_throws(&self) -> Option<crate::ncbi_exception::NcbiException> {
         match &self.resolution.found {
             Some(FoundInstead::Failed(failure)) => failure.exception(),
             Some(FoundInstead::ThrowsOnId(exception)) => Some(exception.clone()),
+            _ if self.bioseq_load_throws() => Some(crate::ncbi_exception::NcbiException::new(
+                crate::seqdb::GET_BIOSEQ_SITE,
+                crate::seqdb::NO_TARGET_IN_HEADERS.as_bytes(),
+            )),
             _ => None,
         }
     }
@@ -3695,9 +3758,6 @@ impl ParsedSubject {
     /// for a subject whose definition line the formatters do not find (`unfetchable`), which the
     /// PSSM reads by the scope as any other (review 2 of line DBID pssmread, M2).
     pub fn pssm_read(&self) -> Result<(), String> {
-        if let Some(reason) = self.handle_load_refusal() {
-            return Err(reason);
-        }
         match &self.resolution.found {
             Some(
                 found @ (FoundInstead::Failed(_)
@@ -3732,10 +3792,8 @@ impl ParsedSubject {
         refused: Option<ThrowRefusal>,
         seen_by_scope: bool,
     ) -> Result<(), String> {
-        if !seen_by_scope {
-            if let Some(reason) = self.handle_load_refusal() {
-                return Err(reason);
-            }
+        if !seen_by_scope && self.bioseq_load_throws() {
+            return Err(self.bioseq_load_throws_reason(refused));
         }
         if self.unfetchable {
             return Err(format!(
@@ -3816,8 +3874,8 @@ impl ParsedSubject {
         if seen_by_scope {
             return Prefetched::Nothing;
         }
-        if let Some(reason) = self.handle_load_refusal() {
-            return Prefetched::Failed(reason);
+        if self.bioseq_load_throws() {
+            return Prefetched::Failed(self.bioseq_load_throws_reason(None));
         }
         let reason = || {
             self.resolution
@@ -3871,18 +3929,79 @@ impl ParsedSubject {
         matches!(self.resolution.found, Some(FoundInstead::ThrowsOnId(_)))
     }
 
-    /// NCBI's message where the lookup of this subject's Seq-align id fails on a file of the
-    /// database with NCBI's own `CSeqDBException` (`FoundInstead::Failed`,
-    /// `LookupFailure::ncbi_message`; "DB contains no accession info." of a list that puts
-    /// version 5 databases with and without the accession table side by side): NCBI's prefetch of
-    /// a batch that reports the subject rethrows it, which stops the run with `BLAST Database
-    /// error: <message>` (exit status 2) before the batch's reports
-    /// (`common::database::batch_prefetch`).
+    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:379-424
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1328-1355
+    /// NCBI's message where its load of this subject's Seq-align id throws a `CSeqDBException`
+    /// that NCBI's prefetch of a batch that reports the subject rethrows, which stops the run with
+    /// `BLAST Database error: <message>` (exit status 2) before the batch's reports
+    /// (`common::database::batch_prefetch`): the lookup fails on a file of the database with
+    /// NCBI's own exception (`FoundInstead::Failed`, `LookupFailure::ncbi_message`; "DB contains
+    /// no accession info." of a list that puts version 5 databases with and without the accession
+    /// table side by side), or it gives a sequence whose Bioseq's build then throws
+    /// (`crate::seqdb::NO_TARGET_IN_HEADERS`): this record (`bioseq_load_throws`), or another
+    /// that the data loader keeps (`ScopeResolution::gives_throws`; review 1 of line DBID
+    /// pfoff-9, M3). The stop of a batch whose query scope NCBI holds at the prefetch is
+    /// [`ParsedSubject::prefetch_stops_in`]'s.
     pub fn prefetch_stops(&self) -> Option<&[u8]> {
         match &self.resolution.found {
             Some(FoundInstead::Failed(failure)) => failure.ncbi_message(),
+            Some(FoundInstead::Sequence(_)) if self.resolution.gives_throws => {
+                Some(crate::seqdb::NO_TARGET_IN_HEADERS.as_bytes())
+            }
+            _ if self.bioseq_load_throws() => Some(crate::seqdb::NO_TARGET_IN_HEADERS.as_bytes()),
             _ => None,
         }
+    }
+
+    /// Whether this subject stops NCBI's prefetch of a batch whose query scope at the prefetch is
+    /// `scope` (made where asked): [`ParsedSubject::prefetch_stops`] unless a query of the scope
+    /// takes its place ([`ParsedSubject::hidden_by_query`]). The one test of a batch's stop
+    /// (`common::database::batch_prefetch` and the programs that cut their reports there).
+    pub fn prefetch_stops_in<'s>(
+        &self,
+        scope: impl FnOnce() -> &'s crate::blastinput::query_batch::QueryScope,
+    ) -> bool {
+        self.prefetch_stops().is_some() && !self.hidden_by_query(scope)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3288-3297
+    /// Whether NCBI's scope finds a query Bioseq of `scope` (the query scope at a batch's
+    /// prefetch, made where asked) for this subject's Seq-align id before it calls the BLAST
+    /// database data loader, where that changes what NCBI does: a query holds the id
+    /// (`QueryScopeKeys::own`; `-parse_deflines`) and the data loader's load of it gives no Bioseq
+    /// or throws at the build of one (`scope_finds_none`, `load_throws`,
+    /// `ScopeResolution::gives_throws`; line RG-KB item 12, line DBID pfoff-9). Such a subject is
+    /// neither loaded nor looked up at the prefetch: it stops nothing, and nothing of it is read
+    /// there. The one rule of a query that hides a subject at the prefetch (the stop,
+    /// `prefetch_stops_in`; the loads, `common::database::batch_prefetch`; psiblast's traceback
+    /// lists, BLASTX's reported subjects). Another subject whose id a query holds is refused
+    /// before (`common::database::refuse_id_of_a_query`), and a stopping lookup that a query may
+    /// take is `common::database::stop_lookup_unsure`'s.
+    pub fn hidden_by_query<'s>(
+        &self,
+        scope: impl FnOnce() -> &'s crate::blastinput::query_batch::QueryScope,
+    ) -> bool {
+        (self.load_throws || self.scope_finds_none || self.resolution.gives_throws)
+            && scope().has_key(&self.query_scope_keys().own)
+    }
+
+    /// LOSAT's words for why NCBI's prefetch stops at this subject ([`ParsedSubject::prefetch_stops`]),
+    /// for the refusals of a stop whose bytes LOSAT does not know: the Seq-align id, what fails
+    /// (the lookup on a file, or the build of the Bioseq of this record or of the sequence that
+    /// the lookup gives), NCBI's message and the stop.
+    pub fn prefetch_stop_words(&self) -> Option<String> {
+        let message = String::from_utf8_lossy(self.prefetch_stops()?);
+        let id = String::from_utf8_lossy(&self.alignment_fasta()).into_owned();
+        let fails = match &self.resolution.found {
+            Some(FoundInstead::Failed(_)) => "whose lookup in the database fails".to_owned(),
+            Some(FoundInstead::Sequence(other)) => format!(
+                "by which NCBI BLAST+'s lookup gives database sequence {other}, whose Bioseq load in the database throws"
+            ),
+            _ => "whose Bioseq load in the database throws".to_owned(),
+        };
+        Some(format!(
+            "has the Seq-align id {id}, {fails} ({message}; NCBI BLAST+ 2.17.0's prefetch stops with a BLAST Database error)"
+        ))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2250-2255
@@ -4923,7 +5042,7 @@ enum HandleLookup {
     Line(usize),
     /// Another id of the sequence compares equal to it, but no definition line holds it as the
     /// load reads the ids (one definition line with the chains 321 and 65: its first pdb id is not
-    /// the handle's): the load throws (`ParsedSubject::handle_load_refusal`).
+    /// the handle's): the load throws (`ParsedSubject::bioseq_load_throws`).
     Throws,
 }
 
@@ -5332,6 +5451,21 @@ impl From<Vec<Option<usize>>> for ReportKeys {
 pub struct RunThrow {
     pub after: AfterThrow,
     pub rows: super::tabular::SubjectFetch,
+    /// What the report does where only `GetBioseqNoData` throws while `sequence::GetLength`
+    /// succeeds (`ParsedSubject::bioseq_load_throws`, line DBID pfoff-9): XML2 and JSON (outfmt
+    /// 13 to 16) write the caught `Hit` with the real length and go on (`WritesHit`), while the
+    /// other formats do `after`.
+    pub bioseq_after: AfterThrow,
+    /// Which rows load the Bioseq where only `GetBioseqNoData` throws
+    /// (`ParsedSubject::bioseq_load_throws`, line DBID pfoff-9): `TabularSpec::subject_fetch` for
+    /// a table (`slen` alone does not load the Bioseq and succeeds), `Every` for every other
+    /// format.
+    pub bioseq_rows: super::tabular::SubjectFetch,
+    /// Whether the formats of a call of the library end apart after a throw of the Bioseq's build
+    /// alone (`bioseq_after`, `bioseq_rows`) though they agree after a lookup's
+    /// ([`FormatThrow::and`]): a subject whose Bioseq's build throws is refused there
+    /// (`ThrowRefusal::Mixed`, [`HitLoads::load`]), every other is written.
+    pub bioseq_mixed: bool,
     pub first_row_ends: bool,
     pub keeps_scope: bool,
 }
@@ -5343,6 +5477,9 @@ impl RunThrow {
         RunThrow {
             after,
             rows: super::tabular::SubjectFetch::Every,
+            bioseq_after: after,
+            bioseq_rows: super::tabular::SubjectFetch::Every,
+            bioseq_mixed: false,
             first_row_ends: false,
             keeps_scope: after == AfterThrow::WritesHit,
         }
@@ -5361,20 +5498,49 @@ impl RunThrow {
     /// info.`); outfmt 5 and the formats that write the row (`WritesHit`, `WritesRow`) go on and
     /// write nothing there, as a format that reads nothing of the subject does
     /// ([`FormatThrow::Unread`], `None` here: review 2 of line DBID pfoff-4, M3). Two formats of
-    /// one writer agree.
+    /// one writer agree. After a lookup's throw (`after`, `rows`); [`RunThrow::bioseq_apart`]
+    /// after the Bioseq's build's.
     fn stops_apart(self, other: Option<Self>) -> bool {
-        let quiet = |run: Option<Self>| {
-            run.is_none_or(|run| matches!(run.after, AfterThrow::WritesHit | AfterThrow::WritesRow))
+        Self::ends_apart(self.end(false), other.map(|other| other.end(false)))
+    }
+
+    /// [`RunThrow::stops_apart`] after a throw of the Bioseq's build alone (`bioseq_after`,
+    /// `bioseq_rows`; `ParsedSubject::bioseq_load_throws`).
+    fn bioseq_apart(self, other: Option<Self>) -> bool {
+        Self::ends_apart(self.end(true), other.map(|other| other.end(true)))
+    }
+
+    /// What the report does after a throw at a load of a subject and at which rows it loads it:
+    /// after a lookup's throw (`after`, `rows`), or where only the build of the subject's Bioseq
+    /// throws (`bioseq_only`: `bioseq_after`, `bioseq_rows`). The one choice of the kind.
+    fn end(self, bioseq_only: bool) -> (AfterThrow, super::tabular::SubjectFetch) {
+        if bioseq_only {
+            (self.bioseq_after, self.bioseq_rows)
+        } else {
+            (self.after, self.rows)
+        }
+    }
+
+    /// Whether the runs of a format that does `one` (what it does after the throw, at which rows)
+    /// and of one that does `other` (`None`: one that reads nothing, which goes on) end apart:
+    /// runs that go on and post nothing (`WritesHit`, `WritesRow`, an `EndsRun` table whose rows
+    /// never load the subject) agree, and any other agrees only with one that does the same, at
+    /// the same rows where it ends the run.
+    fn ends_apart(
+        one: (AfterThrow, super::tabular::SubjectFetch),
+        other: Option<(AfterThrow, super::tabular::SubjectFetch)>,
+    ) -> bool {
+        let quiet = |(after, rows): (AfterThrow, super::tabular::SubjectFetch)| {
+            matches!(after, AfterThrow::WritesHit | AfterThrow::WritesRow)
+                || (after == AfterThrow::EndsRun && rows == super::tabular::SubjectFetch::Never)
         };
         let Some(other) = other else {
-            return !quiet(Some(self));
+            return !quiet(one);
         };
-        if quiet(Some(self)) && quiet(Some(other)) {
-            false
-        } else {
-            self.after != other.after
-                || (self.after == AfterThrow::EndsRun && self.rows != other.rows)
+        if quiet(one) && quiet(other) {
+            return false;
         }
+        one.0 != other.0 || (one.0 == AfterThrow::EndsRun && one.1 != other.1)
     }
 }
 
@@ -5436,7 +5602,10 @@ impl FormatThrow {
     ) -> Self {
         use crate::blastinput::app::ReportFormat;
         if let Some(kind) = super::blast_xml2::Xml2Kind::of(format) {
-            return FormatThrow::Writes(RunThrow::every_row(kind.after_throw()));
+            return FormatThrow::Writes(RunThrow {
+                bioseq_after: AfterThrow::WritesHit,
+                ..RunThrow::every_row(kind.after_throw())
+            });
         }
         if let Some(view) = super::pairwise::PairwiseView::of(format) {
             return FormatThrow::Writes(RunThrow::every_row(view.after_throw(html)));
@@ -5567,7 +5736,10 @@ impl FormatThrow {
                 if run.stops_apart(None) {
                     FormatThrow::Refused(ThrowRefusal::Mixed)
                 } else {
-                    FormatThrow::Writes(run)
+                    FormatThrow::Writes(RunThrow {
+                        bioseq_mixed: run.bioseq_mixed || run.bioseq_apart(None),
+                        ..run
+                    })
                 }
             }
             (FormatThrow::Writes(one), FormatThrow::Writes(other))
@@ -5576,13 +5748,19 @@ impl FormatThrow {
                 FormatThrow::Refused(ThrowRefusal::Mixed)
             }
             (FormatThrow::Writes(one), FormatThrow::Writes(other)) => {
+                let merge_rows = |a, b| match (a, b) {
+                    (x, y) if x == y => x,
+                    (SubjectFetch::Never, y) | (y, SubjectFetch::Never) => y,
+                    _ => SubjectFetch::Every,
+                };
                 FormatThrow::Writes(RunThrow {
                     after: one.after.max(other.after),
-                    rows: if one.rows == other.rows {
-                        one.rows
-                    } else {
-                        SubjectFetch::Every
-                    },
+                    rows: merge_rows(one.rows, other.rows),
+                    bioseq_after: one.bioseq_after.max(other.bioseq_after),
+                    bioseq_rows: merge_rows(one.bioseq_rows, other.bioseq_rows),
+                    bioseq_mixed: one.bioseq_mixed
+                        || other.bioseq_mixed
+                        || one.bioseq_apart(Some(other)),
                     first_row_ends: one.first_row_ends || other.first_row_ends,
                     keeps_scope: one.keeps_scope || other.keeps_scope,
                 })
@@ -5837,6 +6015,9 @@ impl From<bool> for ReportRead {
 #[derive(Debug, Default)]
 pub struct HitLoads {
     throws: std::collections::HashMap<usize, crate::ncbi_exception::NcbiException>,
+    /// Keys whose throw ended a report or the run (`AfterThrow::EndsReport` / `EndsRun`,
+    /// distinguishing `bioseq_load_throws` in XML2/JSON, which writes the `Hit` and goes on).
+    stops_report: std::collections::HashSet<usize>,
     /// The subjects for which a load gives another sequence (`HitLoad::Shown`).
     shown: std::collections::HashMap<usize, ShownInstead>,
     unread: std::collections::HashSet<usize>,
@@ -5845,6 +6026,9 @@ pub struct HitLoads {
     prefetched_only: std::collections::HashSet<usize>,
     /// Why the run's formats refuse a lookup that throws (`FormatThrow::Refused`).
     refused: Option<ThrowRefusal>,
+    /// The subjects whose Bioseq's build throws at a load where the formats end apart after
+    /// that throw alone (`RunThrow::bioseq_mixed`): refused (`ThrowRefusal::Mixed`).
+    mixed: std::collections::HashSet<usize>,
     /// The number of the reports given that NCBI's run reaches, where a report's load ended it
     /// (`None`: the run reaches every one).
     reached: Option<usize>,
@@ -6118,11 +6302,6 @@ impl HitLoads {
                     continue;
                 };
                 let keys = subjects[range.clone()].iter().flatten().copied();
-                // The `Hit`'s first row that loads its subject (`rows`).
-                let loads_it = run.rows == super::tabular::SubjectFetch::Every
-                    || range.clone().any(|entry| {
-                        subjects[entry].is_some() && run.rows.reads(identities(report, entry))
-                    });
                 if thrown {
                     passed.extend(keys);
                     continue;
@@ -6131,6 +6310,13 @@ impl HitLoads {
                     loaded.extend(keys);
                     continue;
                 };
+                let bioseq_only = subject.bioseq_load_throws();
+                let (after, row_fetch) = run.end(bioseq_only);
+                // The `Hit`'s first row that loads its subject (`row_fetch`).
+                let loads_it = row_fetch == super::tabular::SubjectFetch::Every
+                    || range.clone().any(|entry| {
+                        subjects[entry].is_some() && row_fetch.reads(identities(report, entry))
+                    });
                 if !loads_it {
                     // No row reads the subject: no load, so nothing is held or thrown; a subject
                     // whose lookup throws is passed, another counts as loaded (its rows read
@@ -6140,6 +6326,12 @@ impl HitLoads {
                     } else {
                         loaded.extend(keys);
                     }
+                    continue;
+                }
+                if bioseq_only && run.bioseq_mixed {
+                    // The formats end apart after this throw: refused (`HitLoads::load`).
+                    loads.mixed.insert(first);
+                    loaded.extend(keys);
                     continue;
                 }
                 let exception = match walk.load(subject) {
@@ -6156,12 +6348,17 @@ impl HitLoads {
                     continue;
                 };
                 loads.throws.insert(first, exception);
-                // Outfmt 13 to 16 load nothing after it in the report (or the run); BLAST XML's
-                // next `Hit` and a table's next row look their own subjects up, but where the
-                // report's first row throws, a table of `sacc` or `saccver` ends the run.
+                // Outfmt 13 to 16 load nothing after a lookup throw in the report (or the run);
+                // a `bioseq_load_throws` subject (`bioseq_after: WritesHit`) writes the `Hit` and
+                // goes on. BLAST XML's next `Hit` and a table's next row look their own subjects
+                // up, but where the report's first row throws, a table of `sacc` or `saccver` ends
+                // the run.
                 let ends_run =
-                    run.after == AfterThrow::EndsRun || (run.first_row_ends && range.start == 0);
-                thrown = ends_run || run.after == AfterThrow::EndsReport;
+                    after == AfterThrow::EndsRun || (run.first_row_ends && range.start == 0);
+                thrown = ends_run || after == AfterThrow::EndsReport;
+                if thrown {
+                    loads.stops_report.insert(first);
+                }
                 if ends_run {
                     ended.set(true);
                 }
@@ -6500,6 +6697,7 @@ impl HitLoads {
                 .into_iter()
                 .filter_map(|(old, exception)| Some((key(old)?, exception)))
                 .collect(),
+            stops_report: self.stops_report.into_iter().filter_map(&key).collect(),
             shown: self
                 .shown
                 .into_iter()
@@ -6508,6 +6706,7 @@ impl HitLoads {
             unread: self.unread.into_iter().filter_map(&key).collect(),
             prefetched_only: self.prefetched_only.into_iter().filter_map(&key).collect(),
             refused: self.refused,
+            mixed: self.mixed.into_iter().filter_map(&key).collect(),
             reached: self.reached,
             prefetched: self
                 .prefetched
@@ -6532,6 +6731,8 @@ impl HitLoads {
             HitLoad::Unread
         } else if let Some(why) = self.refused {
             HitLoad::Refused(why)
+        } else if self.mixed.contains(&key) {
+            HitLoad::Refused(ThrowRefusal::Mixed)
         } else {
             HitLoad::Loaded
         }
@@ -6595,6 +6796,13 @@ impl HitLoads {
             return None;
         }
         self.throws.get(&key)
+    }
+
+    /// Whether the throw at subject `key` ends the query's report or the run
+    /// (`AfterThrow::EndsReport` or `EndsRun` in `HitLoads::after`; `false` for
+    /// `bioseq_load_throws` in XML2 and JSON, which write the caught `Hit` and go on).
+    pub fn stops_report(&self, key: usize) -> bool {
+        !self.shown.contains_key(&key) && self.stops_report.contains(&key)
     }
 
     /// Whether the load of some subject throws (`HitLoad::Throws`).

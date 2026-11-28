@@ -172,6 +172,16 @@ TAXIDS = [9606, 10090, 9606, 10090, 9606, 10090]
 # The records of `pdbtwo`: (molecule, the title of the first definition line or None).
 TWO_LINES = [("1AB1", None), ("1AB2", "t0")]
 
+# The records of `pdbdual` (protein) and `pdbndual` (its back-translation): (FASTA line, the k of
+# `record_letters`, None for ALT's letters, and the shapes `(mol, chain)` that each pdb Seq-id of the line is
+# rewritten to in its order, without a chain-id).
+DUAL = [
+    ("gb|AB600001.1| first", 0, []),
+    ("pdb|1AB1|A|pdb|1AB1|B dual", 1, [("1AB1", 321), ("1AB1", 65)]),
+    ("gb|AB600003.1| after", 2, []),
+    ("gb|AB600004.1| alt", None, []),
+]
+
 # The databases: name -> whether each record has the gb Seq-id before the pdb one.
 DATABASES = {
     "pdbchain": True,
@@ -181,6 +191,8 @@ DATABASES = {
     "pdbn": False,
     "pdbnonly": False,
     "pdbnthrow": False,
+    "pdbdual": False,
+    "pdbndual": False,
 }
 
 # The seed of the letters of `pdbnthrow`'s first record (`random.Random`, A C G T, three per query letter).
@@ -261,13 +273,36 @@ def with_first_pdb(record, mol, chain):
     return record[:at] + b"\xae\x80\x30\x80" + new + b"\x00\x00\x00\x00" + record[end:]
 
 
+def with_pdbs(record, shapes):
+    """`record` (a `Blast-def-line-set`) with its pdb Seq-ids, in their order, `{ mol, chain }` of `shapes`
+    (no chain-id)."""
+    at = 0
+    for mol, chain in shapes:
+        at = record.index(b"\xae\x80\x30\x80", at)
+        end = tlv_end(record, at)
+        new = b"\xae\x80\x30\x80" + ctx(0, visible(mol)) + ctx(1, integer(chain)) + b"\x00\x00\x00\x00"
+        record = record[:at] + new + record[end:]
+        at += len(new)
+    return record
+
+
+def alt_letters(n=220):
+    """Letters unrelated to `pdup.faa` (a linear congruential walk over the 20 amino acids), which hit no
+    other record of `pdbdual`."""
+    x, out = 12345, []
+    for _ in range(n):
+        x = (1103515245 * x + 12345) % (1 << 31)
+        out.append("ACDEFGHIKLMNPQRSTVWY"[(x >> 16) % 20])
+    return "".join(out)
+
+
 def patch(base, db, nucl=False):
     """Rewrites the stored deflines of the version 4 database `base` (one record each of CHAINS, or
     of NORMALIZED for `pdbnorm`, of TWO_LINES for `pdbtwo`, of CHAINS[:1] for `pdbnonly`, the second
-    record of two for `pdbnthrow`) and the
-    header offsets of its index file."""
+    record of two for `pdbnthrow`, of DUAL for `pdbdual` and `pdbndual`) and the header offsets of its
+    index file."""
     rows = {"pdbnorm": NORMALIZED, "pdbtwo": TWO_LINES, "pdbnonly": CHAINS[:1],
-            "pdbnthrow": [None, None]}.get(db, CHAINS)
+            "pdbnthrow": [None, None], "pdbdual": DUAL, "pdbndual": DUAL}.get(db, CHAINS)
     idx_ext, hdr_ext = ("nin", "nhr") if nucl else ("pin", "phr")
     index = bytearray(open(f"{base}.{idx_ext}", "rb").read())
     version, = struct.unpack(">I", index[0:4])
@@ -288,6 +323,8 @@ def patch(base, db, nucl=False):
         records = [with_first_pdb(record, mol, 321) for record, (mol, _) in zip(records, rows)]
     elif db == "pdbnthrow":
         records = [records[0], with_first_pdb(records[1], "1AB1", 321)]
+    elif db in ("pdbdual", "pdbndual"):
+        records = [with_pdbs(record, shapes) for record, (_, _, shapes) in zip(records, rows)]
     else:
         records = [with_chain(record, chain) for record, (_, _, chain) in zip(records, rows)]
     offsets = [0]
@@ -350,8 +387,29 @@ def main(ncbi_bin, names):
         f.write(">pdb|1AB1|A short tail query\n" + back(seq)[360:660] + "\n")
     with open(os.path.join(HERE, "q_pdb1ab1_straddle.fna"), "w") as f:
         f.write(">pdb|1AB1|A straddle query\n" + back(seq)[150:451] + "\n")
+    alt = alt_letters()
+    with open(os.path.join(HERE, "q_dual2.faa"), "w") as f:
+        f.write(">qalt the letters of pdbdual's alt record\n" + alt + "\n>qdual the duplicated record's letters\n"
+                + seq + "\n")
+    with open(os.path.join(HERE, "q_dual.fna"), "w") as f:
+        f.write(">qndual the duplicated record's letters back-translated\n" + back(seq) + "\n")
+    with open(os.path.join(HERE, "q_dual2.fna"), "w") as f:
+        f.write(">qnalt pdbndual's alt record\n" + back(alt) + "\n>qndual the duplicated record's letters "
+                "back-translated\n" + back(seq) + "\n")
     for db in names:
         fasta = os.path.join(work, f"{db}.faa")
+        if db in ("pdbdual", "pdbndual"):
+            nucl = db == "pdbndual"
+            with open(fasta, "w") as f:
+                for line, k, _ in DUAL:
+                    letters_k = alt if k is None else record_letters(seq, k)
+                    f.write(f">{line}\n" + (back(letters_k) if nucl else letters_k) + "\n")
+            base = os.path.join(HERE, db)
+            subprocess.run([os.path.join(ncbi_bin, "makeblastdb"), "-in", fasta, "-dbtype",
+                            "nucl" if nucl else "prot", "-parse_seqids", "-blastdb_version", "4", "-title", db,
+                            "-out", base], check=True, env=env, stdout=subprocess.DEVNULL)
+            patch(base, db, nucl=nucl)
+            continue
         if db == "pdbn":
             with open(fasta, "w") as f:
                 for k, (name, _, _) in enumerate(CHAINS[:2]):

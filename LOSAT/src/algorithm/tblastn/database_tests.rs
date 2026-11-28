@@ -234,3 +234,39 @@ fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
     assert_eq!(text(&database, &[&[(0, 50), (1, 40)]]), "");
     std::fs::remove_dir_all(&cwd).unwrap();
 }
+
+// Review 1 of line DBID pfoff-9, L5: the sequences that a query hides are taken from the hit
+// lists by ordinal id, before the lists are renamed to ranks (by ranks, the sequence of ordinal
+// id 5, rank 0, was matched to no query, and the sequence of ordinal id 0 to the queries that
+// report rank 0).
+#[test]
+fn the_sequences_a_query_hides_are_taken_by_ordinal_id_before_the_ranks() {
+    use crate::blastinput::fasta_reader::believed::BelievedIds;
+    use crate::report::query_bioseq::{QueryBioseqs, QueryRecordRef};
+    let id = crate::seqid::parse::parse_ids(b"gb|AAQ00001.1|", 0, &mut |_| {})
+        .unwrap()
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    let mut keys = Vec::new();
+    for id in &id {
+        crate::seqid::defline_set::scope_keys(id, &mut keys);
+    }
+    let query = BelievedIds::new(id, crate::report::archive::bioseq::SeqLocStrand::Unknown);
+    let record = |h: usize| {
+        (h == 0).then_some(QueryRecordRef {
+            believed: &query,
+            title: b"query",
+            length: 10,
+        })
+    };
+    let mut seen = QueryBioseqs::default();
+    seen.note(0, 5, &keys, 0..1, 0..1, record, true).unwrap();
+    // Query 0 reports the sequences of ordinal ids 5 and 9 (ranks 0 and 1).
+    let mut hitlists = vec![hitlist(&[(5, 40), (9, 30)])];
+    let hidden = rank_hit_lists(&mut hitlists, &[5, 9], seen.numbered_from(0)).unwrap();
+    assert_eq!(hidden, std::collections::HashSet::from([5]));
+    let mut ranks: Vec<i32> = hitlists[0].lists().iter().map(|list| list.oid).collect();
+    ranks.sort_unstable();
+    assert_eq!(ranks, [0, 1]);
+}

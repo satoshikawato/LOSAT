@@ -2889,8 +2889,17 @@ organism report takes `BLASTDB=tests/seqdb/taxdb/t5`). NCBI's data loader makes 
 the description lines, the organism report's generated title and the heading's generated title of the untitled line
 show `t1`, while the heading, the tables and the XML documents list the sequence's own lines. Where no definition line
 holds the handle's id as NCBI's load reads the ids (one line with chain 321 then chain 65, the review probe
-`i12/review/p3` `e15b_oneline`), NCBI's load throws `oid headers do not contain target gi/seq_id`: LOSAT refuses the
-formats that read the Bioseq or prefetch it, outfmt 8 is NCBI's (no row here).
+`i12/review/p3` `e15b_oneline`), NCBI's load throws `oid headers do not contain target gi/seq_id` (line DBID pfoff-9:
+`pdbdual` below).
+`pdbchain/pdbdual` (line DBID pfoff-9; rows `db.pdbchain.pf9.*`) is the version 4 protein database of four records:
+`gb|AB600001.1|` `first`, the definition line `pdb|1AB1|A|pdb|1AB1|B` `dual` rewritten to `pdb 1AB1` chain 321 then
+`pdb 1AB1` chain 65, both without a chain-id, `gb|AB600003.1|` `after` and `gb|AB600004.1|` `alt` (other letters);
+`pdbchain/pdbndual` is its nucleotide database, the same letters back-translated. NCBI's lookup of the handle of the
+dual record's Seq-align id (chain 65) finds the record, whose Bioseq's build then throws: the batch's prefetch stops the
+run (`BLAST Database error`, exit status 2), and with `PRE_FETCH_SEQS_LIMIT=0` each format catches the throw as for a
+lookup that fails on a file, but that `GetLength` succeeds (`slen`, the XML2 and JSON `Hit_len`). `pdbchain/q_dual2.faa`
+(the `alt` record's letters, then the duplicated record's, those of `ids/pdup_q.faa`) with `-evalue 1e-10` and `BATCH_SIZE=1` reports the first batch before the
+second's prefetch stops; `q_dual.fna` and `q_dual2.fna` are the nucleotide queries of the same letters.
 `pdbchain/q_pdb1ab1.faa` (decision KB-12-1 of line RG-KB item 12; rows `db.pdbchain.seen.*`) is the query `pdb|1AB1|A`
 of the duplicated record's letters: read with `-parse_deflines`, its Bioseq holds the id of the handle of `1AB1` chain 321
 (chain 65), so NCBI's scope finds the query for that sequence of `pdbonly` and `pdbtwo`: the tables show the query's ids,

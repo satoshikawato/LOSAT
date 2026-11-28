@@ -4,4 +4,4 @@
   and shown under its own name, quoted as a query file is (`-seqidlist 'ids.txt '`).
 - Web: after a help or version word (`-version`, `-h`) is typed in Additional options, the Run LOSAT button
   no longer says "(2 runs)" for a moment: it names no count until LOSAT has read the new words, then the
-  count of the argv it will run.
+  count of the argv it will run. The WindowMasker tab's button says one run for a help or version word, as the press starts one.

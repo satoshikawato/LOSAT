@@ -5159,6 +5159,7 @@ pub(crate) fn batch_title_posts(
             )?;
         } else {
             db.note_unmodelled_prefetch();
+            taxonomy.note_title_loads(db, reads.clone());
         }
     }
     if utf8_posted && !posts.is_empty() {
@@ -5196,8 +5197,9 @@ pub(crate) fn batch_title_posts(
 /// (whether its load reads the record decides whether the other's finds its own). And LOSAT's
 /// refusal of what NCBI determines but LOSAT does not model yet: a batch whose loads of a subject
 /// with a positive taxid write texts of the run's taxonomy database (`taxonomy`,
-/// [`TaxdbRun::loads_write_texts`]: NCBI writes them inside the loads, after the header reads and
-/// before the decode, `CSeqDBVol::GetBioseq`'s `x_GetTaxonomy`, among the loads' posts, where LOSAT
+/// [`TaxdbRun::title_loads_write_texts`]: NCBI writes them in the load that looks the taxid up,
+/// after its header read and before the decode, `CSeqDBVol::GetBioseq`'s `x_GetTaxonomy`, among
+/// the loads' posts, where LOSAT
 /// writes the prefetch's texts after its posts), and a batch whose map LOSAT does not know
 /// ([`UNNAMED_MAP`]).
 #[cold]
@@ -5241,6 +5243,7 @@ fn prefetch_title_posts(
         )
     };
     let slot = |at: Option<crate::seqdb::SeqLocation>| at.map(|at| db.header_slot(at));
+    let load_texts = std::cell::OnceCell::new();
     for (index, (ordinal, at, texts)) in subjects.iter().enumerate() {
         if texts.is_empty() {
             continue;
@@ -5252,9 +5255,18 @@ fn prefetch_title_posts(
             return Err(refuse(*ordinal, why));
         }
         if held[index] == BlobHeld::Out
-            && taxonomy_texts_among_loads(db, taxonomy, &subjects, &held)
+            && *load_texts.get_or_init(|| {
+                taxonomy.title_loads_write_texts(
+                    db,
+                    subjects
+                        .iter()
+                        .zip(&held)
+                        .filter(|(_, state)| **state != BlobHeld::Held)
+                        .map(|((ordinal, _, _), _)| *ordinal),
+                )
+            })
         {
-            return Err(refuse(*ordinal, "the run's taxonomy database writes texts where the prefetch loads a sequence with a taxid (NCBI writes them inside each load, among the loads' error messages), which LOSAT does not place among those messages yet"));
+            return Err(refuse(*ordinal, "a load of the batch's prefetch writes a text of the run's taxonomy database (NCBI writes it in the load that looks a taxid up, after that load's header read and before its decode: the texts of opening the database at the run's first such load, the offset error at a lookup of its taxid that the volume's cache does not hold), among the loads' error messages, which LOSAT does not place among those messages yet"));
         }
         // Whether such a load reads its record decides what the slot holds for this subject's
         // load, and for its reads in the batches after, held or not.
@@ -5296,27 +5308,8 @@ fn prefetch_title_posts(
             }
         }
     }
+    taxonomy.note_title_loads(db, subjects.iter().map(|(ordinal, _, _)| *ordinal));
     Ok(())
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1306-1324, 1455-1466
-/// Whether a load of the batch's prefetch (a subject of `subjects` that `held` leaves out of
-/// NCBI's cache, [`crate::seqdb::BlobHeld::Out`]) has a positive taxid in a run whose loads of
-/// such a sequence write texts of its taxonomy database ([`TaxdbRun::loads_write_texts`]): the
-/// load looks the taxid up after it reads the header, before it decodes it.
-fn taxonomy_texts_among_loads(
-    db: &SeqDb,
-    taxonomy: &TaxdbRun,
-    subjects: &[(u32, Option<crate::seqdb::SeqLocation>, Vec<Vec<u8>>)],
-    held: &[crate::seqdb::BlobHeld],
-) -> bool {
-    taxonomy.loads_write_texts(db)
-        && subjects.iter().zip(held).any(|((ordinal, _, _), state)| {
-            *state == crate::seqdb::BlobHeld::Out
-                && db
-                    .defline_taxids(*ordinal)
-                    .map_or(true, |taxids| taxids.iter().any(|&taxid| taxid > 0))
-        })
 }
 
 /// NCBI's posts of each read of the definition lines of the reported database subjects that a
@@ -5694,6 +5687,9 @@ pub(crate) struct TaxdbRun {
     /// The texts of the loads that the model of the reads placed where NCBI makes no load
     /// ([`TaxdbRun::load_texts`], `report::query_warnings::LoadTexts`).
     load_texts: std::sync::Arc<crate::report::query_warnings::LoadTexts>,
+    /// What the prefetch loads of the run's batches before looked up, as the posts of their titles
+    /// meet them ([`TaxdbRun::title_loads_write_texts`]).
+    title_lookups: std::sync::Mutex<TitleLookups>,
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:126
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:128
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:100
@@ -5746,6 +5742,19 @@ impl PrefetchTexts {
             opening: !taxdb.open_messages().is_empty(),
         }
     }
+}
+
+/// What the prefetch loads of a run's batches looked up for certain in its taxonomy database, as
+/// the posts of their titles meet the batches in order (`batch_title_posts`,
+/// [`TaxdbRun::note_title_loads`]): what decides whether a later batch's loads write a text
+/// ([`TaxdbRun::title_loads_write_texts`]).
+#[derive(Debug, Default)]
+struct TitleLookups {
+    /// A load looked a positive taxid up: the database is open, its texts of opening written.
+    opened: bool,
+    /// The volumes where a load looked the offset error's taxid up, whose slot of the volume's
+    /// cache holds it from then on where no other taxid of the volume takes that slot.
+    offset_volumes: std::collections::HashSet<usize>,
 }
 
 /// The size 256 of `CSeqDBVol::m_TaxCache`: the slots of a volume's taxonomy cache.
@@ -7041,6 +7050,7 @@ impl TaxdbRun {
         if let Some(rows_open) = self.rows_open.get() {
             rows_open.lock().expect("the rows' texts").clear();
         }
+        *self.title_lookups.lock().expect("the title lookups") = TitleLookups::default();
         self.load_texts.clear();
     }
 
@@ -7253,6 +7263,73 @@ impl TaxdbRun {
     /// (`report::query_bioseq::note_or_refuse`).
     pub(crate) fn loads_write_texts(&self, db: &SeqDb) -> bool {
         self.prefetch_texts(db) != PrefetchTexts::default() || self.load_throws(db)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1306-1324, 1455-1466
+    // A load looks each positive taxid of its definition lines up after it reads the header,
+    // before it decodes it (`x_GetTaxonomy`), through the volume's 256-slot cache (cited at
+    // `SlotHolds::walk`): the run's first lookup opens the database (its texts of opening), a
+    // lookup of the offset error's taxid that misses its slot writes that error, and every lookup
+    // faults or throws where `taxdb.btd` is mapped as a null pointer or a file throws.
+    /// Whether a load of the sequences `loads` (ordinal ids in `db`: the loads of a batch's
+    /// prefetch, those that NCBI's data source may hold included) may write a text of the run's
+    /// taxonomy database or throw, after the loads of the batches before
+    /// ([`TaxdbRun::note_title_loads`]): a load of a sequence with a positive taxid (or taxids
+    /// LOSAT cannot read) where every lookup can (a null mapping, a file that throws), or before
+    /// the run's first lookup where opening the database writes texts, and a load with the offset
+    /// error's taxid in a volume where no load before looked it up, or where another taxid of the
+    /// volume can take its slot ([`TaxdbRun::cache_collision`]).
+    fn title_loads_write_texts(&self, db: &SeqDb, loads: impl IntoIterator<Item = u32>) -> bool {
+        if !self.loads_write_texts(db) {
+            return false;
+        }
+        let texts = self.prefetch_texts(db);
+        let every = texts.maps_null || self.load_throws(db);
+        let collision = self.cache_collision(db).is_some();
+        let before = self.title_lookups.lock().expect("the title lookups");
+        loads.into_iter().any(|ordinal| {
+            let taxids = db.defline_taxids(ordinal).ok();
+            if !taxids
+                .as_ref()
+                .is_none_or(|taxids| taxids.iter().any(|&taxid| taxid > 0))
+            {
+                return false;
+            }
+            every
+                || (texts.opening && !before.opened)
+                || texts.offset_error_taxid.is_some_and(|last| {
+                    taxids.as_ref().is_none_or(|taxids| taxids.contains(&last))
+                        && (collision
+                            || db
+                                .volume_index(ordinal)
+                                .map_or(true, |volume| !before.offset_volumes.contains(&volume)))
+                })
+        })
+    }
+
+    /// Notes the subjects of a batch's prefetch `ordinals` (every one of its Seq-aligns: each was
+    /// loaded by this batch or a batch before) for the batches after it
+    /// ([`TaxdbRun::title_loads_write_texts`]): a positive taxid opens the database, the offset
+    /// error's taxid fills its slot of the volume. Nothing where no load writes a text.
+    pub(crate) fn note_title_loads(&self, db: &SeqDb, ordinals: impl IntoIterator<Item = u32>) {
+        if !self.loads_write_texts(db) {
+            return;
+        }
+        let last = self.prefetch_texts(db).offset_error_taxid;
+        let mut seen = self.title_lookups.lock().expect("the title lookups");
+        for ordinal in ordinals {
+            let Ok(taxids) = db.defline_taxids(ordinal) else {
+                continue;
+            };
+            if taxids.iter().any(|&taxid| taxid > 0) {
+                seen.opened = true;
+            }
+            if let (Some(last), Ok(volume)) = (last, db.volume_index(ordinal)) {
+                if taxids.contains(&last) {
+                    seen.offset_volumes.insert(volume);
+                }
+            }
+        }
     }
 
     /// [`PrefetchTexts`] of the run, read once ([`PrefetchTexts::of`]): none without `taxdb.bti`

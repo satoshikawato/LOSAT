@@ -27,7 +27,11 @@ NCBI BLAST+ 2.17.0's makeblastdb), the version 4 databases of `tests/db_search/t
   `tc_qabc`, `tc_qbac`, `tc_qacb`, `tc_qaba`, the batches' order of NCBI's cache of 10 released sequences);
 - `tc_du_p` / `tc_du_n`: DU (a UTF8String title, such a byte and a title NCBI cannot read, one query
   `tc_qdu` hits them in that order);
-- the queries `tc_q260` (BIG's OIDs 0 to 259 in one query), `tc_qslotu` (BIG's OID 258 with OIDs
+- `tc_h1_p` / `tc_h1_n`: H1 (a clean title and one with such a byte, `-taxid 99990`; the queries `tc_qh1`,
+  the clean one's letters then the other's, and `tc_qh1r`, the reverse: with BATCH_SIZE, which batch's
+  loads look the taxid up first);
+- the queries `tc_q200` and `tc_q201` (BIG's OIDs 0 to 197 or 198 and OID 256: 200 or 201 Seq-align ids
+  with OIDs 1 and 257), `tc_q260` (BIG's OIDs 0 to 259 in one query), `tc_qslotu` (BIG's OID 258 with OIDs
   4 to 13, then OIDs 2 and 258) and `tc_qslotu1` (its first query);
 - the queries `tc_q1.faa` (one protein), `tc_q2.faa` (two), `tc_qslot.faa` (eight: OID 0's and OID
   256's letters, which read their slot in both orders, OID 2's, OID 258's and OID 2's again, OID 3's,
@@ -133,15 +137,25 @@ FAM_QUERIES = {"A": (b"qa famA", FAM_A), "B": (b"qb famB", FAM_B), "C": (b"qc fa
 # one query hits in that order (v0's 120 letters score first).
 EU = lcg(120, 308)
 DU = [(b"v0 utf8 clean long", [], EU), (b"v1 fam#one", [b"\xe9"], PROT), (b"v2 damaged title", [], mut(PROT, 10))]
+# H1: a clean title and one with such a byte, `-taxid 99990` (the last entry of tests/seqdb/taxdb's databases, the
+# offset error's taxid in offset_last_past_end); one query each, so that BATCH_SIZE gives each its batch.
+H1_CLEAN, H1_BAD = lcg(60, 401), lcg(80, 402)
+H1 = [(b"k0 clean", [], H1_CLEAN), (b"k1 cee#", [b"\xff"], H1_BAD)]
 DATABASES = {"tc": SUBJECTS, "tc_b": DBB, "tc_big": BIG, "tc_big2": BIG2, "tc_x": DBX, "tc_dmg": DMG,
-             "tc_ps": PS, "tc_u8": U8, "tc_tax": SUBJECTS, "tc_fam": FAM, "tc_du": DU}
+             "tc_ps": PS, "tc_u8": U8, "tc_tax": SUBJECTS, "tc_fam": FAM, "tc_du": DU, "tc_h1": H1}
 # More queries: one of the letters of BIG's OIDs 0 to 259 (a batch of 260 Seq-align ids, NCBI's prefetch in
 # pieces of 100, 100 and 60); BIG's OID 258 with OIDs 4 to 13 (11 loads, more than NCBI's cache of 10 keeps),
 # then OID 2 and OID 258 (OID 2 posts in the header cache slot of OID 258), and its first query alone (the
 # rows that LOSAT writes before it refuses the second batch); the families in the orders A B C, B A C, A C B and
-# A B A; DU's v0 and v1 letters.
+# A B A; DU's v0 and v1 letters; BIG's OIDs 0 to 197 or 198 with OID 256 (with OIDs 1 and 257, whose letters OIDs 0
+# and 256 share, 200 or 201 Seq-align ids: one map or NCBI's pieces); H1's clean subject then the other, and the
+# reverse.
 MORE_QUERIES = {
     "tc_q260": [(b"q260 big", "".join(BIG[i][2] for i in range(260)))],
+    "tc_q200": [(b"q200", "".join(BIG[i][2] for i in range(198)) + BIG[256][2])],
+    "tc_q201": [(b"q201", "".join(BIG[i][2] for i in range(199)) + BIG[256][2])],
+    "tc_qh1": [(b"qa clean", H1_CLEAN), (b"qb bad", H1_BAD)],
+    "tc_qh1r": [(b"qb bad", H1_BAD), (b"qa clean", H1_CLEAN)],
     "tc_qslotu": [(b"qsu1 dee and ten", D + "".join(BIG[i][2] for i in range(4, 14))), (b"qsu2 cee dee", C + D)],
     "tc_qslotu1": [(b"qsu1 dee and ten", D + "".join(BIG[i][2] for i in range(4, 14)))],
     "tc_qabc": [FAM_QUERIES[c] for c in "ABC"],
@@ -222,7 +236,8 @@ def main():
             subprocess.run([os.path.join(ncbi_bin, "makeblastdb"), "-in", source, "-dbtype", dbtype,
                             "-blastdb_version", "4", "-title", name, "-out", os.path.join(HERE, name)]
                            + (["-parse_seqids"] if stem == "tc_ps" else [])
-                           + (["-taxid", "9606"] if stem == "tc_tax" else []),
+                           + (["-taxid", "9606"] if stem == "tc_tax" else [])
+                           + (["-taxid", "99990"] if stem == "tc_h1" else []),
                            check=True, stdout=subprocess.DEVNULL)
             os.remove(source)
             for ext in ("pjs", "njs"):

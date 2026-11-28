@@ -104,6 +104,14 @@ describe('blast-db domain discovery & directory assembly', () => {
     expect(pickedFilePath(fileWithRelPath('bad\0name.nin'))).toBeUndefined();
   });
 
+  it('keeps spaces at the start and the end of a name: the file is mounted and named as it is called (S4-3)', () => {
+    expect(normalizeRunPath('ids.txt ')).toBe('ids.txt ');
+    expect(normalizeRunPath(' ids.txt')).toBe(' ids.txt');
+    expect(normalizeRunPath('./ my db / nt.nin ')).toBe(' my db / nt.nin ');
+    expect(normalizeRunPath('')).toBeUndefined();
+    expect(pickedFilePath(fileWithRelPath(' db/nt.nin '))).toBe(' db/nt.nin ');
+  });
+
   it('uses case-sensitive NCBI FindBlastDBs extensions in sync discovery and primaryBlastDbName', () => {
     expect(discoverBlastDatabaseNames(['db/nt.nin', 'db/NT.NIN', 'db/prot.pin', 'db/PROT.PIN'])).toEqual([
       { name: 'db/nt', kind: 'nucleotide', entry: 'volume' },
@@ -1084,6 +1092,34 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     expect(draft.state.get().message?.text).toContain("Incompatible with argument:  'no_taxid_expansion'");
   });
 
+  it('names every list file as the file is called, also with a space at its start or end, in the argv and in the run directory (S4-3)', async () => {
+    const names = new Map<string, string>([
+      ['-seqidlist', 'seq.txt '],
+      ['-negative_seqidlist', ' neg seq.txt'],
+      ['-taxidlist', ' tax.txt '],
+      ['-negative_taxidlist', 'neg_tax.txt '],
+      ['-gilist', ' gi.txt'],
+      ['-negative_gilist', 'neg_gi.txt '],
+      ['-ipglist', ' ipg.txt'],
+      ['-negative_ipglist', 'neg_ipg.txt '],
+    ]);
+    const { draft, runCalls, coordinator } = setup();
+    draft.setProgram('blastp');
+    draft.setSubjectSource('database');
+    await draft.setSubjectDatabaseFiles([fileWithRelPath('protdb/p.pin', 'pin'), fileWithRelPath('protdb/p.phr', 'phr'), fileWithRelPath('protdb/p.psq', 'psq')]);
+    for (const [flag, name] of names) draft.setDatabaseFilterFile(flag, diskFile(name, `${name}\n`));
+    await draft.idle();
+    for (const [flag, name] of names) expect(draft.parameters(), flag).toContainEqual([flag, name]);
+    draft.setPaste('query', '>q1\nMKVLAAGIVGLLLAQPSWA\n');
+    await submitAndWait(draft, coordinator);
+    const request = runCalls[0]!;
+    for (const [flag, name] of names) {
+      const at = request.argv.indexOf(flag);
+      expect(request.argv[at + 1], flag).toBe(name);
+      expect(request.files?.map((f) => f.name), flag).toContain(name);
+    }
+  });
+
   it('pins explicit argv order of all database filter text, boolean, and list-file flags in parameters() (WW4)', async () => {
     const { draft } = setup();
     draft.setProgram('blastp');
@@ -1282,5 +1318,43 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     await runEnd(coordinator, (second as { runIds: readonly string[] }).runIds[0]!);
     expect(runCalls[1]!.argv).toContain('-help');
     expect(runCalls[1]!.argv.join(' ')).not.toContain('q"');
+  });
+
+  it('counts and runs one version print with a refused -db and two queries Separate, and the line says it (line WQA, D33 with WW4d)', async () => {
+    const reason = 'a double quote there starts or ends a name';
+    const { draft, coordinator, runCalls, engine } = setup();
+    const asked: (readonly string[])[] = [];
+    const start = engine.start.bind(engine);
+    engine.start = async (argv: readonly string[] = []) => {
+      asked.push(argv);
+      const started = await start(argv);
+      return started.ok && argv.includes('-version') ? { ok: true, start: { ...started.start, prints: 'version' } } : started;
+    };
+    // The engine's check of an argv that prints the version, as the real engine answers it (the fake knows no -version of a search).
+    const validate = engine.validate.bind(engine);
+    engine.validate = async (argv: readonly string[]) =>
+      argv.includes('-version') ? { ok: true, dataLoaders: false, parseDeflines: false } : validate(argv);
+    const fasta = (name: string, text: string) => new File([text], name, { type: 'text/plain' });
+    draft.addFiles('query', [fasta('a.fa', '>a\nACGTACGTACGTACGT\n'), fasta('b.fa', '>b\nACGTACGTACGTACGT\n')]);
+    draft.setMode('query', 'separate');
+    draft.setSubjectSource('database');
+    await draft.setSubjectDatabaseFiles([fileWithRelPath('q"d/ndb.nin', 'nin'), fileWithRelPath('q"d/ndb.nsq', 'nsq')]);
+    await draft.idle();
+    const refused = `A database named "q"d/ndb" cannot be in -db: ${reason}.`;
+    // The start answers for the argv with the refused name left out: a search of each query, refused by the check.
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: refused });
+    expect([draft.runCount(), draft.shownPrintsKind()]).toEqual([2, null]);
+    draft.setExtra('-version');
+    await draft.idle();
+    expect(draft.state.get().validation).toEqual({ state: 'ok' });
+    expect([draft.runCount(), draft.shownPrintsKind(), draft.printsKind()]).toEqual([1, 'version', 'version']);
+    expect(asked.every((argv) => !argv.join(' ').includes('q"'))).toBe(true);
+    const submitted = await draft.submit();
+    expect(submitted).toMatchObject({ ok: true });
+    expect((submitted as { runIds: readonly string[] }).runIds).toHaveLength(1);
+    await runEnd(coordinator, (submitted as { runIds: readonly string[] }).runIds[0]!);
+    expect(runCalls).toHaveLength(1);
+    expect(runCalls[0]!.argv).toContain('-version');
+    expect(runCalls[0]!.argv.join(' ')).not.toContain('q"');
   });
 });

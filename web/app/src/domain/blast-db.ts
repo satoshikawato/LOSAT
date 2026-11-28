@@ -228,11 +228,13 @@ export function duplicateRunFileMessage(name: string): string {
 
 /**
  * Normalizes a picked or folder-relative entry name for a run directory: uses `/` separators,
- * trims whitespace, strips leading `./` and `/` segments, and rejects empty, interior `.`, `..`,
- * or NUL-containing paths (matching `RunDirectory`'s path rules in `packages/losat`).
+ * strips leading `./` and `/` segments, and rejects empty, interior `.`, `..`, or NUL-containing
+ * paths (matching `RunDirectory`'s path rules in `packages/losat`). Spaces are part of a name, as
+ * in the user's folder and on the command line: the file is mounted, and named in the argv, as it
+ * is called (line WQA's D33, S4-3).
  */
 export function normalizeRunPath(raw: string): string | undefined {
-  const cleaned = raw.replaceAll('\\', '/').trim();
+  const cleaned = raw.replaceAll('\\', '/');
   if (cleaned === '' || cleaned.includes('\0')) return undefined;
   const parts: string[] = [];
   for (const segment of cleaned.split('/')) {

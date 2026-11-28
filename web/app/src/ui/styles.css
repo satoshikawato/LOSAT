@@ -1624,7 +1624,8 @@ textarea {
   z-index: 20;
   box-sizing: border-box;
   width: max-content;
-  max-width: min(44em, calc(100vw - 32px));
+  /* The page's width less 16 px at each side, measured by HelpTip.vue (100vw counts a scroll bar). */
+  max-width: min(44em, var(--help-room, calc(100vw - 32px)));
   margin: 0;
   padding: 8px 10px;
   background: var(--group);
@@ -2386,21 +2387,27 @@ pre.range-text {
     container-type: inline-size;
   }
 
+  /* A tab's name is centred on the whole tab, between its 1 px borders, with no padding at the sides: the
+     name's line is as wide as the space the name has. With 2 px of padding at each side the line was 4 px
+     narrower than that space, and "TBLASTN" was wider than its line at 280 to 360 px (by 0.1 to 0.8 px in
+     Firefox and WebKit, up to 3 px in Chromium), so the page's rule for long words (body's overflow-wrap)
+     broke it in two lines (D32's review r2, M1, 2026-11-28). */
   .program-tab {
     flex: 1 1 0;
     min-width: 0;
     text-align: center;
-    padding: 10px 2px 9px;
+    padding: 10px 0 9px;
     border-radius: 6px 6px 0 0;
     font-size: 0.9em;
   }
 
   /* Below 360 px the names would pass their tabs' borders: the type shrinks with the row so that
-     each name fits its tab. A tab is (100cqi - 8px) / 5 wide (five tabs, four 2 px gaps); a name
-     wider than its tab's content starts 3 px in (1 px border, 2 px padding); the widest,
-     "TBLASTN" in Inter 600, is up to 4.76 em wide (Chromium at 12 px; Firefox and WebKit 4.67).
-     With 1 px to spare and 4.8 em: 3px + 4.8em <= (100cqi - 8px) / 5 - 1px, so the size is at
-     most (100cqi - 28px) / 24 (10.8 px in a 320 px window, 12.5 px at 359 px). */
+     each name fits its tab. A tab is (100cqi - 8px) / 5 wide (five tabs, four 2 px gaps), and its
+     name's line is the tab less its two 1 px borders; the widest name, "TBLASTN" in Inter 600, is
+     up to 4.76 em wide (Chromium at 12 px; Firefox and WebKit 4.67). With 4.8 em and 1 px to spare
+     at each side: 4.8em <= (100cqi - 8px) / 5 - 4px, so the size is at most (100cqi - 28px) / 24
+     (10.8 px in a 320 px window, 12.5 px at 359 px). Chromium, which rounds the name to 4.9 em at
+     10 px (a 300 px window), still has 0.5 px at each side. */
   @media (max-width: 359px) {
     .program-tab {
       font-size: min(0.9em, calc((100cqi - 28px) / 24));

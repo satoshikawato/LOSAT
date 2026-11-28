@@ -9,10 +9,11 @@ let pointing: (() => void) | undefined;
 // mouse or pen or reached with the keyboard, and a click keeps it open until the next click,
 // Escape or a click elsewhere (a touch screen has no hover: a tap opens, a tap closes). The
 // help floats under the control (styles.css .help-tip), shifted left when it would leave the
-// viewport, so the page does not move while the pointer passes over the "?". As WCAG 1.4.13
+// page's width, so the page does not move while the pointer passes over the "?". As WCAG 1.4.13
 // asks (WA2-AX-07), the pointer can move from the "?" onto the help without closing it, and
 // Escape closes the help wherever the focus is, which stays where it is.
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
+import { helpRoom, helpShift } from './help-place';
 
 const props = defineProps<{ id: string; label: string; text: string }>();
 
@@ -24,8 +25,31 @@ const keyed = ref(false);
 const shown = computed(() => pinned.value || pointed.value || keyed.value);
 const root = ref<HTMLElement | null>(null);
 const box = ref<HTMLElement | null>(null);
-/** Pixels the help is moved left so that it ends inside the viewport. */
+/** Pixels the help is moved left so that it ends inside the page's width. */
 const shift = ref(0);
+/** The widest the help may be: the page's width less a margin at each side (help-place.ts, styles.css .help-tip .help). */
+const room = ref<number | undefined>(undefined);
+/** Places the help again when the page's width or the help's size changes while it is shown. */
+let resized: ResizeObserver | undefined;
+
+/**
+ * Keeps the shown help inside the page's width, a margin from its edges (help-place.ts): as wide as the page
+ * allows, and moved left when it would end past the right edge, never past the left one. The page's width is the
+ * window's less a scroll bar (the root's clientWidth; innerWidth and 100vw count the bar). Run when the help opens
+ * and again whenever the page's width or the help's size changes while it is shown: a help that kept the place it
+ * had when it opened passed the edge once the window was narrowed, and the page scrolled sideways (3 and 9 px at
+ * 280 to 390 px for max_hsps and lcase_masking opened at 1280 px; D32's review r2, L2, 2026-11-28).
+ */
+async function place(): Promise<void> {
+  const page = document.documentElement.clientWidth;
+  if (room.value !== helpRoom(page)) {
+    room.value = helpRoom(page);
+    await nextTick();
+  }
+  const rect = box.value?.getBoundingClientRect();
+  if (rect === undefined) return;
+  shift.value = helpShift(rect.left, rect.right, shift.value, page);
+}
 
 /**
  * Whether a point is in the box around the "?" and the help, the way from one to the other: the
@@ -107,19 +131,24 @@ watch(pinned, (on) => {
 watch(shown, async (on) => {
   if (on) document.addEventListener('keydown', escape);
   else document.removeEventListener('keydown', escape);
+  resized?.disconnect();
+  resized = undefined;
   shift.value = 0;
   if (!on) return;
   await nextTick();
-  const rect = box.value?.getBoundingClientRect();
-  if (rect !== undefined) {
-    const over = Math.ceil(rect.right - (window.innerWidth - 16));
-    shift.value = Math.min(Math.max(0, over), Math.max(0, Math.floor(rect.left - 16)));
-  }
+  if (!shown.value || box.value === null) return;
+  await place();
+  if (!shown.value || box.value === null || typeof ResizeObserver === 'undefined') return;
+  // The root's box changes with the window's width.
+  resized = new ResizeObserver(() => void place());
+  resized.observe(document.documentElement);
+  resized.observe(box.value);
 });
 onUnmounted(() => {
   if (pointing === unpoint) pointing = undefined;
   document.removeEventListener('pointerdown', outside, true);
   document.removeEventListener('keydown', escape);
+  resized?.disconnect();
   unfollow();
 });
 </script>
@@ -149,7 +178,10 @@ onUnmounted(() => {
       role="tooltip"
       :data-testid="`${props.id}-help`"
       :data-pinned="pinned"
-      :style="shift > 0 ? { transform: `translateX(-${shift}px)` } : undefined"
+      :style="{
+        '--help-room': room === undefined ? undefined : `${room}px`,
+        transform: shift > 0 ? `translateX(-${shift}px)` : undefined,
+      }"
     >
       {{ props.text }}
     </p>

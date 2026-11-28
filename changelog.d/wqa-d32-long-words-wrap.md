@@ -4,3 +4,7 @@
   Alignments summary, the HSP list's heading and the Dot plot's caption for a sequence ID such as
   `NC_000913.3_Escherichia_coli_K12_MG1655`, Format Archive's chosen file and WindowMasker's output
   tab and download button. They wrap inside their box, as other long names do.
+
+- LOSAT Web: a "?" help that is open while the window gets narrower stays inside the window. It kept the place it
+  had when it opened, and the help of an option at the right edge (Mask lower case letters, Max HSPs per subject,
+  Max target sequences) made the page scroll sideways by 3 to 9 px.

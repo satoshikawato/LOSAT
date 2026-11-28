@@ -3,6 +3,8 @@
 // make the page wider than the window (line WQA's sweep 4, S4-4 and S4-7, 2026-11-28). The same word in the other
 // boxes that show a name or an ID (the review's M1): the Alignments summary, the HSP list's heading, the Dot plot's
 // caption, Format Archive's chosen file, WindowMasker's output tab and download button, and the words of a failed run.
+// The rule must not break the page's own words (review r2, M1: "TBLASTN" in two lines at 280 to 360 px), and a help
+// stays inside the page when the window narrows while it is open (review r2, L2).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
@@ -163,5 +165,81 @@ test.describe('long words stay inside the page', () => {
     ]);
     await expect(page.locator('.warning').filter({ hasText: 'Not searched' }).first()).toContainText('YYYY', { timeout: 30_000 });
     await expectFits(page, '.warning', 'source card warning');
+  });
+});
+
+// The page's own words: a tab's name has a line as wide as its tab, so the rule for long words never breaks it.
+test.describe("the page's own words and its helps", () => {
+  const NARROW_TO_WIDE = [280, 300, 320, 340, 359, 360, 390, 480, 800, 801, 1280] as const;
+
+  /** The names of the shown `.program-tab` tabs that take more than one line, at the window's width now. */
+  async function brokenTabNames(page: Page): Promise<string[]> {
+    return page.evaluate(() =>
+      [...document.querySelectorAll('.program-tab')].flatMap((tab) => {
+        const text = [...tab.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim());
+        if (text === undefined) return [];
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        const tops = new Set([...range.getClientRects()].filter((rect) => rect.width > 0).map((rect) => Math.round(rect.top)));
+        return tops.size > 1 ? [text.textContent!.trim()] : [];
+      }),
+    );
+  }
+
+  test('the mode tabs and the WindowMasker stage tabs keep each name on one line at every width', async ({ page }) => {
+    await openSearch(page);
+    for (const panel of ['search', 'windowmasker'] as const) {
+      if (panel === 'windowmasker') await page.getByTestId('tab-windowmasker').click();
+      const tabs = page.getByTestId(panel === 'search' ? 'program-tabs' : 'wm-stage-tabs');
+      await expect(tabs).toBeVisible();
+      for (const width of NARROW_TO_WIDE) {
+        await page.setViewportSize({ width, height: 900 });
+        expect(await brokenTabNames(page), `${panel} tabs at ${width} px: a name in two lines`).toEqual([]);
+      }
+    }
+  });
+
+  test('every help opened in a wide window stays inside the page when the window narrows', async ({ page }) => {
+    // 24 helps opened at 1280 px and seen at three widths, then opened at two: WebKit took 33 s.
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await openSearch(page);
+    await openParameters(page);
+    const toggles = await page
+      .locator('.help-toggle:visible')
+      .evaluateAll((buttons) => buttons.map((button) => button.getAttribute('data-testid') ?? ''));
+    expect(toggles.length).toBeGreaterThan(20);
+    /** "inside" when the open help of `id` and the page are inside the window, else where they are. */
+    const where = (id: string) =>
+      page.evaluate((help) => {
+        const box = document.querySelector(`[data-testid="${help}"]`)!.getBoundingClientRect();
+        const window = document.documentElement.clientWidth;
+        const scroll = document.documentElement.scrollWidth;
+        return box.left >= 0 && box.right <= window && scroll <= window
+          ? 'inside'
+          : `help ${box.left.toFixed(1)}..${box.right.toFixed(1)}, page ${scroll} in a window of ${window}`;
+      }, id.replace(/-toggle$/, ''));
+    for (const id of toggles) {
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.getByTestId(id).click();
+      await expect(page.getByTestId(id.replace(/-toggle$/, ''))).toBeVisible();
+      for (const width of [390, 320, 280]) {
+        await page.setViewportSize({ width, height: 900 });
+        await expect
+          .poll(() => where(id), { message: `${id} at ${width} px after opening at 1280 px`, timeout: 3_000 })
+          .toBe('inside');
+      }
+      await page.getByTestId(id).click();
+      await expect(page.getByTestId(id.replace(/-toggle$/, ''))).toHaveCount(0);
+    }
+    // Opened at the width it is seen at.
+    for (const width of [280, 320]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const id of toggles) {
+        await page.getByTestId(id).click();
+        await expect.poll(() => where(id), { message: `${id} opened at ${width} px`, timeout: 3_000 }).toBe('inside');
+        await page.getByTestId(id).click();
+      }
+    }
   });
 });

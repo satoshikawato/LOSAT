@@ -12,7 +12,7 @@ import { splitOptions } from '../domain/argv';
 import { duplicateRunFileMessage, normalizeRunPath, primaryBlastDbName } from '../domain/blast-db';
 import type { FieldValue, FormValues } from '../domain/parameters';
 import type { ToolFileOrigin } from '../domain/run';
-import { buildMakeblastdbArgv, fileListNames, makeblastdbInputList } from '../domain/tool-argv';
+import { buildMakeblastdbArgv, fileListNames, listNameRefusal, makeblastdbInputList } from '../domain/tool-argv';
 import { makeblastdbInputType, makeblastdbOptionParameters, toolPrintsKind, type MakeblastdbInputType } from '../domain/tools';
 import type { ToolDirectoryFile, ToolRequest } from './coordinator';
 import { ToolDraftCore, type StatePatch, type ToolDraftCoreDeps, type ToolExtraFile, type ToolFormState } from './tool-draft-core';
@@ -26,6 +26,8 @@ export interface MakeblastdbDraftState extends ToolFormState {
   readonly fastaPaste: string;
   /** The files that `-in` names for FASTA and ASN.1 input, in the run directory under their names. */
   readonly inputFiles: readonly ToolExtraFile[];
+  /** Why files opened for `-in` were refused, shown in the Input block (`inputProblem`). */
+  readonly inputError?: string;
   /**
    * `-in` for `-input_type blastdb`, as the command line takes it (its files are files of the run): as typed (a list of
    * databases, a name with a space between double quotes), or the name that the files of the run give, quoted when it
@@ -118,15 +120,18 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
   // --- the input ------------------------------------------------------------------------------
 
   setFastaPaste(text: string): void {
-    this.set({ fastaPaste: text, message: undefined });
+    this.set({ fastaPaste: text, inputError: undefined, message: undefined });
     this.scheduleValidation();
   }
 
-  /** Adds files that `-in` names (FASTA or ASN.1); refuses a name already there. */
+  /**
+   * Adds files that `-in` names (FASTA or ASN.1); refuses, in the Input block, a name already there and a name that
+   * `-in`'s list cannot carry (`listNameRefusal`).
+   */
   addInputFiles(files: readonly File[]): void {
     if (files.length === 0) return;
     const state = this.state.get();
-    const taken = new Set([...state.inputFiles.map((entry) => entry.name), ...(state.fastaPaste.trim() === '' ? [] : [MAKEBLASTDB_PASTE_NAME])]);
+    const taken = new Set(state.inputFiles.map((entry) => entry.name));
     const added: ToolExtraFile[] = [];
     let error: string | undefined;
     for (const file of files) {
@@ -135,25 +140,31 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
         error ??= `Invalid file name: "${file.name}".`;
         continue;
       }
-      if (taken.has(name)) {
-        error ??= duplicateRunFileMessage(name);
+      const refusal = taken.has(name) ? duplicateRunFileMessage(name) : listNameRefusal('-in', name);
+      if (refusal !== undefined) {
+        error ??= refusal;
         continue;
       }
       taken.add(name);
       added.push({ key: `in-${this.nextKey++}`, name, size: file.size, file });
     }
-    this.set({
-      inputFiles: Object.freeze([...state.inputFiles, ...added]),
-      message: error === undefined ? undefined : { kind: 'error', text: error },
-    });
+    this.set({ inputFiles: Object.freeze([...state.inputFiles, ...added]), inputError: error, message: undefined });
     this.scheduleValidation();
   }
 
   removeInputFile(key: string): void {
     const state = this.state.get();
     if (!state.inputFiles.some((entry) => entry.key === key)) return;
-    this.set({ inputFiles: Object.freeze(state.inputFiles.filter((entry) => entry.key !== key)), message: undefined });
+    this.set({ inputFiles: Object.freeze(state.inputFiles.filter((entry) => entry.key !== key)), inputError: undefined, message: undefined });
     this.scheduleValidation();
+  }
+
+  /**
+   * What the Input block says is wrong with the input: files refused at open, or a file of the run directory under the
+   * name of the pasted FASTA (`pasteNameTaken`).
+   */
+  inputProblem(state: MakeblastdbDraftState = this.state.get()): string | undefined {
+    return state.inputError ?? pasteNameTaken(state, this.inputType(state));
   }
 
   /**
@@ -201,11 +212,16 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
     return state.values[flag];
   }
 
-  /** The `-in` name that files added to the run directory name, until the user edits it (a BLAST database). */
+  /**
+   * The `-in` name that files added to the run directory name, until the user edits it (a BLAST database); a name that
+   * `-in`'s list cannot carry (`listNameRefusal`) is not written, and the Input block says why.
+   */
   protected override runFilesAdded(state: MakeblastdbDraftState, runFiles: readonly ToolExtraFile[]): StatePatch<MakeblastdbDraftState> {
     if (state.dbInEdited && state.dbIn.trim() !== '') return {};
     const detected = primaryBlastDbName(runFiles.map((entry) => entry.name));
-    return detected === undefined ? {} : { dbIn: makeblastdbInputList([detected]), dbInEdited: false };
+    if (detected === undefined) return {};
+    const refusal = listNameRefusal('-in', detected, 'database');
+    return refusal === undefined ? { dbIn: makeblastdbInputList([detected]), dbInEdited: false } : { runFilesError: refusal };
   }
 
   /**
@@ -214,6 +230,8 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
    */
   protected validationArgv(state: MakeblastdbDraftState, extra: readonly string[]): readonly string[] | undefined {
     const argv = this.argvOf(state, extra);
+    const taken = pasteNameTaken(state, this.inputType(state));
+    if (taken !== undefined && toolPrintsKind(argv) === null) throw new Error(taken);
     if (this.inputValue(state) !== '' || toolPrintsKind(argv) !== null) return argv;
     return namesInput(argv) ? argv : undefined;
   }
@@ -229,6 +247,8 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
       return [{ tool: 'makeblastdb', stage: 'build', argv, directory: this.runDirectoryOf(state, []), prints }];
     }
     if (this.inputValue(state) === '' && !namesInput(argv)) throw new Error(MISSING_INPUT[this.inputType(state)]);
+    const taken = pasteNameTaken(state, this.inputType(state));
+    if (taken !== undefined) throw new Error(taken);
     return [{ tool: 'makeblastdb', stage: 'build', argv, directory: this.runDirectoryOf(state, this.inputEntries(state)) }];
   }
 
@@ -260,6 +280,18 @@ export class MakeblastdbDraft extends ToolDraftCore<MakeblastdbDraftState> {
     for (const entry of state.inputFiles) entries.push({ name: entry.name, file: entry.file, origin: { kind: 'picked' } });
     return entries;
   }
+}
+
+/**
+ * The one rule of the pasted FASTA's name (`MAKEBLASTDB_PASTE_NAME`): while FASTA is pasted, no file of the run directory
+ * (opened for `-in` or a file of the run) may have that name, whichever came first; the message says how to go on.
+ */
+function pasteNameTaken(state: MakeblastdbDraftState, type: MakeblastdbInputType): string | undefined {
+  if (type !== 'fasta' || state.fastaPaste.trim() === '') return undefined;
+  const taken = [...state.inputFiles, ...state.runFiles].some((entry) => entry.name === MAKEBLASTDB_PASTE_NAME);
+  return taken
+    ? `A file named "${MAKEBLASTDB_PASTE_NAME}" is open, the name of the pasted FASTA in the run directory: remove the file or clear the pasted text.`
+    : undefined;
 }
 
 /** Whether the words name `-in` themselves. */

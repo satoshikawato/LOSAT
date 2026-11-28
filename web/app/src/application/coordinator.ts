@@ -282,6 +282,8 @@ export class Coordinator {
   private readonly runDirectories = new Map<string, readonly DirectoryFile[]>();
   /** Working directory files held for queued/running tool runs; cleared when the run finishes or is cancelled. */
   private readonly toolDirectories = new Map<string, readonly DirectoryFile[]>();
+  /** The database of each completed makeblastdb run handed over (`madeDatabase`), by run: its Files, read once. */
+  private readonly madeDatabases = new Map<string, Promise<MadeDatabase>>();
   /** The releases of the saved-counts locks that each queued or running run holds (holdCounts), by run. */
   private readonly countsHolds = new Map<string, () => void>();
   private active: string | undefined;
@@ -753,15 +755,28 @@ export class Coordinator {
     await this.saveFile(toolOutputFileName(view.snapshot, `${stem}.tar`), archive);
   }
 
-  /** The database that a completed makeblastdb run made: every file of the run, as a search's database folder. */
+  /**
+   * The database that a completed makeblastdb run made: every file of the run, as a search's database folder. Its Files
+   * are read once per run (`madeDatabases`), so that every hand-over of the run gives the same objects: `-db` and
+   * `-filtering_db` of one run are then one file each in the search's directory, whatever stamp a store gives a read.
+   */
   async madeDatabase(runId: string): Promise<MadeDatabase> {
     const view = this.findTool(runId);
     const entries = view?.record.files ?? [];
     const primary = primaryBlastDb(entries.map((entry) => entry.name));
     if (view?.status !== 'completed' || primary === undefined) throw new Error('the run made no BLAST database');
-    const files = await Promise.all(entries.map((entry) => this.deps.data.getToolOutputFile(runId, entry.key, baseName(entry.name))));
-    const folder = madeDatabaseFolder(view.snapshot.number);
-    return { kind: primary.kind, files, names: entries.map((entry) => `${folder}/${entry.name}`) };
+    let made = this.madeDatabases.get(runId);
+    if (made === undefined) {
+      const folder = madeDatabaseFolder(view.snapshot.number);
+      made = Promise.all(entries.map((entry) => this.deps.data.getToolOutputFile(runId, entry.key, baseName(entry.name)))).then((files) => ({
+        kind: primary.kind,
+        files,
+        names: entries.map((entry) => `${folder}/${entry.name}`),
+      }));
+      this.madeDatabases.set(runId, made);
+      made.catch(() => this.madeDatabases.delete(runId));
+    }
+    return made;
   }
 
   /** The mask data of an output of a completed masking run (`maskDataName`), as a file for makeblastdb's `-mask_data`. */

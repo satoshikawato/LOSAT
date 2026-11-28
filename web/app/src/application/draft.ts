@@ -666,9 +666,7 @@ export class SearchDraft {
       void _rem;
       this.set({ subjectSource, database: Object.freeze(rest), message: undefined });
     } else {
-      if (database.discovery !== undefined && database.selected !== undefined) {
-        this.rememberDb('subject', database.selected, database.discovery.folder);
-      }
+      this.rememberDb('subject', database);
       this.set({ subjectSource, message: undefined });
     }
     this.scheduleValidation();
@@ -701,18 +699,9 @@ export class SearchDraft {
       const { program, subjectSource } = this.state.get();
       const matches = matchingDatabases(discovery, programById(program).subject);
       const selected = defaultDatabase(matches, rememberedName)?.name;
-      if (subjectSource === 'database') {
-        if (options.made === true) this.forgetSubjectDb();
-        else if (selected !== undefined) this.rememberDb('subject', selected, discovery.folder);
-      }
-      this.set({
-        database: this.subjectDatabaseWith({
-          discovery,
-          ...(selected === undefined ? {} : { selected }),
-          ...(options.made === true ? { made: true as const } : {}),
-        }),
-        message: undefined,
-      });
+      const pick = databasePick(discovery, selected, options);
+      if (subjectSource === 'database') this.rememberDb('subject', pick);
+      this.set({ database: this.subjectDatabaseWith(pick), message: undefined });
       this.scheduleValidation();
     });
     this.track(work);
@@ -725,11 +714,9 @@ export class SearchDraft {
     const { discovery } = database;
     if (discovery === undefined) return;
     if (!matchingDatabases(discovery, programById(program).subject).some((db) => db.name === name)) return;
-    if (database.made !== true) this.rememberDb('subject', name, discovery.folder);
-    this.set({
-      database: Object.freeze({ ...database, selected: name }),
-      message: undefined,
-    });
+    const next = Object.freeze({ ...database, selected: name });
+    this.rememberDb('subject', next);
+    this.set({ database: next, message: undefined });
     this.scheduleValidation();
   }
 
@@ -833,16 +820,9 @@ export class SearchDraft {
       const { discovery } = outcome;
       const matches = matchingDatabases(discovery, 'nucleotide');
       const selected = defaultDatabase(matches, rememberedName)?.name;
-      if (options.made === true) this.deps.databaseMemory?.write('filtering', undefined);
-      else if (selected !== undefined) this.rememberDb('filtering', selected, discovery.folder);
-      this.set({
-        filteringDb: Object.freeze({
-          discovery,
-          ...(selected === undefined ? {} : { selected }),
-          ...(options.made === true ? { made: true as const } : {}),
-        }),
-        ...(onBlastn ? { message: undefined } : {}),
-      });
+      const pick = databasePick(discovery, selected, options);
+      this.rememberDb('filtering', pick);
+      this.set({ filteringDb: pick, ...(onBlastn ? { message: undefined } : {}) });
       this.setFilteringDbField(selected);
     });
     this.track(scan);
@@ -858,8 +838,9 @@ export class SearchDraft {
     const { filteringDb } = this.state.get();
     if (filteringDb.discovery === undefined) return;
     if (!matchingDatabases(filteringDb.discovery, 'nucleotide').some((db) => db.name === name)) return;
-    if (filteringDb.made !== true) this.rememberDb('filtering', name, filteringDb.discovery.folder);
-    this.set({ filteringDb: Object.freeze({ ...filteringDb, selected: name }) });
+    const next = Object.freeze({ ...filteringDb, selected: name });
+    this.rememberDb('filtering', next);
+    this.set({ filteringDb: next });
     this.setFieldForProgram('blastn', FILTERING_DB_FLAG, name);
   }
 
@@ -875,8 +856,21 @@ export class SearchDraft {
     return Object.freeze({ filterValues, filterFiles, ...pick });
   }
 
-  private rememberDb(slot: 'subject' | 'filtering', name: string, folder: string | undefined): void {
-    this.deps.databaseMemory?.write(slot, folder === undefined ? { name } : { name, folder });
+  /**
+   * The one rule of what a reload offers again: the selected database of a folder or files that the user picked is
+   * remembered; a made database (a makeblastdb run's files, "Use as Database"), which a reload cannot open again, never
+   * is, and it clears the slot's memory, so that a reload does not offer a database that the made one replaced.
+   */
+  private rememberDb(slot: 'subject' | 'filtering', pick: DatabasePickDraft): void {
+    const memory = this.deps.databaseMemory;
+    if (memory === undefined) return;
+    if (pick.made === true) {
+      memory.write(slot, undefined);
+      return;
+    }
+    const { discovery, selected } = pick;
+    if (discovery === undefined || selected === undefined) return;
+    memory.write(slot, discovery.folder === undefined ? { name: selected } : { name: selected, folder: discovery.folder });
   }
 
   private forgetSubjectDb(): void {
@@ -1565,12 +1559,7 @@ export class SearchDraft {
         ...(assembled.blastdbEnv === undefined ? {} : { blastdbEnv: assembled.blastdbEnv }),
         ...(filterFileSnapshots.length === 0 ? {} : { filterFiles: Object.freeze(filterFileSnapshots) }),
       });
-      if (database.made !== true) {
-        this.deps.databaseMemory?.write(
-          'subject',
-          database.discovery.folder === undefined ? { name: database.selected } : { name: database.selected, folder: database.discovery.folder },
-        );
-      }
+      this.rememberDb('subject', database);
     }
     let filteringSnapshot: DatabaseSnapshot | undefined;
     if (usesFilteringDb && filteringDb.discovery !== undefined && filteringDb.selected !== undefined) {
@@ -1584,12 +1573,7 @@ export class SearchDraft {
         taxdb: fTax.taxdb,
         sqlite: fTax.sqlite,
       });
-      if (filteringDb.made !== true) {
-        this.deps.databaseMemory?.write(
-          'filtering',
-          filteringDb.discovery.folder === undefined ? { name: filteringDb.selected } : { name: filteringDb.selected, folder: filteringDb.discovery.folder },
-        );
-      }
+      this.rememberDb('filtering', filteringDb);
     }
 
     let queryFileSnapshot: QueryFileSnapshot | undefined;
@@ -2586,6 +2570,15 @@ function fetchProblem(result: Exclude<FetchResult, { ok: true }>, source: FetchS
 /** The registry file of a validation: the File chosen for `-conffile`, under the argv's name. */
 interface ChosenRegistryFile extends RegistryFile {
   readonly file: File;
+}
+
+/** The pick of a database read from files: its discovery, the selected database and whether a makeblastdb run made it. */
+function databasePick(discovery: BlastDbDiscovery, selected: string | undefined, options: DatabaseFilesOptions): DatabasePickDraft {
+  return Object.freeze({
+    discovery,
+    ...(selected === undefined ? {} : { selected }),
+    ...(options.made === true ? { made: true as const } : {}),
+  });
 }
 
 /** Re-evaluates the selected subject database when switching to a program with a different subject molecule type. */

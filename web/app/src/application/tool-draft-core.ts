@@ -11,7 +11,7 @@ import { isUnavailable, type ToolEngine, type ToolValidation } from 'losat/ports
 import { duplicateRunFileMessage, normalizeRunPath, pickedFilePath, RunDirectoryBuilder } from '../domain/blast-db';
 import type { FieldValue } from '../domain/parameters';
 import type { ToolFileOrigin } from '../domain/run';
-import { fileListNames, toolCommandWords, toolValidationSummary } from '../domain/tool-argv';
+import { fileListNames, listNameRefusal, toolCommandWords, toolValidationSummary } from '../domain/tool-argv';
 import { TOOL_FILE_LIST_FLAGS, type ToolId } from '../domain/tools';
 import { failureText } from './availability';
 import type { EnqueueAllResult, ToolDirectoryFile, ToolRequest } from './coordinator';
@@ -120,7 +120,10 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
   /** The message of an input that could not be read because a part of LOSAT is unavailable. */
   protected inputsUnavailable?(state: S): string | undefined;
 
-  /** What else changes when files are added to the run directory (WindowMasker's `-in` name). */
+  /**
+   * What else changes when files are added to the run directory (WindowMasker's `-in` name, makeblastdb's database
+   * name); its `runFilesError` says why the files could not name what they hold, unless a name was refused already.
+   */
   protected runFilesAdded?(state: S, runFiles: readonly ToolExtraFile[]): StatePatch<S>;
 
   /** The value of an option of the form (of the stage shown, for WindowMasker). */
@@ -188,7 +191,8 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
       added.push({ key: `rf-${this.nextKey++}`, name, size: file.size, file });
     }
     const runFiles = Object.freeze([...state.runFiles, ...added]);
-    this.set({ ...this.runFilesAdded?.(state, runFiles), ...common<S>({ runFiles, runFilesError: duplicateError, message: undefined }) });
+    const found = this.runFilesAdded?.(state, runFiles);
+    this.set({ ...found, ...common<S>({ runFiles, runFilesError: duplicateError ?? found?.runFilesError, message: undefined }) });
     this.scheduleValidation();
   }
 
@@ -232,12 +236,12 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
       this.patch({ runFilesError: `Invalid file name: "${given}".` });
       return;
     }
-    const list = TOOL_FILE_LIST_FLAGS.has(flag);
-    if (list && name.includes(',')) {
-      // The command line's list (`-mask_data a.asnb,b.asnb`) cannot carry the name.
-      this.patch({ runFilesError: `A file named "${name}" cannot be in ${flag}: a comma separates its files.` });
+    const refusal = listNameRefusal(flag, name);
+    if (refusal !== undefined) {
+      this.patch({ runFilesError: refusal });
       return;
     }
+    const list = TOOL_FILE_LIST_FLAGS.has(flag);
     const kept = list ? state.runFiles : state.runFiles.filter((entry) => entry.flag !== flag);
     const names = list ? fileListNames(this.optionValue(state, flag)) : [];
     const value = list ? [...names.filter((entry) => entry !== name), name].join(',') : name;

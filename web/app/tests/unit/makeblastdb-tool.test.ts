@@ -12,6 +12,7 @@ import {
   buildMakeblastdbArgv,
   changedMakeblastdbOptionsCount,
   fileListNames,
+  listNameRefusal,
   makeblastdbInputList,
   maskDataName,
   refusedToolFields,
@@ -92,6 +93,25 @@ describe('makeblastdb domain helpers', () => {
     expect(toolOutputDownloadName(run, { key: 'stdout', name: 'stdout' })).toMatch(/run.*3.*stdout\.txt$/);
     expect(toolPrintsKind(['makeblastdb', '-help-full'])).toBe('help');
     expect(toolPrintsKind(['windowmasker', '-help-full'])).toBeNull();
+  });
+
+  it('prints what the command line prints: a version flag anywhere wins, else the first help flag, in FakeEngine too (line WW, WW4b2 R3 F8)', async () => {
+    // NCBI BLAST+ 2.17.0 and native LOSAT print the version for `-help -version` and `-xmlhelp -version`, the usage for
+    // `-help -xmlhelp` and the XML for `-xmlhelp -help` (probe 2026-11-28, DONE_ww4b2_R3.md).
+    expect(toolPrintsKind(['makeblastdb', '-help', '-version'])).toBe('version');
+    expect(toolPrintsKind(['windowmasker', '-xmlhelp', '-version-full'])).toBe('version');
+    expect(toolPrintsKind(['makeblastdb', '-dbtype', 'nucl', '-help'])).toBe('help');
+    const engine = new FakeEngine();
+    const printed = async (argv: readonly string[]) => {
+      const result = await engine.runTool(argv);
+      return { status: result.status, text: await result.stdout.text() };
+    };
+    expect(await printed(['makeblastdb', '-help', '-version'])).toEqual({ status: 0, text: expect.stringMatching(/^makeblastdb: 0\.2\.0 /) });
+    expect(await printed(['makeblastdb', '-help-full'])).toEqual({ status: 0, text: expect.stringMatching(/^USAGE\n/) });
+    expect(await printed(['makeblastdb', '-help', '-xmlhelp'])).toEqual({ status: 0, text: expect.stringMatching(/^USAGE\n/) });
+    expect(await printed(['makeblastdb', '-xmlhelp', '-help'])).toEqual({ status: 0, text: expect.stringMatching(/^<\?xml/) });
+    expect((await engine.validateTool(['makeblastdb', '-help-full', '-no_such_option'])).ok).toBe(true);
+    expect((await engine.validateTool(['windowmasker', '-help-full'])).ok).toBe(false);
   });
 
   it("offers a masking run's maskinfo output as -mask_data: the -out file, or the standard output under a name", () => {
@@ -216,17 +236,56 @@ describe('MakeblastdbDraft', () => {
     expect(await queued[0]!.directory[0]!.file.text()).toBe('>s1\nACGT\n');
   });
 
-  it('refuses an input file under the name of the pasted FASTA, and says what is missing before a run', async () => {
+  it('says what is missing before a run', async () => {
     const { draft } = setup();
     await loaded(draft);
     draft.setField('-dbtype', 'prot');
     const none = await draft.submit();
     expect(none.ok).toBe(false);
     expect(!none.ok && none.message).toBe('Enter sequences or open FASTA files.');
-    draft.setFastaPaste('>p\nMKV\n');
-    draft.addInputFiles([new File(['x'], 'input.fa')]);
-    expect(draft.state.get().inputFiles).toHaveLength(0);
-    expect(draft.state.get().message?.text).toBe('A file named "input.fa" is already in the run directory.');
+  });
+
+  it('keeps the name of the pasted FASTA by one rule in both orders, said in the Input block (line WW, WW4b2 R3 F4)', async () => {
+    const taken = 'A file named "input.fa" is open, the name of the pasted FASTA in the run directory: remove the file or clear the pasted text.';
+    for (const order of ['paste first', 'open first'] as const) {
+      const { draft } = setup();
+      await loaded(draft);
+      draft.setField('-dbtype', 'prot');
+      if (order === 'paste first') draft.setFastaPaste('>p\nMKV\n');
+      draft.addInputFiles([new File(['>q\nMKV\n'], 'input.fa')]);
+      if (order === 'open first') draft.setFastaPaste('>p\nMKV\n');
+      expect(draft.inputProblem(), order).toBe(taken);
+      await vi.waitFor(() => expect(draft.state.get().validation).toEqual({ state: 'invalid', message: taken }));
+      const refused = await draft.submit();
+      expect(refused, order).toEqual({ ok: false, message: taken });
+      // The input type that reads no paste (ASN.1) has no such clash; clearing the paste ends it.
+      draft.setField('-input_type', 'asn1_txt');
+      expect(draft.inputProblem(), order).toBeUndefined();
+      draft.setField('-input_type', '');
+      draft.setFastaPaste('');
+      expect(draft.inputProblem(), order).toBeUndefined();
+      expect(draft.previewArgv(), order).toEqual(['makeblastdb', '-in', 'input.fa', '-dbtype', 'prot']);
+    }
+  });
+
+  it('refuses, at open, a name that the list of -in cannot carry: a file opened and a database found from the files (line WW, WW4b2 R3 F3)', async () => {
+    const { draft } = setup();
+    await loaded(draft);
+    draft.setField('-dbtype', 'nucl');
+    draft.addInputFiles([new File(['>s\nACGT\n'], 'my"seqs.fa'), new File(['>t\nACGT\n'], 'my seqs.fa')]);
+    expect(draft.state.get().inputFiles.map((entry) => entry.name)).toEqual(['my seqs.fa']);
+    expect(draft.inputProblem()).toBe('A file named "my"seqs.fa" cannot be in -in: a double quote there starts or ends a name.');
+    expect(draft.previewArgv()).toEqual(['makeblastdb', '-in', '"my seqs.fa"', '-dbtype', 'nucl']);
+
+    draft.setField('-input_type', 'blastdb');
+    draft.addRunFiles(['nin', 'nhr', 'nsq'].map((ext) => new File(['x'], `old"db.${ext}`)));
+    expect(draft.state.get().dbIn).toBe('');
+    expect(draft.state.get().runFilesError).toBe('A database named "old"db" cannot be in -in: a double quote there starts or ends a name.');
+    // The one rule for every list option: a comma in -mask_data's list.
+    expect(listNameRefusal('-mask_data', 'a,b.asnb')).toBe('A file named "a,b.asnb" cannot be in -mask_data: a comma separates its files.');
+    expect(listNameRefusal('-mask_data', 'a"b.asnb')).toBeUndefined();
+    expect(listNameRefusal('-in', 'a,b.fa')).toBeUndefined();
+    expect(listNameRefusal('-taxid_map', 'a,"b.txt')).toBeUndefined();
   });
 
   it('checks nothing before an input is given, then reports a missing -dbtype in its field', async () => {
@@ -442,6 +501,26 @@ describe('the results of a makeblastdb run', () => {
       filteringDb: { discovery: await discoverBlastDatabases(second.files, second.names), selectedName: 'run2/input.fa' },
     });
     expect(directory.files.map((file) => file.name).sort()).toEqual([...first.names, ...second.names].sort());
+  });
+
+  it("hands one run's database as -db and as -filtering_db of one search, the same Files each time, under the memory store too (line WW, WW4b2 R3 F5)", async () => {
+    // MemoryBlockStore (the store when OPFS cannot be opened) reads a stored file as a new File stamped with the time of the read.
+    const { coordinator } = makeCoordinator();
+    const runId = await finished(coordinator, {
+      tool: 'makeblastdb',
+      stage: 'build',
+      argv: ['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', '-out', 'db'],
+      directory: [{ name: 'input.fa', file: new Blob(['>a\nACGT\n']), origin: { kind: 'pasted' } }],
+    });
+    const asDb = await coordinator.madeDatabase(runId);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const asFilteringDb = await coordinator.madeDatabase(runId);
+    const directory = assembleSearchDirectory({
+      subjectDb: { discovery: await discoverBlastDatabases(asDb.files, asDb.names), selectedName: 'run1/db' },
+      filteringDb: { discovery: await discoverBlastDatabases(asFilteringDb.files, asFilteringDb.names), selectedName: 'run1/db' },
+    });
+    expect(directory.files.map((file) => file.name).sort()).toEqual([...asDb.names].sort());
+    expect(asFilteringDb.files.every((file, index) => file === asDb.files[index])).toBe(true);
   });
 
   it("hands a WindowMasker run's maskinfo output to makeblastdb's -mask_data", async () => {

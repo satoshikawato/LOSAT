@@ -203,9 +203,9 @@ fn score_edit_script_local_alignment(
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:56-62
 #[derive(Clone, Copy)]
-struct BlastGapDp {
-    best: i32,
-    best_gap: i32,
+pub(crate) struct BlastGapDp {
+    pub(crate) best: i32,
+    pub(crate) best_gap: i32,
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:69-97
@@ -314,7 +314,7 @@ fn blastp_gapped_start_score<const BLOSUM62: bool>(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:802-821
 // `n` is NCBI's `N`, the subject letters of this extension (`len2`).
-fn gap_dp_reserve_initial(
+pub(crate) fn gap_dp_reserve_initial(
     dp_mem: &mut Vec<BlastGapDp>,
     dp_mem_alloc: &mut usize,
     num_extra_cells: usize,
@@ -327,7 +327,7 @@ fn gap_dp_reserve_initial(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:923-931
-fn gap_dp_reserve_band(
+pub(crate) fn gap_dp_reserve_band(
     dp_mem: &mut Vec<BlastGapDp>,
     dp_mem_alloc: &mut usize,
     last_b_index: usize,

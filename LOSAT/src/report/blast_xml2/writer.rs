@@ -585,11 +585,11 @@ impl StreamThrow {
 
     /// Whether `error`, the error of the report's writer, is the stream's throw.
     fn is_error(&self, error: &anyhow::Error) -> bool {
-        match (self, error.downcast_ref::<SerialError>()) {
-            (StreamThrow::Xml(_), Some(SerialError::Utf8(_))) => true,
-            (StreamThrow::Json(_), Some(SerialError::JsonDouble(_))) => true,
-            _ => false,
-        }
+        matches!(
+            (self, error.downcast_ref::<SerialError>()),
+            (StreamThrow::Xml(_), Some(SerialError::Utf8(_)))
+                | (StreamThrow::Json(_), Some(SerialError::JsonDouble(_)))
+        )
     }
 }
 

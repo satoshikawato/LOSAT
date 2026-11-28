@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.128
+- Version: 1.129
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -1042,7 +1042,7 @@
   1.122, line NP item M4b-3d, then
   1.124 at the merge of dev of 2026-11-27 that brought 1.123, line RG-KB item 18b, then 1.126 at the merge
   of dev of 2026-11-27 that brought 1.124 and 1.125, line RG-D2 items D2b-2..5 and exception 36);
-  1.127 2026-11-27 (every program, line DBID item rf-1 and its review 1 of 2026-11-28: the
+  1.128 2026-11-27 (every program, line DBID item rf-1 and its review 1 of 2026-11-28: the
   rejection of rule 3 of a lookup that reads a record of an empty `taxdb.btd` (version 1.43), where
   NCBI crashes, comes at the query batch whose loads (its prefetch, or its report's) make that
   lookup, also where its report shows a title made from the taxid, after the reports of the query
@@ -1052,15 +1052,16 @@
   query batch (in outfmt 0 to 4 after the prolog, version 1.126 and TBLASTX's), BLASTN, BLASTX and
   RPSTBLASTN lost the reports before in outfmt 5, 15 and 16, BLASTN lost the field line of outfmt 20 where the first batch failed, and every program
   but PSIBLAST lost the files of the batches before in outfmt 13 and 14; Owner-delegated, standing
-  instruction 2026-09-29, restated 2026-10-07; numbered after 1.126 at the merge of dev 74f94b820a
-  that brought line RG item T4b-f's 1.126; first 1.126);
-  1.128 2026-11-28 (BLASTX and TBLASTN, line DBID item rf-2 and item rf-1's review 1 M1: the place
-  of 1.127 also for a reported sequence with parsed Seq-ids whose title NCBI makes from its taxid,
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.127, line DBID item pfoff-9, which
+  lands first; first 1.126, then 1.127 at the merge of dev 74f94b820a that brought line RG item
+  T4b-f's 1.126);
+  1.129 2026-11-28 (BLASTX and TBLASTN, line DBID item rf-2 and item rf-1's review 1 M1: the place
+  of 1.128 also for a reported sequence with parsed Seq-ids whose title NCBI makes from its taxid,
   which TBLASTN's outfmt 0 to 4 and `-html` rejected before the reports of the batches before, and one text of
   the rejection in every program and format, the load's: NCBI's load of the sequence looks the
   taxid up before any title is made, and BLASTX and TBLASTN named the title in the formats that
   show it; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after
-  1.127)
+  1.128; first 1.128)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -4628,7 +4629,7 @@ file. LOSAT refuses (exit 1, one line naming its program) only:
   whose loads (its prefetch, or its report's) or whose report's title made from the taxid make the
   first such lookup, after the reports of the query batches before, without the epilog (for the
   first batch, the prologs), as NCBI's own error of a batch, with the words of the load's rejection
-  in every program and format (versions 1.127 and 1.128, line DBID items rf-1 and rf-2);
+  in every program and format (versions 1.128 and 1.129, line DBID items rf-1 and rf-2);
 - a name that the output writes and NCBI reads past the mapping: the super kingdom of a record
   that reaches past it (`blastdbcmd -outfmt %K`, `-tax_info` with `%K`, `sskingdom` and
   `sskingdoms`), and any name of a record whose third tab is past it (whether NCBI finds names at

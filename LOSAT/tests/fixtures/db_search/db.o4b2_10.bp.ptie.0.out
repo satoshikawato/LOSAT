@@ -1,0 +1,103 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: ptie_t5 (parsed Seq-ids, taxids 99990 and 150)
+           4 sequences; 480 total letters
+
+
+
+Query= rq query
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+FFF00010.1 before                                                     239     6e-88
+FFF00050.1 tie                                                        233     1e-85
+Unknown                                                               233     2e-85
+FFF00090.1 after, taxid 150                                           222     3e-81
+
+
+>FFF00010.1 before
+Length=120
+
+ Score = 239 bits (610),  Expect = 6e-88, Method: Compositional matrix adjust.
+ Identities = 118/120 (98%), Positives = 118/120 (98%), Gaps = 0/120 (0%)
+
+Query  1    MCWKLVFGLPIKDGRCGHCWSFACRTWVKSCTCSITGPKFKQTFRILTTEKEFMDSGWDD  60
+            MCWKLVFGLPIKDGRCGH WSFACRTWVKSCTCSITGPKFKQTFRILTTEKEFMDSGWDD
+Sbjct  1    MCWKLVFGLPIKDGRCGHEWSFACRTWVKSCTCSITGPKFKQTFRILTTEKEFMDSGWDD  60
+
+Query  61   AYCLIKMRYKIADYMESVTSLGQIKEEMCYLCWDGCVIWDKPLCSCKKWFPPLDVLRWCQ  120
+            AYCLIKMRYKIAD MESVTSLGQIKEEMCYLCWDGCVIWDKPLCSCKKWFPPLDVLRWCQ
+Sbjct  61   AYCLIKMRYKIADKMESVTSLGQIKEEMCYLCWDGCVIWDKPLCSCKKWFPPLDVLRWCQ  120
+
+
+>FFF00050.1 tie
+Length=120
+
+ Score = 233 bits (595),  Expect = 1e-85, Method: Compositional matrix adjust.
+ Identities = 116/120 (97%), Positives = 116/120 (97%), Gaps = 0/120 (0%)
+
+Query  1    MCWKLVFGLPIKDGRCGHCWSFACRTWVKSCTCSITGPKFKQTFRILTTEKEFMDSGWDD  60
+            MCWKLVFG PIK GRCGHCWSFACRTWVKSCTCSITGPKFKQTFRILTTEKEFMDSGWDD
+Sbjct  1    MCWKLVFGGPIKMGRCGHCWSFACRTWVKSCTCSITGPKFKQTFRILTTEKEFMDSGWDD  60
+
+Query  61   AYCLIKMRYKIADYMESVTSLGQIKEEMCYLCWDGCVIWDKPLCSCKKWFPPLDVLRWCQ  120
+            AYCLIKMRYKIADYMESVTSLGQIKEEMCYLCWDGCVIWDKPLCSCKKW P LDVLRWCQ
+Sbjct  61   AYCLIKMRYKIADYMESVTSLGQIKEEMCYLCWDGCVIWDKPLCSCKKWPPDLDVLRWCQ  120
+
+
+Sequence with id BL_ORD_ID:x050 no longer exists in database...alignment skipped
+>FFF00090.1 after, taxid 150
+Length=120
+
+ Score = 222 bits (566),  Expect = 3e-81, Method: Compositional matrix adjust.
+ Identities = 112/120 (93%), Positives = 112/120 (93%), Gaps = 0/120 (0%)
+
+Query  1    MCWKLVFGLPIKDGRCGHCWSFACRTWVKSCTCSITGPKFKQTFRILTTEKEFMDSGWDD  60
+            MCWKLVFGLPIK G CGHCW FACRTWVKSC CSITGPK KQTFRILTTEK FMDSGWDD
+Sbjct  1    MCWKLVFGLPIKVGPCGHCWIFACRTWVKSCDCSITGPKAKQTFRILTTEKMFMDSGWDD  60
+
+Query  61   AYCLIKMRYKIADYMESVTSLGQIKEEMCYLCWDGCVIWDKPLCSCKKWFPPLDVLRWCQ  120
+            AY LIKMRYKIADYMESVTSLGQIKEEMCYLCW GCVIWDKPLCSCKKWFPPLDVLRWCQ
+Sbjct  61   AYDLIKMRYKIADYMESVTSLGQIKEEMCYLCWWGCVIWDKPLCSCKKWFPPLDVLRWCQ  120
+
+
+
+Lambda      K        H        a         alpha
+   0.329    0.142    0.551    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 38416
+
+
+  Database: ptie_t5 (parsed Seq-ids, taxids 99990 and 150)
+    Posted date:  Nov 27, 2026  4:06 PM
+  Number of letters in database: 480
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

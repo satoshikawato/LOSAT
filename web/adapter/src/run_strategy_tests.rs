@@ -151,30 +151,41 @@ fn row_argv<'a>(
     argv
 }
 
-/// Each row's file is a file of the run under the name as typed, with NCBI's bytes, whatever
-/// other searches the run makes (`blastp.sub.nd`: outfmt 0's hit list of 3 and outfmt 6's of 500
-/// are two searches, and the file is the argv's, outfmt 0's), next to the file of `-logfile`, and
-/// the outputs are those of the run without the option. The start's JSON names the file
-/// (`strategy_file`).
+/// Each row's file is a file of the run under the command line's name of it (line RG item
+/// F1w-r2: `s.asn` for `./s.asn`, `outfmt11/../s.asn` and `/proc/self/cwd/s.asn`), with NCBI's
+/// bytes, whatever other searches the run makes (`blastp.sub.nd`: outfmt 0's hit list of 3 and
+/// outfmt 6's of 500 are two searches, and the file is the argv's, outfmt 0's), next to the file of
+/// `-logfile`, and the outputs are those of the run without the option, also in the folder of the
+/// query (`outfmt11/s.asn` next to `-query outfmt11/...`: a folder of the run's files). The start's
+/// JSON names the file as the run does (`strategy_file`).
 #[test]
 fn the_strategy_file_is_a_file_of_the_run_with_the_command_lines_bytes() {
     for row in &ROWS {
         let (name, _, query, subject, _) = *row;
-        for file in ["s.asn", "out/s.asn", "/tmp/s.asn"] {
-            let words = row_argv(row, file);
+        for (typed, file) in [
+            ("s.asn", "s.asn"),
+            ("./s.asn", "s.asn"),
+            ("outfmt11/s.asn", "outfmt11/s.asn"),
+            ("outfmt11/./s.asn", "outfmt11/s.asn"),
+            ("outfmt11/../s.asn", "s.asn"),
+            ("/proc/self/cwd/s.asn", "s.asn"),
+            ("/tmp/s.asn", "/tmp/s.asn"),
+            ("/tmp//s.asn", "/tmp/s.asn"),
+        ] {
+            let words = row_argv(row, typed);
             validate(&words).unwrap();
             assert!(
                 start_json(&words)
                     .unwrap()
                     .contains(&format!("\"strategy_file\":\"{file}\"")),
-                "{name}"
+                "{name} {typed}"
             );
             let (result, streams) = run_files_of(&words, query, subject);
             result.unwrap();
             assert_eq!(
                 files(&streams),
                 [(file.to_string(), frozen(name))],
-                "{name} {file}"
+                "{name} {typed}"
             );
             let plain: Vec<&str> = words[..words.len() - 2].to_vec();
             let (_, without) = run_files_of(&plain, query, subject);
@@ -192,6 +203,96 @@ fn the_strategy_file_is_a_file_of_the_run_with_the_command_lines_bytes() {
         result.unwrap();
         let named: Vec<String> = files(&streams).into_iter().map(|(name, _)| name).collect();
         assert_eq!(named, ["s.asn", "run.log"], "{name}");
+    }
+}
+
+/// The files of the run (stream 8), each with the option that its entry's comment names.
+fn labeled(streams: &BTreeMap<u32, Vec<u8>>) -> Vec<(String, String)> {
+    streams
+        .get(&STREAM_RUN_FILES)
+        .map(|archive| {
+            crate::zip::read_with_comments(archive)
+                .into_iter()
+                .map(|(name, _, comment)| {
+                    (
+                        String::from_utf8(name).unwrap(),
+                        String::from_utf8(comment).unwrap(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Each file of the run carries the option that names it, its entry's comment, by which the host
+/// labels it (line RG item F1w-r2, review 3 S1). Where the `-logfile` name and another option's
+/// name have one host name but the run opens only the other option's file (the log's directory
+/// as written, `/data/..` or `sub/..`, is missing, so the messages stay on the standard error),
+/// the one file is that option's: NCBI 2.17.0 blastp makes only the strategy file, and psiblast
+/// only the PSSM file. The *start* names both alike (`log_file_name` names a log that a run with
+/// those folders makes), so its names cannot tell the files apart.
+#[test]
+fn each_file_of_the_run_carries_the_option_that_names_it() {
+    let row = &ROWS[0];
+    let (name, _, query, subject, _) = *row;
+    for (log, strategy) in [("/data/../tmp/X", "/tmp/X"), ("sub/../X", "X")] {
+        let mut words = row_argv(row, strategy);
+        words.extend(["-logfile", log]);
+        let start = start_json(&words).unwrap();
+        assert!(
+            start.contains(&format!(
+                "\"log_file_name\":\"{strategy}\",\"strategy_file\":\"{strategy}\""
+            )),
+            "{start}"
+        );
+        let (result, streams) = run_files_of(&words, query, subject);
+        result.unwrap();
+        assert_eq!(files(&streams), [(strategy.to_string(), frozen(name))]);
+        assert_eq!(
+            labeled(&streams),
+            [(strategy.to_string(), "export_search_strategy".to_string())]
+        );
+    }
+    // Both files: each with its own option.
+    let mut words = row_argv(row, "s.asn");
+    words.extend(["-logfile", "run.log"]);
+    let (result, streams) = run_files_of(&words, query, subject);
+    result.unwrap();
+    assert_eq!(
+        labeled(&streams),
+        [
+            ("s.asn".to_string(), "export_search_strategy".to_string()),
+            ("run.log".to_string(), "logfile".to_string()),
+        ]
+    );
+    // psiblast's PSSM files (the PSSM of the last round, `-save_pssm_after_last_round`).
+    let psiblast = [
+        "psiblast",
+        "-query",
+        "psiblast/q1b_gi.faa",
+        "-subject",
+        "psiblast/q1_subj_ids.faa",
+        "-num_iterations",
+        "2",
+        "-save_pssm_after_last_round",
+        "-num_descriptions",
+        "3",
+        "-num_alignments",
+        "2",
+    ];
+    for (log, option, file) in [
+        ("/data/../tmp/P", "-out_pssm", "/tmp/P"),
+        ("sub/../P", "-out_ascii_pssm", "P"),
+    ] {
+        let mut words = psiblast.to_vec();
+        words.extend([option, file, "-logfile", log]);
+        let (result, streams) = run_files_of(&words, words[2], words[4]);
+        result.unwrap();
+        assert_eq!(
+            labeled(&streams),
+            [(file.to_string(), option[1..].to_string())],
+            "{option}"
+        );
     }
 }
 
@@ -224,16 +325,30 @@ fn a_run_that_fails_after_the_file_is_made_keeps_the_command_lines_file() {
     }
 }
 
-/// The names that the command line cannot open are NCBI's error, at once (no file); `-` and the
-/// standard output are the command line's refusals at NCBI's first request, and the outputs hold
-/// nothing; the null device gives no file and the run goes on; the standard error and the file of
-/// another option of the run are LOSAT Web's refusals at the same point. A run with an empty query
-/// ends before that request: NCBI's run, with no file for `-`.
+/// The names that the command line cannot open are NCBI's error, at once (no file): also, read
+/// against the run's files as `-logfile` is (line RG item F1w-r2), a name in a folder that they do
+/// not have (`out/s.asn`, `a/b/../s.asn`) or in a file of them, and a folder of them (the query's
+/// `outfmt11`; `src` of the run's directory, this test's working directory); `-` and the standard
+/// output are the command line's refusals at NCBI's first request, and the outputs hold nothing;
+/// the null device gives no file and the run goes on; the standard error, the file of another
+/// option of the run and another file of the run's directory (`Cargo.toml` of this test's) are
+/// LOSAT Web's refusals at the same point. A run with an empty query ends before that request:
+/// NCBI's run, with no file for `-`.
 #[test]
 fn the_names_the_run_has_no_file_for() {
     let row = &ROWS[0];
     let (_, _, query, subject, _) = *row;
-    for name in ["/etc/s.asn", ".", "out/", ""] {
+    for name in [
+        "/etc/s.asn",
+        ".",
+        "out/",
+        "",
+        "out/s.asn",
+        "a/b/../s.asn",
+        "outfmt11",
+        "outfmt11/arch_bp_q.faa/s.asn",
+        "src",
+    ] {
         let words = row_argv(row, name);
         let message = validate(&words).unwrap_err();
         assert_eq!(
@@ -256,6 +371,7 @@ fn the_names_the_run_has_no_file_for() {
         ("/dev/stdout", "an -export_search_strategy file that is also the output (-out or the standard output) is not supported by LOSAT's BLASTP: NCBI writes both through separate streams and the file's bytes follow the order of their flushes"),
         ("/dev/stderr", "-export_search_strategy /dev/stderr (a device or a file of the system, where the run has no file) is not supported in the browser; give a file name of the run's own"),
         ("outfmt11/arch_bp_q.faa", "-export_search_strategy outfmt11/arch_bp_q.faa (the file of -query too, whose bytes the command line's strategy file replaces or mixes with its own) is not supported in the browser; give a file name of the run's own"),
+        ("Cargo.toml", "-export_search_strategy Cargo.toml (a file of the run's directory: LOSAT Web reads the run's files and writes none of them) is not supported in the browser; give a file name of the run's own"),
     ] {
         let words = row_argv(row, name);
         validate(&words).unwrap();
@@ -267,6 +383,10 @@ fn the_names_the_run_has_no_file_for() {
         }
     }
     let words = row_argv(row, "/dev/null");
+    // No file in any run's files: the start names none.
+    assert!(start_json(&words)
+        .unwrap()
+        .contains("\"strategy_file\":null"));
     let (result, streams) = run_files_of(&words, query, subject);
     result.unwrap();
     assert!(files(&streams).is_empty(), "/dev/null");
@@ -497,6 +617,60 @@ fn a_two_search_run_refuses_a_name_as_the_command_line() {
         "NCBI's prolog"
     );
     for stream in [6, 7] {
+        assert!(streams.get(&stream).is_none_or(Vec::is_empty), "{stream}");
+    }
+}
+
+/// The other search of a run of two searches reads the names of the run's files against the same
+/// run's files as the argv's own search (line RG item F1w-r2, `kept_by_no_one`). For the strategy
+/// file, `ROWS[1]` of the first test (`blastp.sub.nd`, `outfmt11/s.asn`) fails without it: the other
+/// search read the name against no registered names, where the query's folder is missing, and gave
+/// NCBI's error. psiblast's `-out_pssm` takes the same names in the other search: a name in the
+/// query's folder is the run's file and the query's own file is LOSAT Web's refusal before any
+/// output, as in a run of one search (these hold before the change too: the other search's PSSM
+/// writes are not checked, and the refusal comes from the argv's search).
+#[test]
+fn the_other_search_reads_names_against_the_runs_files() {
+    // NCBI writes the PSSM of the last round with `-save_pssm_after_last_round` (V-ABI row
+    // psiblast.subject.it2.pssm, web/adapter/tests/v_abi.js).
+    let words = [
+        "psiblast",
+        "-query",
+        "psiblast/q1b_gi.faa",
+        "-subject",
+        "psiblast/q1_subj_ids.faa",
+        "-num_iterations",
+        "2",
+        "-save_pssm_after_last_round",
+        "-num_descriptions",
+        "3",
+        "-num_alignments",
+        "2",
+        "-out_pssm",
+        "psiblast/p.asn",
+    ];
+    let groups = {
+        let (program, command, requested) = parse_run(&words).unwrap();
+        search_groups(&outputs(program, &requested), &command)
+    };
+    assert_eq!(groups.len(), 2, "two searches");
+    validate(&words).unwrap();
+    let (result, streams) = run_files_of(&words, words[2], words[4]);
+    result.unwrap();
+    let named: Vec<String> = files(&streams).into_iter().map(|(name, _)| name).collect();
+    assert_eq!(named, ["psiblast/p.asn"]);
+    // The query's own file is a file of the run (registered) for both searches: LOSAT Web's
+    // refusal before either search writes an output.
+    let mut refused = words;
+    refused[13] = "psiblast/q1b_gi.faa";
+    let (result, streams) = run_files_of(&refused, words[2], words[4]);
+    assert_eq!(
+        result.unwrap_err(),
+        "an -out_pssm file 'psiblast/q1b_gi.faa' that is a file of the run's directory (the command \
+         line replaces it; LOSAT Web reads the run's files and writes none of them)"
+    );
+    assert!(files(&streams).is_empty());
+    for stream in [0, 6, 7] {
         assert!(streams.get(&stream).is_none_or(Vec::is_empty), "{stream}");
     }
 }
@@ -860,15 +1034,27 @@ fn the_files_of_a_database_search_are_no_strategy_file() {
 /// The run's files go to the host once, after the run (`RunFileArchive::close`): a file handed over
 /// after that is refused, so that a strategy file that the engine hands over late is its error
 /// (LOSAT's internal error of `strategy::end_run`) and not a file lost without one (review 2 of
-/// line RG F1w, N-a).
+/// line RG F1w, N-a). Each file comes with the option that names it, which its entry's comment
+/// carries; one without is LOSAT's internal error (line RG item F1w-r2, review 3 S1).
 #[test]
 fn a_file_handed_over_after_the_runs_files_went_out_is_refused() {
-    use losat::web_adapter::FileReceiver as _;
+    use losat::web_adapter::{FileReceiver as _, RunFileOption};
     crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
     let archive = RunFileArchive::default();
-    archive.receive(b"s.asn", b"requests").unwrap();
+    archive
+        .receive_run_file(RunFileOption::ExportSearchStrategy, b"s.asn", b"requests")
+        .unwrap();
+    assert_eq!(
+        archive
+            .receive(b"x.asn", b"unlabeled")
+            .unwrap_err()
+            .to_string(),
+        "LOSAT's internal error: the run's file x.asn came without the option that names it"
+    );
     RunFileArchive::emit(archive.close()).unwrap();
-    let late = archive.receive(b"late.asn", b"more").unwrap_err();
+    let late = archive
+        .receive_run_file(RunFileOption::ExportSearchStrategy, b"late.asn", b"more")
+        .unwrap_err();
     assert_eq!(
         late.to_string(),
         "late.asn came after the run's files were emitted"
@@ -886,5 +1072,13 @@ fn a_file_handed_over_after_the_runs_files_went_out_is_refused() {
     assert_eq!(
         files(&streams),
         [("s.asn".to_string(), b"requests".to_vec())]
+    );
+    assert_eq!(
+        crate::zip::read_with_comments(&streams[&crate::emit::STREAM_RUN_FILES]),
+        [(
+            b"s.asn".to_vec(),
+            b"requests".to_vec(),
+            b"export_search_strategy".to_vec()
+        )]
     );
 }

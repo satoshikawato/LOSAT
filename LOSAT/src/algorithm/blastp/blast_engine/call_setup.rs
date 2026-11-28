@@ -816,9 +816,10 @@ pub(super) fn db_extent<'a>(
 /// count 0 of no letters has no OID 0 to read, NCBI's failed read, which `run_call` reports before
 /// this test (`SeqDb::first_oid_read_fails`); a FASTA subject set counts at least 1 (`db_extent`),
 /// so only a database search reaches 0 (review E of D1a-4, N2). The one test of the refusal:
-/// `check_setup_count` makes it in the call, and the block search (`x_query_block_plan`) leaves a
-/// search it would refuse to the call of all queries, which refuses before any output (review D of
-/// D1a-4, SF1).
+/// `check_setup_count` makes it in the call, after the reports of the batches before the call's
+/// first searched batch, where NCBI crashes (`split_steps::first_batch_setup`, line RG item
+/// bp-SF1), and the block search (`x_query_block_plan`) leaves a search it would refuse to the call
+/// of all queries, the one place of the refusal (review D of D1a-4, SF1).
 pub(super) fn setup_count_refused(args: &ResolvedBlastpArgs, setup_numbers: (i64, i32)) -> bool {
     let (setup_total, setup_count) = setup_numbers;
     crate::algorithm::common::database::setup_count_refused(
@@ -911,11 +912,14 @@ pub(super) struct BlastpSearchSpaces<F> {
 }
 
 /// The call's `BlastpSearchSpaces`: the setup's spaces, then the database's statistics, the
-/// options' spaces and the preliminary stage's own spaces.
+/// options' spaces and the preliminary stage's own spaces. A space that overflows NCBI's `Int8`
+/// (`SearchSpaceOverflow`) is LOSAT's refusal of the first of the call's query batches
+/// (`query_batches`) whose setup computes it (`overflow_failure`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:946-947
 pub(super) fn call_search_spaces<'s>(
     statistics: &CallStatistics<'s>,
+    query_batches: &[RangedBatch],
 ) -> Result<BlastpSearchSpaces<impl Fn(&QueryContext) -> Result<i64, SearchSpaceOverflow> + 's>> {
     let CallStatistics {
         args,
@@ -935,62 +939,6 @@ pub(super) fn call_search_spaces<'s>(
     // hit cutoffs read each context's search space, which the exact computation hands them
     // (`exact_search_spaces`; `blastp_cutoff_score_max`).
     let options_searchsp = args.searchsp.unwrap_or(0);
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-732
-    // When every subject is empty, NCBI leaves each query's effective search space and
-    // length adjustment at 0 (the outfmt 0 footers print 0).
-    let mut exact_search_spaces: Vec<Option<i64>> = Vec::new();
-    let search_spaces: Vec<SearchSpace> = contexts
-        .iter()
-        .enumerate()
-        .map(|(context_index, ctx)| -> Result<SearchSpace> {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:676-697
-            // A query chunk's search takes its batch's search spaces as options
-            // (`search_split_query_batches`), by the context's index in the chunk, unless the
-            // user's `-searchsp` is set (`SplitQuery_SetEffectiveSearchSpace` leaves it).
-            let given_searchsp = match ranges.split_search_spaces {
-                Some(batch) => split_option_space(batch, context_index, options_searchsp),
-                None => options_searchsp,
-            };
-            if given_searchsp != 0 {
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:826-846
-                exact_search_spaces.push(Some(given_searchsp));
-                return Ok(SearchSpace {
-                    effective_space: given_searchsp as f64,
-                    length_adjustment: if ctx.aa_len > 0 {
-                        i64::from(
-                            crate::stats::setup::calc_eff_lengths(
-                                ctx.aa_len as i64,
-                                eff_db_length,
-                                num_subjects,
-                                context_block(args, gapped_params, ctx),
-                                options_searchsp,
-                                args.app.name(),
-                            )?
-                            .length_adjustment,
-                        )
-                    } else {
-                        0
-                    },
-                });
-            }
-            if eff_db_length == 0 {
-                exact_search_spaces.push(None);
-                return Ok(SearchSpace {
-                    effective_space: 0.0,
-                    length_adjustment: 0,
-                });
-            }
-            let (space, exact) = database::blastp_database_search_space(
-                ctx.aa_len,
-                eff_db_length,
-                num_subjects,
-                context_block(args, gapped_params, ctx),
-                args.app.name(),
-            )?;
-            exact_search_spaces.push(Some(exact));
-            Ok(space)
-        })
-        .collect::<Result<Vec<_>>>()?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-220 (cited at
     // `stats::setup::preliminary_option_space`): the preliminary stage's setup reads the options'
     // search spaces of the statistics before their fallback to OID 0, which differ from the
@@ -1018,6 +966,132 @@ pub(super) fn call_search_spaces<'s>(
             args.app.name(),
         )
     };
+    // The option spaces of the call's own contexts where the preliminary stage reads them (a
+    // query chunk's search reads its batch's, `BlastpRanges::split_search_spaces`).
+    let options_read: Option<&dyn Fn(&QueryContext) -> Result<i64, SearchSpaceOverflow>> =
+        if (option_total <= 0 && statistics.is_some() || per_subject)
+            && ranges.split_search_spaces.is_none()
+        {
+            Some(&option_space_of)
+        } else {
+            None
+        };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-732
+    // When every subject is empty, NCBI leaves each query's effective search space and
+    // length adjustment at 0 (the outfmt 0 footers print 0).
+    let setup_space =
+        |context_index: usize, ctx: &QueryContext| -> Result<(SearchSpace, Option<i64>)> {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:676-697
+            // A query chunk's search takes its batch's search spaces as options
+            // (`search_split_query_batches`), by the context's index in the chunk, unless the
+            // user's `-searchsp` is set (`SplitQuery_SetEffectiveSearchSpace` leaves it).
+            let given_searchsp = match ranges.split_search_spaces {
+                Some(batch) => split_option_space(batch, context_index, options_searchsp),
+                None => options_searchsp,
+            };
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-732
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:752-761
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1112-1115
+            // PHI-BLAST (psiblast `-phi_pattern`): the setup's own branch gives each context the
+            // database length less the count times its length adjustment, which is the pattern's
+            // minimum match length in a batch's first context and 0 in the others; no product of
+            // lengths, so no space of a PHI search overflows `Int8` (NCBI 2.17.0 reports a query of
+            // 4,970 letters over a length of 2^55, review M4 of line RG item bp-SF1). The pattern's
+            // search reads the same value (`phi_search::stats::search_space`).
+            if let Some(Ok(pattern)) = args.phi.as_deref() {
+                if eff_db_length == 0 && given_searchsp == 0 {
+                    let space = SearchSpace {
+                        effective_space: 0.0,
+                        length_adjustment: 0,
+                    };
+                    return Ok((space, None));
+                }
+                let first_of_batch = query_batches
+                    .binary_search_by_key(&(ctx.q_idx as usize), |batch| batch.searched.start)
+                    .is_ok();
+                let length_adjustment = if first_of_batch {
+                    pattern.min_match_length
+                } else {
+                    0
+                };
+                let space = crate::algorithm::phi_search::stats::search_space(
+                    eff_db_length,
+                    i64::from(num_subjects),
+                    length_adjustment,
+                );
+                let space_of = SearchSpace {
+                    effective_space: space as f64,
+                    length_adjustment,
+                };
+                return Ok((space_of, Some(space)));
+            }
+            if given_searchsp != 0 {
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:826-846
+                // The given space is the context's: only its length adjustment is computed.
+                let length_adjustment = if ctx.aa_len > 0 {
+                    i64::from(crate::stats::setup::length_adjustment(
+                        ctx.aa_len as i64,
+                        eff_db_length,
+                        num_subjects,
+                        context_block(args, gapped_params, ctx),
+                    ))
+                } else {
+                    0
+                };
+                let space = SearchSpace {
+                    effective_space: given_searchsp as f64,
+                    length_adjustment,
+                };
+                return Ok((space, Some(given_searchsp)));
+            }
+            if eff_db_length == 0 {
+                let space = SearchSpace {
+                    effective_space: 0.0,
+                    length_adjustment: 0,
+                };
+                return Ok((space, None));
+            }
+            let (space, exact) = database::blastp_database_search_space(
+                ctx.aa_len,
+                eff_db_length,
+                num_subjects,
+                context_block(args, gapped_params, ctx),
+                args.app.name(),
+            )?;
+            Ok((space, Some(exact)))
+        };
+    let mut search_spaces: Vec<SearchSpace> = Vec::with_capacity(contexts.len());
+    let mut exact_search_spaces: Vec<Option<i64>> = Vec::with_capacity(contexts.len());
+    for (context_index, ctx) in contexts.iter().enumerate() {
+        let (space, exact) = match setup_space(context_index, ctx) {
+            Ok(space) => space,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:778-848
+            // NCBI computes no space for a context that is not valid: its space stays the
+            // options' (here 0) and its length adjustment 0, which no report of it reads (its
+            // footer prints 0). LOSAT computes it as a valid context's; where that overflows
+            // `Int8`, the context has NCBI's values and the search goes on (NCBI 2.17.0 blastp
+            // of X-only queries over an alias file's `LENGTH` of 2^55: exit 0, line RG item
+            // bp-SF1).
+            Err(_) if !ctx.is_valid => (
+                SearchSpace {
+                    effective_space: 0.0,
+                    length_adjustment: 0,
+                },
+                Some(0),
+            ),
+            Err(overflow) => {
+                return Err(overflow_failure(
+                    args,
+                    query_batches,
+                    &contexts[..context_index],
+                    options_read,
+                    (ctx, overflow),
+                ));
+            }
+        };
+        search_spaces.push(space);
+        exact_search_spaces.push(exact);
+    }
     // A query chunk's search reads the whole batch's option spaces by its own context index
     // (`BlastpRanges::split_search_spaces`, made by `search_split_query_batches`), as its setup's
     // spaces above do.
@@ -1027,10 +1101,26 @@ pub(super) fn call_search_spaces<'s>(
                 Some(batch) => (0..contexts.len())
                     .map(|ctx_idx| split_option_space(batch, ctx_idx, options_searchsp))
                     .collect(),
-                None => contexts
-                    .iter()
-                    .map(option_space_of)
-                    .collect::<Result<_, _>>()?,
+                None => {
+                    let mut spaces = Vec::with_capacity(contexts.len());
+                    for ctx in contexts {
+                        match option_space_of(ctx) {
+                            Ok(space) => spaces.push(space),
+                            Err(overflow) => {
+                                // The setup's spaces of every context fit: the first
+                                // overflowing option space is the first failure.
+                                return Err(overflow_failure(
+                                    args,
+                                    query_batches,
+                                    &[],
+                                    None,
+                                    (ctx, overflow.into()),
+                                ));
+                            }
+                        }
+                    }
+                    spaces
+                }
             })
         } else {
             None
@@ -1078,6 +1168,44 @@ pub(super) fn call_search_spaces<'s>(
         preliminary_option_spaces,
         preliminary_spaces,
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:178-180
+/// LOSAT's refusal of a search space that overflows NCBI's `Int8` (`SearchSpaceOverflow`, the
+/// error of `failed`'s context; NCBI's arithmetic wraps, probe p5_big of line RG D1a-3) as the
+/// failure of NCBI's query batch whose setup computes it (`split_steps::batch_failure`): NCBI's
+/// batch loop has printed the reports of the batches before, whose queries may have hits (line
+/// RG item bp-SF1, NCBI 2.17.0 probes of a query batch before one of 4,970 letters over an alias
+/// file's `LENGTH` of 2^55). Each batch computes the option spaces of its contexts
+/// (`option_space_of`, where the preliminary stage reads them) before its setup's spaces, so the
+/// batch is the first that holds a context of `before` (the contexts before `failed`, whose setup
+/// spaces fit) with an overflowing option space, or else `failed`'s. On this error path only.
+#[cold]
+pub(super) fn overflow_failure(
+    args: &ResolvedBlastpArgs,
+    query_batches: &[RangedBatch],
+    before: &[QueryContext],
+    option_space_of: Option<&dyn Fn(&QueryContext) -> Result<i64, SearchSpaceOverflow>>,
+    failed: (&QueryContext, anyhow::Error),
+) -> anyhow::Error {
+    let (ctx, error) = option_space_of
+        .and_then(|option_space_of| {
+            before.iter().find_map(|ctx| {
+                option_space_of(ctx)
+                    .err()
+                    .map(|overflow| (ctx, anyhow::Error::from(overflow)))
+            })
+        })
+        .unwrap_or(failed);
+    let query = ctx.q_idx as usize;
+    match query_batches
+        .iter()
+        .find(|batch| batch.searched.contains(&query))
+    {
+        Some(batch) => super::split_steps::batch_failure(args, batch.searched.start, error),
+        None => error,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:203-209

@@ -1684,15 +1684,7 @@ impl FirstReads {
         } else {
             crate::algorithm::common::database::RowLookups::None
         };
-        let ends_on_throw = super::database::after_throw(formats, call)
-            .run()
-            .is_some_and(|run| {
-                matches!(
-                    run.after,
-                    crate::report::db_subject::AfterThrow::EndsReport
-                        | crate::report::db_subject::AfterThrow::EndsRun
-                )
-            });
+        let ends_on_throw = super::database::after_throw(formats, call).ends_on_throw();
         FirstReads {
             report,
             places_reads: report

@@ -19,6 +19,9 @@ Masked and compressed inputs (rows MKW, line WW: the option sets of LOSAT Web's 
 - `mask_dust_ps.asnb`, `mask_seg_ps.asnb`: the same masks with the ids parsed, for `makeblastdb -parse_seqids`, by the
   official NCBI BLAST+ 2.17.0 release: `dustmasker -in mask_nucl.fna -parse_seqids -outfmt maskinfo_asn1_bin -out
   mask_dust_ps.asnb` and `segmasker -in mask_prot.faa -parse_seqids -outfmt maskinfo_asn1_bin -out mask_seg_ps.asnb`.
+- `mask_dust_l10.asnb`, `mask_dust_l10_ps.asnb`: masks of a second dust algorithm (level 10) for the rows of two
+  `-mask_data` files, by the official NCBI BLAST+ 2.17.0 release: `dustmasker -in mask_nucl.fna -level 10 -outfmt
+  maskinfo_asn1_bin -out mask_dust_l10.asnb`, and the same with `-parse_seqids` for `mask_dust_l10_ps.asnb`.
 - `ns.fna.gz`, `ns.fna.bz2`, `ns.fna.zst`: `ns.fna` by `gzip -n -9`, `bzip2 -9` and `zstd -19`.
 
 Lists and maps:

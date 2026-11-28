@@ -812,7 +812,7 @@ fn the_check_accepts_what_the_check_before_it_accepted() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1146-1155
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-790
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-788
 /// A load of a subject with a taxid where a file of the taxonomy database does not open
 /// (`SeqDbError::TaxdbThrows`) is LOSAT's refusal, in words that say what the user can do, which
 /// the batch's prefetch alone catches (`batch_prefetch`, in a run whose formats NCBI writes the

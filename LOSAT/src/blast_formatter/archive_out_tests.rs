@@ -1,0 +1,180 @@
+//! Unit tests for `blast_formatter -outfmt 11` (`archive_out`).
+
+use std::ffi::OsString;
+
+use super::*;
+use crate::report::archive::read::options::{BuiltOptions, EProgram, SeqRange, Setter};
+
+fn fixture_archive(name: &str) -> Vec<u8> {
+    std::fs::read(format!(
+        "{}/tests/blast_formatter/in/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap()
+}
+
+fn run_bytes(input: &[u8], words: &[&str]) -> (i32, Vec<u8>, String) {
+    let mut line: Vec<OsString> = vec!["-archive".into(), "-".into()];
+    line.extend(words.iter().map(OsString::from));
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let status = super::super::run_with(&line, &mut &input[..], &mut out, &mut err);
+    (status, out, String::from_utf8(err).unwrap())
+}
+
+fn empty_built(program: EProgram, setters: Vec<Setter>) -> BuiltOptions {
+    BuiltOptions {
+        program,
+        setters,
+        entrez_query: None,
+        first_db_seq: None,
+        final_db_seq: None,
+        gi_list: None,
+        negative_gi_list: None,
+        taxid_list: None,
+        negative_taxid_list: None,
+        db_filtering_algorithm_id: None,
+        db_filtering_algorithm_key: None,
+        subject_masking_type: None,
+        query_masks: None,
+        query_range: SeqRange::EMPTY,
+    }
+}
+
+#[test]
+fn outfmt_11_reemits_subject_archive_and_is_idempotent() {
+    let input = fixture_archive("bn.asn");
+    let (status, out1, err1) = run_bytes(&input, &["-outfmt", "11"]);
+    assert_eq!((status, err1.as_str()), (0, ""));
+    let text1 = String::from_utf8(out1.clone()).unwrap();
+    assert!(text1.starts_with("Blast4-archive ::= {\n"), "{text1}");
+    assert!(
+        text1.contains(&format!("ident \"{}\"", crate::wording::LOSAT_VERSION)),
+        "{text1}"
+    );
+    assert!(text1.contains("program \"blastn\""), "{text1}");
+    assert!(text1.contains("service \"megablast\""), "{text1}");
+    // Feeding the emitted archive back into `blast_formatter -outfmt 11` yields identical bytes.
+    let (status2, out2, err2) = run_bytes(&out1, &["-outfmt", "11"]);
+    assert_eq!((status2, err2.as_str()), (0, ""));
+    assert_eq!(out1, out2);
+}
+
+#[test]
+fn outfmt_11_updates_hitlist_size_without_pruning_alignments() {
+    let input = fixture_archive("bn.asn");
+    let (status, out, err) = run_bytes(&input, &["-outfmt", "11", "-max_target_seqs", "1"]);
+    assert_eq!(status, 0);
+    assert!(err.contains("Examining 5 or more matches"), "{err}");
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("name \"HitlistSize\",\n          value integer 1"),
+        "{text}"
+    );
+    assert!(text.contains("alignments {"), "{text}");
+    assert!(text.contains("local str \"Subject_1\""), "{text}");
+
+    let (status0, out0, err0) = run_bytes(&input, &["-outfmt", "11", "-num_alignments", "0"]);
+    assert_eq!(status0, 0);
+    assert!(err0.contains("Examining 5 or more matches"), "{err0}");
+    let text0 = String::from_utf8(out0).unwrap();
+    assert!(
+        text0.contains("name \"HitlistSize\",\n          value integer 0"),
+        "{text0}"
+    );
+    // Alignments are NOT pruned even with `-num_alignments 0`.
+    assert!(text0.contains("local str \"Subject_1\""), "{text0}");
+}
+
+#[test]
+fn outfmt_11_omits_messages_and_skips_error_archive() {
+    let err_archive = fixture_archive("err.asn");
+    let (status, out, err) = run_bytes(&err_archive, &["-outfmt", "11"]);
+    assert_eq!((status, out.as_slice()), (0, &b""[..]));
+    assert!(err.contains("gap existence and extension"), "{err}");
+
+    let bn = String::from_utf8(fixture_archive("bn.asn")).unwrap();
+    let with_msg = bn.replacen(
+        "\n}\n",
+        ",\n  messages {\n    {\n      code 1,\n      message \"Warning: sample note\"\n    }\n  }\n}\n",
+        1,
+    );
+    let (status, out, err) = run_bytes(with_msg.as_bytes(), &["-outfmt", "11"]);
+    assert_eq!(status, 0);
+    assert_eq!(err, "Warning: sample note\n");
+    let text = String::from_utf8(out).unwrap();
+    assert!(!text.contains("messages {"), "{text}");
+}
+
+#[test]
+fn taxid_and_negative_taxid_program_options_match_ncbi() {
+    let mut built = empty_built(EProgram::Blastn, vec![]);
+    built.taxid_list = Some(vec![9606, 562, 9606]);
+    assert_eq!(
+        build_program_options(&built, true),
+        vec![Param::new(
+            fields::TAXID_LIST,
+            ParamValue::IntegerList(vec![562, 9606])
+        )]
+    );
+    assert!(build_program_options(&built, false).is_empty());
+
+    let mut neg = empty_built(EProgram::Blastn, vec![]);
+    neg.negative_taxid_list = Some(vec![9606]);
+    assert_eq!(
+        build_program_options(&neg, true),
+        vec![Param::new(
+            fields::NEGATIVE_TAXID_LIST,
+            ParamValue::IntegerList(Vec::new())
+        )]
+    );
+}
+
+#[test]
+fn seq_loc_query_is_refused_in_outfmt_11() {
+    let archive = br#"Blast4-archive ::= {
+  request {
+    ident "test",
+    body queue-search {
+      program "blastn",
+      service "megablast",
+      queries seq-loc-list {
+        whole local str "Query_1"
+      },
+      subject sequences {
+        {
+          id {
+            local str "Subject_1"
+          },
+          inst {
+            repr raw,
+            mol dna,
+            length 4,
+            seq-data ncbi2na '00'H
+          }
+        }
+      },
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, 1 }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    }
+  }
+}
+"#;
+    let (status, out, err) = run_bytes(archive, &["-outfmt", "11"]);
+    assert_eq!(
+        (status, out.as_slice(), err),
+        (
+            1,
+            &b""[..],
+            format!("Error: {}\n", Refusal::SeqLocQuery.reason())
+        )
+    );
+}

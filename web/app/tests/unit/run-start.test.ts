@@ -119,7 +119,7 @@ describe("the reader of the engine's archive of a run's files", () => {
     expect(readStoredZip(storedZip([]))).toEqual([]);
   });
 
-  it("labels each entry by its comment, the option whose file the engine says it is, and refuses a comment that names none", () => {
+  it("labels each entry by its comment, the option whose file the engine says it is, and refuses a comment that names none or an archive that labels some entries only", () => {
     const files = readStoredZip(
       storedZip([
         ['X', encode('Blast4-request ::= {'), 'export_search_strategy'],
@@ -136,6 +136,13 @@ describe("the reader of the engine's archive of a run's files", () => {
     ]);
     expect(() => readStoredZip(storedZip([['run.log', encode('Warning: one\n'), '-logfile']]))).toThrow(
       /cannot be read: entry 1 has the comment "-logfile", which is no option of a run's file/,
+    );
+    // The engine labels every file, an earlier module none: an archive that labels some is the archive's error.
+    expect(() => readStoredZip(storedZip([['X', encode('Blast4-request ::= {'), 'export_search_strategy'], ['run.log', encode('Warning: one\n')]]))).toThrow(
+      /cannot be read: it labels entry 1 and not entry 2$/,
+    );
+    expect(() => readStoredZip(storedZip([['run.log', encode('Warning: one\n')], ['X', encode('Blast4-request ::= {'), 'export_search_strategy']]))).toThrow(
+      /cannot be read: it labels entry 2 and not entry 1$/,
     );
   });
 

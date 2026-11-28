@@ -194,7 +194,8 @@ function crc32(bytes: Uint8Array): number {
  * its local header (no data descriptor) and a UTF-8 name, then a central directory that lists the
  * same entries, each with the option whose file it is as its comment (`StoredRunFile.label`; none in
  * the archive of an earlier module), then the end record. Anything else, an entry whose bytes do not
- * have its CRC-32, and a comment that is no such option, is an error of the engine's archive.
+ * have its CRC-32, a comment that is no such option, and an archive that labels some entries and not
+ * others (the engine labels every file, an earlier module none), is an error of the engine's archive.
  */
 export function readStoredZip(archive: Uint8Array): StoredRunFile[] {
   const view = new DataView(archive.buffer, archive.byteOffset, archive.byteLength);
@@ -272,6 +273,9 @@ export function readStoredZip(archive: Uint8Array): StoredRunFile[] {
     }
     at = commentAt + commentLength;
   }
+  const labeled = files.findIndex((file) => file.label !== undefined);
+  const unlabeled = files.findIndex((file) => file.label === undefined);
+  if (labeled >= 0 && unlabeled >= 0) fail(`it labels entry ${labeled + 1} and not entry ${unlabeled + 1}`);
   if (u32(at) !== END_OF_CENTRAL_DIRECTORY) fail(`no end record after ${entries.length} entries`);
   const count = u16(at + 10);
   if (u16(at + 8) !== count || count !== entries.length || u32(at + 12) !== at - start || u32(at + 16) !== start) {

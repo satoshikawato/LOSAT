@@ -653,8 +653,8 @@ option's file: `-logfile /data/../tmp/X -export_search_strategy /tmp/X` without 
 -export_search_strategy X` without a folder `sub`, and psiblast's `-logfile /data/../tmp/P -out_pssm /tmp/P`, where
 NCBI 2.17.0 makes only the strategy or PSSM file, which the second round's host labeled as the log's. The host
 labels an entry by its comment and checks it against the *start*'s name of that option (an entry that this name
-does not give is the engine's error), and matches an entry without a comment, from an earlier module, by the names
-as above. A host of version 16 skips the comment, whose length the central directory gives, and reads this module
+does not give, and an archive that labels some entries and not others, is the engine's error), and matches the
+entries of an archive without comments, from an earlier module, by the names as above. A host of version 16 skips the comment, whose length the central directory gives, and reads this module
 as before; this host reads an earlier module of version 16 by its names: no field, stream or call that a host reads
 changes its form, so the version stays 16.
 

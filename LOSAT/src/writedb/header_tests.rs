@@ -384,6 +384,197 @@ mod parsed {
         );
     }
 
+    /// Ids of every Seq-id alternative with strings, every string member set to `s`: `local` as a
+    /// string, `giim`, the twelve Textseq-id alternatives, `patent` with both Id-pat numbers,
+    /// `general` and `pdb` with both Date forms; ids without strings (`local` as an integer,
+    /// `gibbsq`, `gi`) stand between them.
+    fn ids_with_strings(s: &[u8]) -> Vec<ParsedSeqId> {
+        let t = |s: &[u8]| Some(s.to_vec());
+        let ts = TextseqId {
+            name: t(s),
+            accession: t(s),
+            release: t(s),
+            version: Some(3),
+        };
+        vec![
+            ParsedSeqId::Local(ObjectId::Str(s.to_vec())),
+            ParsedSeqId::Local(ObjectId::Id(5)),
+            ParsedSeqId::Gibbsq(7),
+            ParsedSeqId::Giim(GiimportId {
+                id: 9,
+                db: t(s),
+                release: t(s),
+            }),
+            ParsedSeqId::Genbank(ts.clone()),
+            ParsedSeqId::Embl(ts.clone()),
+            ParsedSeqId::Pir(ts.clone()),
+            ParsedSeqId::Swissprot(ts.clone()),
+            ParsedSeqId::Patent(PatentSeqId {
+                seqid: 2,
+                cit: IdPat {
+                    country: s.to_vec(),
+                    id: PatentNumber::Number(s.to_vec()),
+                    doc_type: t(s),
+                },
+            }),
+            ParsedSeqId::Patent(PatentSeqId {
+                seqid: 3,
+                cit: IdPat {
+                    country: s.to_vec(),
+                    id: PatentNumber::AppNumber(s.to_vec()),
+                    doc_type: None,
+                },
+            }),
+            ParsedSeqId::Other(ts.clone()),
+            ParsedSeqId::General(Dbtag {
+                db: s.to_vec(),
+                tag: ObjectId::Str(s.to_vec()),
+            }),
+            ParsedSeqId::Gi(-1),
+            ParsedSeqId::Ddbj(ts.clone()),
+            ParsedSeqId::Prf(ts.clone()),
+            ParsedSeqId::Pdb(PdbSeqId {
+                mol: s.to_vec(),
+                chain: Some(32),
+                rel: Some(Date::Std(DateStd {
+                    year: 2020,
+                    month: Some(1),
+                    day: None,
+                    season: t(s),
+                    hour: None,
+                    minute: Some(5),
+                    second: None,
+                })),
+                chain_id: t(s),
+            }),
+            ParsedSeqId::Pdb(PdbSeqId {
+                mol: s.to_vec(),
+                chain: None,
+                rel: Some(Date::Str(s.to_vec())),
+                chain_id: None,
+            }),
+            ParsedSeqId::Tpg(ts.clone()),
+            ParsedSeqId::Tpe(ts.clone()),
+            ParsedSeqId::Tpd(ts.clone()),
+            ParsedSeqId::Gpipe(ts.clone()),
+            ParsedSeqId::NamedAnnotTrack(ts),
+        ]
+    }
+
+    /// The member path of the deepest members (every alternative with strings, `ids_with_strings`,
+    /// a date of both kinds) fits the fixed stack array (`MEMBER_PATH_DEPTH`) and returns to the
+    /// root, and the diagnostics-alone walk's buffer does not grow (`COUNTED_WALK_ROOM`), with a
+    /// title whose length takes four bytes, strings whose lengths take three, integers of four
+    /// bytes and a gi of eight. The writers are those of `encode_defline_set_checked` and
+    /// `defline_set_bad_chars` (`SetWriter::header`, `SetWriter::counting`).
+    #[test]
+    fn the_member_path_fits_the_fixed_depth() {
+        let mut ids = ids_with_strings(&[b's'; 300]);
+        ids.push(ParsedSeqId::Gi(i64::MAX));
+        let set = DeflineSet {
+            deflines: vec![BlastDefline {
+                title: Some(vec![b't'; 70_000]),
+                ids,
+                taxid: Some(i32::MAX),
+                memberships: Some(vec![i32::MIN, 1, i32::MAX]),
+                links: Some(vec![i32::MAX]),
+                other_info: Some(vec![-5]),
+                ..BlastDefline::default()
+            }],
+            utf8: false,
+        };
+        for write_strings in [true, false] {
+            let mut bad = Vec::new();
+            let mut w = if write_strings {
+                SetWriter::header(&set, &mut bad)
+            } else {
+                SetWriter::counting(&mut bad)
+            };
+            let room = w.out.capacity();
+            w.set(&set, &[]).unwrap();
+            assert_eq!(w.path_len, 1);
+            assert_eq!(&w.path[..w.path_len], ["Blast-def-line-set"]);
+            if !write_strings {
+                assert_eq!(w.out.capacity(), room, "the counted walk's buffer grew");
+            }
+        }
+    }
+
+    /// The diagnostics without the record (`defline_set_bad_chars`) are those of the record, for
+    /// the texts of `search_texts` (random bytes of any value, and of an alphabet with bytes
+    /// outside ' '..'~') and texts of 127, 128, 255, 256 and 65,536 bytes (a BER length in the
+    /// short form and in the long form with one to three length bytes) in every string member of
+    /// every alternative with strings (`ids_with_strings`), before and after other members.
+    #[test]
+    fn bad_chars_alone_are_those_of_the_record() {
+        let mut texts = crate::utils::byte_search::tests::search_texts();
+        for len in [127, 128, 255, 256, 65_536] {
+            let mut text = vec![b'a'; len];
+            text[0] = 0x80;
+            text[len / 2] = b'\t';
+            text[len - 1] = 0xff;
+            texts.push(text);
+        }
+        for s in &texts {
+            let defline = |title: Option<Vec<u8>>| BlastDefline {
+                title,
+                ids: ids_with_strings(s),
+                taxid: Some(9606),
+                memberships: Some(vec![1]),
+                links: Some(vec![]),
+                other_info: Some(vec![-5]),
+                ..BlastDefline::default()
+            };
+            let set = DeflineSet {
+                deflines: vec![
+                    defline(Some(s.clone())),
+                    defline(None),
+                    defline(Some(b"x\x01y".to_vec())),
+                ],
+                utf8: false,
+            };
+            let (mut alone, mut written) = (Vec::new(), Vec::new());
+            defline_set_bad_chars(&set, &mut alone);
+            let record = encode_defline_set(&set, &mut written);
+            assert_eq!(alone, written, "{} bytes", s.len());
+            assert!(written.iter().all(|bad| record[bad.stream_offset] == b'#'));
+        }
+    }
+
+    /// One byte outside ' '..'~' at each position of an otherwise visible text of 1 to 200 bytes
+    /// (every path of `find_first`: under 16 bytes, 16 to 63, and 64-byte windows with an
+    /// overlapping last one, so also a first bad byte past the first window): the diagnostics
+    /// without the record are those of the record, for the text as `defline_set`'s title and as
+    /// the title and a `local` string of a parsed definition line.
+    #[test]
+    fn one_bad_byte_anywhere_is_reported_as_the_record_reports_it() {
+        for len in 1..=200 {
+            for at in 0..len {
+                let mut s = vec![b'a'; len];
+                s[at] = 0x80;
+                let (mut alone, mut written) = (Vec::new(), Vec::new());
+                bad_title_chars(&s, &mut alone);
+                defline_set(&s, 7, 9606, &mut written);
+                assert_eq!(alone, written, "title of {len} bytes, bad byte {at}");
+                assert_eq!(written.len(), 1);
+                let set = DeflineSet {
+                    deflines: vec![BlastDefline {
+                        title: Some(s.clone()),
+                        ids: vec![ParsedSeqId::Local(ObjectId::Str(s.clone()))],
+                        taxid: Some(0),
+                        ..BlastDefline::default()
+                    }],
+                    utf8: false,
+                };
+                let (mut alone, mut written) = (Vec::new(), Vec::new());
+                defline_set_bad_chars(&set, &mut alone);
+                encode_defline_set(&set, &mut written);
+                assert_eq!(alone, written, "parsed, {len} bytes, bad byte {at}");
+                assert_eq!(written.len(), 2);
+            }
+        }
+    }
+
     // Verified against NCBI BLAST+ 2.17.0 makeprofiledb -blastdb_version 4: exact BER stream
     // byte position where CObjectOStreamAsnBinary::WriteContainer stops on a NULL Seq-id.
     #[test]
@@ -483,5 +674,60 @@ mod parsed {
             encode_defline_set_checked(&d2_s2, &[(1, 1)], &mut bad),
             Err(NullSeqIdWriteError { byte: 69 })
         );
+    }
+}
+
+/// The title's diagnostics without the record are those of the record, for the texts of
+/// `search_texts` (random bytes of any value, and of an alphabet with bytes outside ' '..'~'),
+/// titles of 127, 128, 255, 256, 65,535 and 65,536 bytes and of 16 MiB (a BER length in the short
+/// form and in the long form with one to four length bytes) and titles of 1, 12, 30, 60 and 100
+/// bytes all outside ' '..'~'.
+#[test]
+fn bad_title_chars_are_those_of_the_record() {
+    let mut texts = crate::utils::byte_search::tests::search_texts();
+    for len in [127, 128, 255, 256, 65_535, 65_536, 1 << 24] {
+        let mut text = vec![b'a'; len];
+        text[0] = 0x80;
+        text[len / 2] = b'\t';
+        text[len - 1] = 0xff;
+        texts.push(text);
+    }
+    for len in [1, 12, 30, 60, 100] {
+        texts.push(vec![0xc3; len]);
+    }
+    for text in texts {
+        let earlier = BadTitleChar {
+            byte: 0x01,
+            stream_offset: 3,
+        };
+        let (mut alone, mut written) = (vec![earlier], vec![earlier]);
+        bad_title_chars(&text, &mut alone);
+        defline_set(&text, 7, 9606, &mut written);
+        assert_eq!(alone, written, "{} bytes", text.len());
+    }
+}
+
+/// The record fits the buffer it is written into: at most 77 bytes besides the title, so within
+/// `DEFLINE_SET_OVERHEAD`, for titles of 0, 1, 127, 128, 255, 256, 65,535 and 65,536 bytes and of
+/// 16 MiB (a BER length of one to five bytes) and oids and taxids whose integers take one, two and
+/// four bytes.
+#[test]
+fn the_record_fits_its_buffer() {
+    for len in [0, 1, 127, 128, 255, 256, 65_535, 65_536, 1 << 24] {
+        let title = vec![b'a'; len];
+        for (oid, taxid) in [
+            (0, 0),
+            (u32::MAX, i32::MIN),
+            (0x7fff_ffff, i32::MAX),
+            (300, -129),
+        ] {
+            let record = defline_set(&title, oid, taxid, &mut Vec::new());
+            assert!(
+                record.len() - len <= 77,
+                "{len} {oid} {taxid}: {}",
+                record.len() - len
+            );
+            assert!(record.len() <= DEFLINE_SET_OVERHEAD + len);
+        }
     }
 }

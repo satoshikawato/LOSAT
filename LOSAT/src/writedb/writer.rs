@@ -15,8 +15,8 @@ use super::cout::Cout;
 pub use super::files::DbVersion;
 use super::files::OffsetArrays;
 use super::header::{
-    defline_set, encode_defline_set, encode_defline_set_checked, BadChar, BadTitleChar,
-    NullSeqIdWriteError,
+    bad_title_chars, defline_set, defline_set_bad_chars, encode_defline_set_checked, BadChar,
+    BadTitleChar, NullSeqIdWriteError,
 };
 use super::lmdb::{
     lmdb_file_name, lmdb_map_size_from_env, LmdbEnvSettings, WriteDbLmdb, WriteDbTaxId,
@@ -161,13 +161,17 @@ impl std::fmt::Debug for WriteDb {
 // hold and each time the definition line is serialized (`post_bad_chars`: of any
 // string of a parsed definition line, under the path of its member):
 // "Error: (803.7) [makeblastdb] Blast-def-line-set.E.title", "Bad char [0xC3]
-// in string at byte 21" and the title.
+// in string at byte 21" and the title. Nothing is posted, and no string made,
+// for a title without reports.
 fn post_bad_title_chars(
     diagnostics: &mut Vec<u8>,
     diag_prefix: Option<&str>,
     title: &[u8],
     bad: &[BadTitleChar],
 ) {
+    if bad.is_empty() {
+        return;
+    }
     let tag = diag_prefix.map_or_else(String::new, |prefix| format!("[{prefix}] "));
     for bad_char in bad {
         diagnostics.extend_from_slice(
@@ -186,8 +190,14 @@ fn post_bad_title_chars(
 /// `post_bad_title_chars` for the strings of definition lines with parsed Seq-ids:
 /// `Error: (803.7) [makeblastdb] Blast-def-line-set.E.seqid.E.local.str`, `Bad char
 /// [0xE9] in string at byte 38` and the string (makeblastdb 2.17.0, survey B fixture
-/// p23_nonascii; the member paths of the other alternatives from the S3a probes).
+/// p23_nonascii; the member paths of the other alternatives from the S3a probes). Nothing is
+/// posted, and no string made, for a record without reports.
+///
+/// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1864-1885
 fn post_bad_chars(diagnostics: &mut Vec<u8>, diag_prefix: Option<&str>, bad: &[BadChar]) {
+    if bad.is_empty() {
+        return;
+    }
     let tag = diag_prefix.map_or_else(String::new, |prefix| format!("[{prefix}] "));
     for bad_char in bad {
         diagnostics.extend_from_slice(
@@ -306,23 +316,29 @@ impl WriteDb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:473-475
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1574-1596
     // The call serializes the definition line once (writedb_impl.cpp:887-893,
     // with the sequence's own id), which posts the diagnostics of its title;
-    // the bytes are not kept.
+    // the bytes are not kept (a local string, with the oid -1), so only the
+    // diagnostics are computed (`header::bad_title_chars`, the offsets that the
+    // serialization reports).
     /// `CWriteDB::ExtractBioseqDeflines` as far as it is visible: the
     /// diagnostics of the title.
     pub fn extract_bioseq_deflines(&mut self, bioseq: &Bioseq) {
         let mut bad = Vec::new();
-        defline_set(&bioseq.title, 0, 0, &mut bad);
+        bad_title_chars(&bioseq.title, &mut bad);
         post_bad_title_chars(&mut self.diagnostics, self.diag_prefix, &bioseq.title, &bad);
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:473-475
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1574-1596
     /// The serialization of `ExtractBioseqDeflines` with `-parse_seqids`: the
     /// diagnostics of the definition lines it built (`writedb::deflines`), before
-    /// `FixTaxId` gives them a taxid.
+    /// `FixTaxId` gives them a taxid. The bytes are not kept, so only the diagnostics are
+    /// computed (`header::defline_set_bad_chars`, the offsets that the serialization reports).
     pub fn post_extracted_deflines(&mut self, deflines: &DeflineSet) {
         let mut bad = Vec::new();
-        encode_defline_set(deflines, &mut bad);
+        defline_set_bad_chars(deflines, &mut bad);
         post_bad_chars(&mut self.diagnostics, self.diag_prefix, &bad);
     }
 

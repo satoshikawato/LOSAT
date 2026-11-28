@@ -292,11 +292,15 @@ export function isCountsOutputFile(stage: ToolStage, argv: readonly string[], fi
   return namedOutPath(argv) === normalizeRelName(fileName);
 }
 
-/** The `-outfmt` values of the masking tools that write mask data for makeblastdb's `-mask_data`, with an extension for a file of each. */
+/**
+ * The `-outfmt` values of the masking tools that write mask data for makeblastdb's `-mask_data`, with an extension for a
+ * file of each. makeblastdb reads ASN.1 binary and text only: a file in another encoding (`maskinfo_xml`) is refused with
+ * "Unknown encoding for mask data in '<file>'" (exit 1; NCBI makeblastdb.cpp:160-181, LOSAT's
+ * `LOSAT/src/writedb/mask_info/reader.rs`), so no hand-over is offered for it.
+ */
 const MASK_DATA_FORMATS: Readonly<Record<string, string>> = Object.freeze({
   maskinfo_asn1_bin: 'asnb',
   maskinfo_asn1_text: 'asnt',
-  maskinfo_xml: 'xml',
 });
 
 /** The tool runs that mask with a `-outfmt`: WindowMasker's Mask (`-ustat`); the masking tools of line WW WW4c join here. */
@@ -307,8 +311,8 @@ function masks(tool: ToolId, stage: ToolStage): boolean {
 /**
  * The name under which an output of a tool run goes to makeblastdb's `-mask_data` ("Use as -mask_data in makeblastdb"),
  * or undefined for an output that is not mask data: the `-out` file of a masking run whose `-outfmt` writes mask data
- * (`maskinfo_asn1_bin`, `maskinfo_asn1_text`, `maskinfo_xml`), or its standard output when it has no `-out`, named for
- * the run (`windowmasker-run3.asnb`).
+ * that makeblastdb reads (`maskinfo_asn1_bin`, `maskinfo_asn1_text`; not `maskinfo_xml`, see `MASK_DATA_FORMATS`), or
+ * its standard output when it has no `-out`, named for the run (`windowmasker-run3.asnb`).
  */
 export function maskDataName(
   run: { readonly tool: ToolId; readonly stage: ToolStage; readonly argv: readonly string[]; readonly number: number },

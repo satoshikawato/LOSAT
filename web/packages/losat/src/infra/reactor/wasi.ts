@@ -1,9 +1,14 @@
 // WASI preview1 for the engine modules, from @bjorn3/browser_wasi_shim (the shim that
 // gbdraw uses; the version is pinned in package.json). The reactors get no arguments, an
-// empty environment (docs/web/abi_v2.md §3), the run's working directory preopened as `/work`,
-// read-only, with the files that the argv names (run-directory.ts; none for most runs, so
-// that a file the run does not have is missing as on the command line), an empty standard
-// input, and standard output and error kept in a small buffer. The engine's warnings do not go there (they are ABI stream 3);
+// environment of `TZ` alone (docs/web/abi_v2.md §3): the browser's time zone as a POSIX rule
+// (time-zone.ts; line NP WW4b1, D-WW4b-2, 2026-11-27), made when the engine reads its
+// environment, which it does at the start of each run (`environment`; line NP WW4b1 R2,
+// finding 5, 2026-11-28: a zone that the user changes between two runs of one instance is the
+// second run's), the run's working directory preopened as
+// `/work`, with the files that the argv names (run-directory.ts; none for most runs, so that a
+// file the run does not have is missing as on the command line; read-only for a search,
+// writable for a tool), an empty standard input, and standard output and error kept in a small
+// buffer. The engine's warnings do not go there (they are ABI stream 3);
 // the buffer holds what the engine writes when it stops, such as a panic message, so that
 // the host can report it.
 //
@@ -15,6 +20,7 @@
 // parameters are BigInt and pass unchanged.
 import { ConsoleStdout, File as WasiFile, OpenFile, WASI } from '@bjorn3/browser_wasi_shim';
 import type { RunDirectory } from './run-directory.js';
+import { posixTimeZone } from './time-zone.js';
 
 /** How much of the engine's standard output and error is kept. */
 const LOG_BYTES = 64 * 1024;
@@ -35,6 +41,15 @@ export interface WasiContext {
 type WasiInstance = WASI['inst'] & { exports: { _initialize?: () => unknown } };
 
 type WasiFunction = (...args: Array<number | bigint>) => unknown;
+
+/**
+ * The environment of the engine when it reads it (WASI's `environ_sizes_get`): `TZ`, the browser's time zone at that
+ * moment as a POSIX rule for that year (time-zone.ts). The engine reads it at the start of each run (docs/web/abi_v2.md
+ * §3), so a run's dates are in the zone of its start.
+ */
+function environment(): string[] {
+  return [`TZ=${posixTimeZone()}`];
+}
 
 /** The imports with every i32 argument passed on as an unsigned value. */
 export function unsignedImports(imports: Record<string, unknown>): WebAssembly.ModuleImports {
@@ -68,10 +83,19 @@ export function createWasi(directory?: RunDirectory): WasiContext {
   const output = new ConsoleStdout(keep);
   const stdin = new OpenFile(new WasiFile(new Uint8Array(0), { readonly: true }));
   // The shim logs its calls to the console unless debug is off.
-  const wasi = new WASI([], [], [stdin, output, output], { debug: false });
+  const wasi = new WASI([], environment(), [stdin, output, output], { debug: false });
   const memory = () => (wasi.inst as unknown as { exports: { memory: WebAssembly.Memory } }).exports.memory;
+  const base = { ...(wasi.wasiImport as Record<string, WasiFunction>) };
+  // The engine asks for the sizes, then for the entries: the environment is made at the first, so that the second
+  // writes what the sizes count (the shim's `environ_get` writes `wasi.env`).
+  const sizes = base['environ_sizes_get']!;
+  base['environ_sizes_get'] = (...args) => {
+    wasi.env = environment();
+    return sizes(...args);
+  };
+  const imports = base as WebAssembly.ModuleImports;
   return {
-    imports: unsignedImports(directory === undefined ? wasi.wasiImport : directory.imports(wasi.wasiImport as WebAssembly.ModuleImports, memory)),
+    imports: unsignedImports(directory === undefined ? imports : directory.imports(imports, memory)),
     bind(instance) {
       wasi.inst = instance as unknown as WasiInstance;
     },

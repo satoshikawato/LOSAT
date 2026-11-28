@@ -8,13 +8,14 @@
 //!
 //! Unix compares the device and inode of the files, and does not use this module.
 //! Elsewhere (Windows, WASI) two names are the same file when they have the same canonical
-//! path ([`std::fs::canonicalize`]). WASI has no `canonicalize` in Rust's standard library
-//! (`Unsupported`) and its device and inode numbers are an unstable interface
+//! path ([`canonical_path`]: [`std::fs::canonicalize`]). WASI has no `canonicalize` in Rust's
+//! standard library (`Unsupported`) and its device and inode numbers are an unstable interface
 //! (`std::os::wasi::fs::MetadataExt`, `wasi_ext`), so there the path is made absolute against
 //! the current directory (`/` of the preopened file system until the program changes it) and
-//! its `.` and `..` are resolved by name. That form sees every spelling of one path, but not a
-//! symbolic link or a hard link to the file (a name of a second path to the same file): such an
-//! alias of the `-out` file is not refused on WASI.
+//! resolved name by name as `realpath(3)` resolves it, through symbolic links (line NP WW4b1,
+//! 2026-11-27). That form sees every spelling of one path and its symbolic links, but not a hard
+//! link to the file (a second name of the same file): such an alias of the `-out` file is not
+//! refused on WASI.
 
 use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
@@ -24,11 +25,89 @@ use std::path::{Component, Path, PathBuf};
 #[cfg_attr(unix, allow(dead_code))] // unix compares device and inode numbers
 pub(crate) fn path_identity(path: &Path) -> Option<PathBuf> {
     std::fs::metadata(path).ok()?;
+    canonical_path(path)
+}
+
+/// The existing entry `path` resolved through symbolic links, as `realpath(3)` resolves it
+/// ([`std::fs::canonicalize`]), or `None` where that fails. Where the platform has no
+/// `canonicalize` (WASI preview 1, whose files a host gives: LOSAT Web's engine), the same
+/// resolution made name by name ([`resolved_by_names`]), so that two names of one file or
+/// directory are one path there too.
+pub(crate) fn canonical_path(path: &Path) -> Option<PathBuf> {
     match std::fs::canonicalize(path) {
         Ok(canonical) => Some(canonical),
-        Err(error) if error.kind() == ErrorKind::Unsupported => lexical_absolute(path),
+        Err(error) if error.kind() == ErrorKind::Unsupported => resolved_by_names(path),
         Err(_) => None,
     }
+}
+
+/// The most symbolic links that one resolution follows (Linux's `MAXSYMLINKS`; `ELOOP` past it).
+const MAX_LINKS: usize = 40;
+
+/// `realpath(3)` of `path` made from its names: absolute from the current directory, each name
+/// looked up without following it, a symbolic link replaced by its target (from the root when the
+/// target is absolute), `..` taking away the name before it once the links before it are
+/// resolved; `None` where a name is missing, where a name or a final `/` follows a file
+/// (`ENOTDIR`), or after `MAX_LINKS` links (`ELOOP`).
+pub(crate) fn resolved_by_names(path: &Path) -> Option<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(path)
+    };
+    // The names still to resolve, the next one last.
+    let mut pending: Vec<std::ffi::OsString> = Vec::new();
+    let push = |pending: &mut Vec<std::ffi::OsString>, path: &Path| {
+        // A final `/` asks for a directory: kept as a last `.`, which a file may not precede.
+        let ends_in_separator = path
+            .as_os_str()
+            .as_encoded_bytes()
+            .last()
+            .is_some_and(|&byte| std::path::is_separator(byte.into()));
+        if ends_in_separator {
+            pending.push(".".into());
+        }
+        let names: Vec<_> = path
+            .components()
+            .filter_map(|component| match component {
+                Component::Normal(name) => Some(name.to_os_string()),
+                Component::ParentDir => Some("..".into()),
+                Component::CurDir | Component::RootDir | Component::Prefix(_) => None,
+            })
+            .collect();
+        pending.extend(names.into_iter().rev());
+    };
+    push(&mut pending, &absolute);
+    let mut resolved = PathBuf::from("/");
+    let mut links = 0;
+    while let Some(name) = pending.pop() {
+        if name == "." {
+            continue;
+        }
+        if name == ".." {
+            resolved.pop();
+            continue;
+        }
+        let candidate = resolved.join(&name);
+        let meta = std::fs::symlink_metadata(&candidate).ok()?;
+        if !meta.file_type().is_symlink() {
+            if !meta.is_dir() && !pending.is_empty() {
+                return None;
+            }
+            resolved = candidate;
+            continue;
+        }
+        links += 1;
+        if links > MAX_LINKS {
+            return None;
+        }
+        let target = std::fs::read_link(&candidate).ok()?;
+        if target.is_absolute() {
+            resolved = PathBuf::from("/");
+        }
+        push(&mut pending, &target);
+    }
+    Some(resolved)
 }
 
 /// Whether `log_path` (a file path that `-logfile` would open with `create(true).append(true)`)
@@ -145,9 +224,9 @@ fn resolve_missing_target(path: &Path) -> Option<PathBuf> {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
     };
-    let resolved_parent = match std::fs::canonicalize(parent) {
-        Ok(canonical) => canonical,
-        Err(_) => lexical_absolute(parent)?,
+    let resolved_parent = match canonical_path(parent) {
+        Some(canonical) => canonical,
+        None => lexical_absolute(parent)?,
     };
     Some(resolved_parent.join(file_name))
 }

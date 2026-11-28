@@ -454,25 +454,31 @@ const byShortestName = (a: BlastDbCandidate, b: BlastDbCandidate) => a.name.leng
  * (`.nal`/`.pal`) first, otherwise a volume (`.nin`/`.pin`), shortest name first.
  */
 export function primaryBlastDbName(fileNames: readonly string[]): string | undefined {
+  return primaryBlastDb(fileNames)?.name;
+}
+
+/** The primary BLAST database of a list of run-directory paths (`primaryBlastDbName`), with its molecule type. */
+export function primaryBlastDb(fileNames: readonly string[]): BlastDbCandidate | undefined {
   const candidates = discoverBlastDatabaseNames(fileNames);
   if (candidates.length === 0) return undefined;
   const aliases = candidates.filter((db) => db.entry === 'alias').sort(byShortestName);
-  if (aliases.length > 0) return aliases[0]!.name;
-  return [...candidates].sort(byShortestName)[0]!.name;
+  if (aliases.length > 0) return aliases[0]!;
+  return [...candidates].sort(byShortestName)[0]!;
 }
 
 /**
  * Discovers valid BLAST databases (`.nal`/`.pal`, `.nin`/`.pin`, multi-volume sets) from picked
- * files. Reads only tiny `.nal`/`.pal` alias text files; binary volume files are never read into memory.
+ * files (at `relativeNames` where given: the paths of the files that a makeblastdb run made). Reads
+ * only tiny `.nal`/`.pal` alias text files; binary volume files are never read into memory.
  */
-export async function discoverBlastDatabases(picked: readonly File[]): Promise<BlastDbDiscovery> {
+export async function discoverBlastDatabases(picked: readonly File[], relativeNames?: readonly string[]): Promise<BlastDbDiscovery> {
   const builder = new RunDirectoryBuilder();
   const filesByName = new Map<string, File>();
   let totalBytes = 0;
   const folder = pickedFolder(picked);
 
-  for (const file of picked) {
-    const path = pickedFilePath(file);
+  for (const [index, file] of picked.entries()) {
+    const path = pickedFilePath(file, relativeNames?.[index]);
     if (path === undefined) continue;
     if (builder.has(path)) {
       builder.add(path, file);

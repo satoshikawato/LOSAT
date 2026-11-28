@@ -10,8 +10,8 @@
 //! NCBI reference (598d8ae6): c++/src/objmgr/bioseq_set_info.cpp:139-154 (attach of a set)
 //! NCBI reference (598d8ae6): c++/src/objmgr/bioseq_set_info.cpp:564-570 (phase I of a set)
 
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
 
 use super::range::{Handle, LiveHandles};
 use super::view::{mandatory, V};
@@ -306,8 +306,10 @@ impl<'a> Tse<'a> {
         handles: &LiveHandles<'_>,
         ids_known: bool,
     ) -> Result<(), Stop> {
-        let mut set_ids = HashSet::new();
-        let mut held: HashMap<&Handle, usize> = HashMap::new();
+        // Lookups only, never iterated: a fast hash, and room for every Seq-id of the Bioseqs at once.
+        let mut set_ids = FxHashSet::default();
+        let mut held: FxHashMap<&Handle, usize> =
+            FxHashMap::with_capacity_and_hasher(ids.iter().map(Vec::len).sum(), Default::default());
         for (index, object) in self.attach.iter().enumerate() {
             match object {
                 Attach::Annot(annot) => annot_name(self.annots[*annot])?,

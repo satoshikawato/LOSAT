@@ -1,21 +1,15 @@
 // The WindowMasker form draft (WW3b DESIGN §2, §4): independent of queued and completed runs,
-// driven by `ToolEngine.describeTool('windowmasker')` (-xmlhelp) and validated by `validateTool`.
+// driven by `ToolEngine.describeTool('windowmasker')` (-xmlhelp) and validated by `validateTool`
+// through the tool drafts' shared core (`ToolDraftCore`: files of the run, check, submit).
 // Large inputs stay as disk/OPFS-backed Files: compressed inputs inflate into session OPFS via
 // `DataGateway.inflateToSessionFile`, and combined FASTA files join Blob references by checking
 // only the final byte of each non-final file so page JS heap never holds the input sequences.
-import type { DirectoryFile, ToolDescription } from 'losat/domain';
-import { isUnavailable, type ToolEngine, type ToolValidation } from 'losat/ports';
+import { isUnavailable } from 'losat/ports';
 import { splitOptions } from '../domain/argv';
-import {
-  duplicateRunFileMessage,
-  normalizeRunPath,
-  pickedFilePath,
-  primaryBlastDbName,
-  RunDirectoryBuilder,
-} from '../domain/blast-db';
+import { duplicateRunFileMessage, normalizeRunPath, primaryBlastDbName } from '../domain/blast-db';
 import { countsName } from '../domain/counts';
 import type { FieldValue, FormValues } from '../domain/parameters';
-import { buildWindowMaskerArgv, toolCommandWords, toolValidationSummary } from '../domain/tool-argv';
+import { buildWindowMaskerArgv } from '../domain/tool-argv';
 import {
   defaultCountsOutName,
   stageOptionParameters,
@@ -24,10 +18,18 @@ import {
 } from '../domain/tools';
 import type { DataGateway } from '../ports/data';
 import { failureText } from './availability';
-import type { EnqueueAllResult, ToolDirectoryFile, ToolRequest } from './coordinator';
-import type { InputMode, SubmitResult, Validation } from './draft';
+import type { ToolDirectoryFile, ToolRequest } from './coordinator';
+import type { InputMode } from './draft';
 import { SessionFiles } from './session-files';
-import { Store } from './store';
+import {
+  ToolDraftCore,
+  type StatePatch,
+  type ToolDraftCoreDeps,
+  type ToolExtraFile,
+  type ToolFormState,
+} from './tool-draft-core';
+
+export type { ToolExtraFile } from './tool-draft-core';
 
 /** One FASTA file added to WindowMasker's Input block (inflated into OPFS when compressed). */
 export interface ToolInputFile {
@@ -40,16 +42,6 @@ export interface ToolInputFile {
   readonly sessionToken?: string;
   readonly error?: string;
   readonly unavailable?: true;
-}
-
-/** One extra file added to "Files of the run" (for `-ids`, `-exclude_ids`, `-conffile`, `-fa_list`, `-infmt blastdb`). */
-export interface ToolExtraFile {
-  readonly key: string;
-  readonly name: string;
-  readonly size: number;
-  readonly file: File;
-  /** Option flag that picked this file via `Choose file…` (`-ids`, `-exclude_ids`), if any. */
-  readonly flag?: string;
 }
 
 /** Counts file selected for Mask (`-ustat`) or Convert counts (`-in`). */
@@ -66,7 +58,7 @@ export type ToolCountsChoice =
   | { readonly kind: 'saved'; readonly taxid: number; readonly name: string; readonly size: number }
   | { readonly kind: 'file'; readonly file: File; readonly name: string; readonly size: number };
 
-export interface ToolDraftState {
+export interface ToolDraftState extends ToolFormState {
   readonly stage: WindowMaskerStage;
   readonly values: Readonly<Record<WindowMaskerStage, FormValues>>;
   readonly extra: Readonly<Record<WindowMaskerStage, string>>;
@@ -79,27 +71,14 @@ export interface ToolDraftState {
   readonly blastDbInEdited: boolean;
   readonly ustatSource: ToolCountsChoice;
   readonly convertSource: ToolCountsChoice;
-  readonly runFiles: readonly ToolExtraFile[];
-  readonly runFilesError?: string;
-  readonly description?: ToolDescription;
-  readonly descriptionError?: string;
-  readonly descriptionUnavailable?: true;
-  readonly validation: Validation;
-  readonly submitting: boolean;
-  readonly message?: { readonly kind: 'info' | 'error'; readonly text: string };
 }
 
-export interface ToolDraftDeps {
-  readonly engine: Pick<ToolEngine, 'describeTool' | 'validateTool'>;
+export interface ToolDraftDeps extends ToolDraftCoreDeps {
   readonly data: Pick<DataGateway, 'inflateToSessionFile' | 'dropSessionFile' | 'getToolOutputFile'>;
-  readonly enqueueToolAll: (requests: readonly ToolRequest[]) => Promise<EnqueueAllResult>;
   /** Reads a counts file saved in this browser for a taxonomy ID (OPFS-backed File). */
   readonly readSavedCounts?: (taxid: number) => Promise<File | undefined>;
   /** Shared holder tracker for inflated session files; defaults to a draft-local instance in unit tests. */
   readonly sessionFiles?: SessionFiles;
-  /** True while the Engine worker is running another job (so `validateTool` would wait behind it). */
-  readonly isBusy?: () => boolean;
-  readonly debounceMs?: number;
 }
 
 const STAGES: readonly WindowMaskerStage[] = ['mk_counts', 'mask', 'convert'];
@@ -107,47 +86,36 @@ const PASTE_NAME = 'input.fa';
 const COMBINED_NAME = 'combined_input.fa';
 const LF = 0x0a;
 
-export class ToolDraft {
-  readonly state: Store<ToolDraftState>;
-  private descriptionRequest: Promise<ToolDescription> | undefined;
-  private validationTimer: ReturnType<typeof setTimeout> | undefined;
-  private validationGeneration = 0;
-  private validationTurn: Promise<void> = Promise.resolve();
-  private validatedKey: string | undefined;
-  private nextKey = 1;
-  private readonly asking = new Set<Promise<unknown>>();
+export class ToolDraft extends ToolDraftCore<ToolDraftState> {
   private readonly sessionFiles: SessionFiles;
 
   constructor(private readonly deps: ToolDraftDeps) {
-    this.sessionFiles =
+    const sessionFiles =
       deps.sessionFiles ?? new SessionFiles((token) => void deps.data.dropSessionFile(token).catch(() => undefined));
     const emptyValues = Object.fromEntries(STAGES.map((stage) => [stage, Object.freeze({})])) as Record<WindowMaskerStage, FormValues>;
     const emptyExtra = Object.fromEntries(STAGES.map((stage) => [stage, ''])) as Record<WindowMaskerStage, string>;
-    this.state = new Store<ToolDraftState>({
-      stage: 'mk_counts',
-      values: emptyValues,
-      extra: emptyExtra,
-      outNames: { mk_counts: defaultCountsOutName(undefined), mask: '', convert: defaultCountsOutName(undefined) },
-      outEdited: { mk_counts: false, mask: false, convert: false },
-      fastaPaste: '',
-      fastaFiles: [],
-      fastaMode: 'combined',
-      blastDbIn: '',
-      blastDbInEdited: false,
-      ustatSource: { kind: 'none' },
-      convertSource: { kind: 'none' },
-      runFiles: [],
-      validation: { state: 'idle' },
-      submitting: false,
-    });
-  }
-
-  /** Loads `-xmlhelp` once when the WindowMasker tab is first opened. */
-  ensureLoaded(): void {
-    const state = this.state.get();
-    if (state.description === undefined && this.descriptionRequest === undefined) {
-      void this.loadDescription();
-    }
+    super(
+      'windowmasker',
+      { ...deps, sessionFiles },
+      {
+        stage: 'mk_counts',
+        values: emptyValues,
+        extra: emptyExtra,
+        outNames: { mk_counts: defaultCountsOutName(undefined), mask: '', convert: defaultCountsOutName(undefined) },
+        outEdited: { mk_counts: false, mask: false, convert: false },
+        fastaPaste: '',
+        fastaFiles: [],
+        fastaMode: 'combined',
+        blastDbIn: '',
+        blastDbInEdited: false,
+        ustatSource: { kind: 'none' },
+        convertSource: { kind: 'none' },
+        runFiles: [],
+        validation: { state: 'idle' },
+        submitting: false,
+      },
+    );
+    this.sessionFiles = sessionFiles;
   }
 
   // --- stage and options ------------------------------------------------------------------
@@ -369,56 +337,21 @@ export class ToolDraft {
     this.scheduleValidation();
   }
 
-  /** Adds files (or a folder picked with `webkitdirectory`) to "Files of the run"; refuses duplicate names. */
-  addRunFiles(files: readonly File[], relativeNames?: readonly string[]): void {
-    if (files.length === 0) return;
-    const state = this.state.get();
-    const builder = new RunDirectoryBuilder();
-    for (const entry of state.runFiles) builder.add(entry.name, entry.file);
-    const added: ToolExtraFile[] = [];
-    let duplicateError: string | undefined;
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i]!;
-      const name = pickedFilePath(file, relativeNames?.[i]);
-      if (name === undefined) continue;
-      if (builder.has(name)) {
-        duplicateError ??= duplicateRunFileMessage(name);
-        continue;
-      }
-      try {
-        builder.add(name, file);
-      } catch (error) {
-        duplicateError ??= errorMessage(error);
-        continue;
-      }
-      added.push({ key: `rf-${this.nextKey++}`, name, size: file.size, file });
-    }
-    const nextRunFiles = Object.freeze([...state.runFiles, ...added]);
-    let nextBlastDbIn = state.blastDbIn;
-    if (!state.blastDbInEdited || state.blastDbIn.trim() === '') {
-      const detected = primaryBlastDbName(nextRunFiles.map((entry) => entry.name));
-      if (detected !== undefined) nextBlastDbIn = detected;
-    }
-    this.set({
-      runFiles: nextRunFiles,
-      blastDbIn: nextBlastDbIn,
-      runFilesError: duplicateError,
-      message: undefined,
-    });
-    this.scheduleValidation();
-  }
-
-  removeRunFile(key: string): void {
+  /** Removes a file of the run; a file chosen for an option (`-ids`) also clears that option. */
+  override removeRunFile(key: string): void {
     const state = this.state.get();
     const target = state.runFiles.find((entry) => entry.key === key);
-    if (target === undefined) return;
-    const nextRunFiles = Object.freeze(state.runFiles.filter((entry) => entry.key !== key));
-    this.set({ runFiles: nextRunFiles, runFilesError: undefined, message: undefined });
-    if (target.flag !== undefined && state.values[state.stage][target.flag] === target.name) {
+    super.removeRunFile(key);
+    if (target?.flag !== undefined && state.values[state.stage][target.flag] === target.name) {
       this.setField(target.flag, '');
-    } else {
-      this.scheduleValidation();
     }
+  }
+
+  /** The `-in` name that files added to the run directory name, until the user edits it (a BLAST database). */
+  protected override runFilesAdded(state: ToolDraftState, runFiles: readonly ToolExtraFile[]): StatePatch<ToolDraftState> {
+    if (state.blastDbInEdited && state.blastDbIn.trim() !== '') return {};
+    const detected = primaryBlastDbName(runFiles.map((entry) => entry.name));
+    return detected === undefined ? {} : { blastDbIn: detected };
   }
 
   // --- command line & validation ----------------------------------------------------------
@@ -451,115 +384,47 @@ export class ToolDraft {
     }
   }
 
-  previewCommandWords(state: ToolDraftState = this.state.get()): readonly string[] {
-    return toolCommandWords(this.previewArgv(state));
+  /** Whether the WindowMasker tab holds user inputs or files that a reload would lose. */
+  holdsInputs(state: ToolDraftState = this.state.get()): boolean {
+    return (
+      state.fastaPaste.trim() !== '' ||
+      state.fastaFiles.length > 0 ||
+      state.runFiles.length > 0 ||
+      state.ustatSource.kind !== 'none' ||
+      state.convertSource.kind !== 'none'
+    );
   }
 
-  /** Asks for `-xmlhelp` again and re-runs validation when LOSAT became unavailable (Availability.recheck). */
-  async askAgain(): Promise<void> {
-    const state = this.state.get();
-    const tasks: Array<Promise<unknown>> = [...this.asking];
-    if (state.descriptionUnavailable === true) {
-      const task = this.loadDescription(true);
-      this.trackAsking(task);
-      tasks.push(task);
-    }
-    if (state.validation.state === 'unavailable') {
-      const task = this.runValidationNow();
-      this.trackAsking(task);
-      tasks.push(task);
-    }
-    await Promise.allSettled(tasks);
+  // --- what the core asks -----------------------------------------------------------------
+
+  protected parseExtra(state: ToolDraftState): readonly string[] {
+    return splitOptions(state.extra[state.stage]);
   }
 
-  /** Submits the current WindowMasker job(s) to the shared Coordinator queue. */
-  async submit(): Promise<SubmitResult> {
-    if (this.state.get().submitting) return { ok: false, message: 'A submission is already in progress.' };
-    this.set({ submitting: true, message: undefined });
-    try {
-      const busy = this.deps.isBusy?.() === true;
-      if (!busy) {
-        for (;;) {
-          if (this.validationTimer !== undefined) {
-            clearTimeout(this.validationTimer);
-            this.validationTimer = undefined;
-            await this.runValidationNow();
-            continue;
-          }
-          const turn = this.validationTurn;
-          await turn;
-          if (this.validationTimer === undefined && this.validationTurn === turn) break;
-        }
-      }
-      // Re-read the draft state after awaiting validation (same order as SearchDraft.prepareAndEnqueue)
-      // so changes that arrived during the await (an inflate finishing, an option changing) are used.
-      const state = this.state.get();
-      // Hold every inflated session file token before any await inside buildStageRequests
-      // (such as -ustat/-in lookup or combineFastaFiles tail reads) so clicking Remove during
-      // submission cannot drop an OPFS session file out from under the submission.
-      const submitHolder = `submit:${this.nextKey++}`;
-      const stateTokens = state.fastaFiles.flatMap((entry) => (entry.sessionToken === undefined ? [] : [entry.sessionToken]));
-      if (stateTokens.length > 0) this.sessionFiles.set(submitHolder, stateTokens);
-      try {
-        let extraWords: readonly string[];
-        try {
-          extraWords = this.parseExtra(state);
-        } catch (error) {
-          const message = errorMessage(error);
-          this.reportError(message);
-          return { ok: false, message };
-        }
+  /** The argv of the check: the inputs not chosen yet are named `input.fa` and `counts.ascii`. */
+  protected validationArgv(state: ToolDraftState, extra: readonly string[]): readonly string[] {
+    const inputName = this.previewInputName(state) ?? (state.stage === 'convert' ? 'counts.ascii' : 'input.fa');
+    const ustatName = state.stage === 'mask' ? (state.ustatSource.kind === 'none' ? 'counts.ascii' : state.ustatSource.name) : undefined;
+    return this.buildArgv(state, extra, { inputName, ustatName });
+  }
 
-        const currentKey = this.validationKey(state);
-        const validated = state.validation;
-        if (validated.state === 'invalid' && (!busy || this.validatedKey === currentKey)) {
-          const text = toolValidationSummary(validated.message);
-          this.reportError(text);
-          return { ok: false, message: text };
-        }
+  protected async buildRequests(state: ToolDraftState, extra: readonly string[]): Promise<readonly ToolRequest[]> {
+    const prints = toolPrintsKind(this.buildArgv(state, extra));
+    return prints !== null ? [this.buildPrintRequest(state, extra, prints)] : this.buildStageRequests(state, extra);
+  }
 
-        const preview = this.buildArgv(state, extraWords);
-        const prints = toolPrintsKind(preview);
+  protected override heldTokens(state: ToolDraftState): readonly string[] {
+    return state.fastaFiles.flatMap((entry) => (entry.sessionToken === undefined ? [] : [entry.sessionToken]));
+  }
 
-        const requests = prints !== null
-          ? [this.buildPrintRequest(state, extraWords, prints)]
-          : await this.buildStageRequests(state, extraWords);
-
-        const requestTokens = requests.flatMap((request) => request.sessionTokens ?? []);
-        if (requestTokens.length > 0) {
-          this.sessionFiles.set(submitHolder, new Set([...stateTokens, ...requestTokens]));
-        }
-        const result = await this.deps.enqueueToolAll(requests);
-        if (!result.ok) {
-          if (result.reason === 'counts') {
-            this.reportError(result.message);
-            return { ok: false, message: result.message };
-          }
-          const text = toolValidationSummary(result.message);
-          this.set({
-            validation: { state: 'invalid', message: result.message },
-            message: { kind: 'error', text },
-          });
-          return { ok: false, message: text };
-        }
-        return result;
-      } finally {
-        this.sessionFiles.release(submitHolder);
-      }
-    } catch (error) {
-      const message = failureText(error);
-      this.reportError(message);
-      return { ok: false, message };
-    } finally {
-      this.set({ submitting: false });
+  protected override inputsUnavailable(state: ToolDraftState): string | undefined {
+    for (const file of state.fastaFiles) {
+      if (file.status === 'failed' && file.unavailable === true && file.error !== undefined) return file.error;
     }
+    return undefined;
   }
 
   // --- internals --------------------------------------------------------------------------
-
-  private parseExtra(state: ToolDraftState): readonly string[] {
-    return splitOptions(state.extra[state.stage]);
-  }
 
   private buildArgv(
     state: ToolDraftState,
@@ -578,14 +443,6 @@ export class ToolDraft {
     });
   }
 
-  private reportError(text: string): void {
-    this.set({ message: { kind: 'error', text } });
-  }
-
-  private markInvalid(error: unknown): void {
-    this.set({ validation: { state: 'invalid', message: errorMessage(error) } });
-  }
-
   private releaseSessionToken(token: string | undefined): void {
     if (token !== undefined) void this.deps.data.dropSessionFile(token).catch(() => undefined);
   }
@@ -600,16 +457,11 @@ export class ToolDraft {
   }
 
   private async buildStageRequests(state: ToolDraftState, extraWords: readonly string[]): Promise<ToolRequest[]> {
-    const { stage, runFiles } = state;
-    const baseExtraDir: ToolDirectoryFile[] = runFiles.map((entry) => ({
-      name: entry.name,
-      file: entry.file,
-      origin: { kind: 'picked' },
-    }));
+    const { stage } = state;
 
     if (stage === 'convert') {
       const counts = await this.resolveCountsChoice(state.convertSource, 'Choose a counts file to convert.');
-      const dir = assembleDirectory([counts, ...baseExtraDir]);
+      const dir = this.runDirectoryOf(state, [counts]);
       const argv = this.buildArgv(state, extraWords, { inputName: counts.name });
       return this.req(stage, argv, dir);
     }
@@ -620,7 +472,7 @@ export class ToolDraft {
     if (!this.usesFastaBox(state)) {
       const inputName = state.blastDbIn.trim();
       if (inputName === '') throw new Error('Enter an input name or open files.');
-      const dir = assembleDirectory([...(ustatFile === undefined ? [] : [ustatFile]), ...baseExtraDir]);
+      const dir = this.runDirectoryOf(state, ustatFile === undefined ? [] : [ustatFile]);
       const argv = this.buildArgv(state, extraWords, { inputName, ustatName: ustatFile?.name });
       return this.req(stage, argv, dir);
     }
@@ -654,7 +506,7 @@ export class ToolDraft {
     }
 
     const makeRequest = (inputEntry: ToolDirectoryFile, sessionTokens: readonly string[]): ToolRequest => {
-      const directory = assembleDirectory([inputEntry, ...(ustatFile === undefined ? [] : [ustatFile]), ...baseExtraDir]);
+      const directory = this.runDirectoryOf(state, [inputEntry, ...(ustatFile === undefined ? [] : [ustatFile])]);
       const argv = this.buildArgv(state, extraWords, { inputName: inputEntry.name, ustatName: ustatFile?.name });
       return {
         tool: 'windowmasker',
@@ -758,124 +610,6 @@ export class ToolDraft {
       ),
     });
   }
-
-  private loadDescription(force = false): Promise<ToolDescription | undefined> {
-    if (!force && this.descriptionRequest !== undefined) return this.descriptionRequest;
-    const req = this.deps.engine.describeTool('windowmasker');
-    this.descriptionRequest = req;
-    return req.then(
-      (description) => {
-        this.set({ description, descriptionError: undefined, descriptionUnavailable: undefined });
-        this.scheduleValidation();
-        return description;
-      },
-      (error: unknown) => {
-        if (this.descriptionRequest === req) this.descriptionRequest = undefined;
-        const unavailable = isUnavailable(error);
-        this.set({
-          descriptionError: errorMessage(error),
-          ...(unavailable ? { descriptionUnavailable: true as const } : {}),
-        });
-        return undefined;
-      },
-    );
-  }
-
-  private scheduleValidation(): void {
-    if (this.validationTimer !== undefined) clearTimeout(this.validationTimer);
-    const delay = this.deps.debounceMs ?? 150;
-    this.validationTimer = setTimeout(() => {
-      this.validationTimer = undefined;
-      void this.runValidationNow();
-    }, delay);
-  }
-
-  /** Runs `validateTool` immediately (serialized so older answers are dropped). */
-  runValidationNow(): Promise<void> {
-    const generation = ++this.validationGeneration;
-    const stale = () => generation !== this.validationGeneration;
-    const run = async () => {
-      const state = this.state.get();
-      if (stale()) return;
-      let extraWords: readonly string[];
-      try {
-        extraWords = this.parseExtra(state);
-      } catch (error) {
-        this.markInvalid(error);
-        return;
-      }
-      let argv: readonly string[];
-      try {
-        const inputName = this.previewInputName(state) ?? (state.stage === 'convert' ? 'counts.ascii' : 'input.fa');
-        const ustatName = state.stage === 'mask' ? (state.ustatSource.kind === 'none' ? 'counts.ascii' : state.ustatSource.name) : undefined;
-        argv = this.buildArgv(state, extraWords, { inputName, ustatName });
-      } catch (error) {
-        this.markInvalid(error);
-        return;
-      }
-      this.set({ validation: { state: 'checking' } });
-      const directory: DirectoryFile[] = state.runFiles.map((entry) => ({ name: entry.name, file: entry.file }));
-      let verdict: ToolValidation;
-      try {
-        verdict = await this.deps.engine.validateTool(argv, { directory });
-      } catch (error) {
-        if (stale()) return;
-        const message = errorMessage(error);
-        this.set({
-          validation: isUnavailable(error)
-            ? { state: 'unavailable', message }
-            : { state: 'invalid', message },
-        });
-        return;
-      }
-      if (stale()) return;
-      this.validatedKey = this.validationKey(state);
-      this.set({
-        validation: verdict.ok ? { state: 'ok' } : { state: 'invalid', message: verdict.message },
-      });
-    };
-    const next = this.validationTurn.then(run, run);
-    this.validationTurn = next.then(() => undefined, () => undefined);
-    return next;
-  }
-
-  private validationKey(state: ToolDraftState): string {
-    return JSON.stringify([
-      state.stage,
-      state.values[state.stage],
-      state.extra[state.stage],
-      state.outNames[state.stage],
-      state.runFiles.map((entry) => entry.name),
-    ]);
-  }
-
-  private trackAsking(promise: Promise<unknown>): void {
-    this.asking.add(promise);
-    void promise.finally(() => this.asking.delete(promise));
-  }
-
-  private set(change: { readonly [K in keyof ToolDraftState]?: ToolDraftState[K] | undefined }): void {
-    const next = { ...this.state.get(), ...change };
-    for (const key of Object.keys(change) as Array<keyof ToolDraftState>) {
-      if (change[key] === undefined) delete next[key];
-    }
-    this.state.set(next as ToolDraftState);
-  }
-}
-
-/** Whether the WindowMasker tab holds user inputs or files that a reload would lose. */
-export function holdsToolInputs(state: ToolDraftState): boolean {
-  return (
-    state.fastaPaste.trim() !== '' ||
-    state.fastaFiles.length > 0 ||
-    state.runFiles.length > 0 ||
-    state.ustatSource.kind !== 'none' ||
-    state.convertSource.kind !== 'none'
-  );
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function sessionCountsChoice(runId: string, runNumber: number, key: string, name: string, size: number): ToolCountsChoice {
@@ -890,18 +624,6 @@ function fileCountsChoice(file: File | undefined): ToolCountsChoice {
   return file === undefined
     ? { kind: 'none' }
     : { kind: 'file', file, name: normalizeRunPath(file.name) ?? file.name, size: file.size };
-}
-
-/** Ensures no two different files in a tool run directory claim the same path. */
-function assembleDirectory(entries: readonly ToolDirectoryFile[]): readonly ToolDirectoryFile[] {
-  const builder = new RunDirectoryBuilder();
-  const kept: ToolDirectoryFile[] = [];
-  for (const entry of entries) {
-    const existed = builder.has(entry.name);
-    builder.add(entry.name, entry.file);
-    if (!existed) kept.push(entry);
-  }
-  return Object.freeze(kept);
 }
 
 /**

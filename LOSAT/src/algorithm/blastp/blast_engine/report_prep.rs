@@ -822,13 +822,7 @@ pub(super) fn prefetch_reported_subjects(
                             let joins_copies = first_report.is_some_and(
                                 crate::blastinput::app::ReportFormat::joins_adjacent_copies,
                             );
-                            let ends_on_throw = after_throw.run().is_some_and(|run| {
-                                matches!(
-                                    run.after,
-                                    crate::report::db_subject::AfterThrow::EndsReport
-                                        | crate::report::db_subject::AfterThrow::EndsRun
-                                )
-                            });
+                            let ends_on_throw = after_throw.ends_on_throw();
                             let query_ranks =
                                 crate::algorithm::common::database::one_by_one_query_reads(
                                     database::ListedTitles::fetched_ranks(shown, rows),
@@ -1469,12 +1463,13 @@ pub(super) fn refuse_prefetch_environment(
     // before they choose the archive, rpsblast's and blastp's write the archive without it.
     let archive_alone = outputs.only_archive() && args.app != BlastpApp::Psiblast;
     if let Err(error) = crate::blastinput::app::check_prefetch_environment(archive_alone) {
-        // NCBI wrote the first batch's search strategy request before its search (`CallRequests`).
+        // The prologs of the first report, then the first batch's search strategy request, which
+        // NCBI wrote before its search (`CallRequests`).
+        if reports.x_prolog {
+            write_pairwise_prologs(args, subject_source, subject_label, outputs, false)?;
+        }
         if let Some(call) = reports.call_requests {
             call.end_at(call.first_batch_end())?;
-        }
-        if reports.x_prolog {
-            write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
         }
         if let Some(first_batch_messages) = reports.reader_warnings.first() {
             outputs.diagnostics.write_all(first_batch_messages)?;

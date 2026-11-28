@@ -196,8 +196,11 @@ function storedZipEntries(archive) {
     const data = local + 30 + archive.readUInt16LE(local + 26) + archive.readUInt16LE(local + 28);
     const bytes = archive.subarray(data, data + size);
     assert.equal(crc32(bytes), crc, `${name}: the CRC-32 of its bytes`);
-    entries.push([name, bytes]);
-    at += 46 + nameLength + extraLength;
+    // The comment: the option whose file the entry is, in the engine's archive of a run's files (stream 8).
+    const commentLength = archive.readUInt16LE(at + 32);
+    const comment = archive.subarray(at + 46 + nameLength + extraLength, at + 46 + nameLength + extraLength + commentLength).toString("utf8");
+    entries.push([name, bytes, comment]);
+    at += 46 + nameLength + extraLength + commentLength;
   }
   return entries;
 }
@@ -281,6 +284,12 @@ class Reactor {
       for (const [ptr, len] of allocations) e.losat_web2_dealloc(ptr, len);
     }
   }
+}
+
+// The argv of a losat_web2_* call (abi_v2.md §7), as the application's host encodes it (encodeArgv,
+// web/packages/losat/src/infra/reactor/abi.ts): each word ends with NUL, so a last empty word is kept.
+function argvOf(words) {
+  return words.map((word) => `${word}\0`).join("");
 }
 
 // Registers the file at `file` under `name` in chunks of `chunkSize` bytes through one buffer of
@@ -733,18 +742,18 @@ function checkSurface(reactor, native) {
   }
   // validate: accepted argv, and CLI errors with the CLI's words. An accepted argv says whether its run reads the inputs
   // with NCBI's data loaders on and with -parse_deflines on (the *validation* JSON, abi_v2.md §9; D16 and X7-5).
-  const accepted = reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s"].join("\0"));
+  const accepted = reactor.call("losat_web2_validate", argvOf(["blastp", "-query", "q", "-subject", "s"]));
   assert.equal(accepted.status, 0);
   assert.deepEqual(JSON.parse(accepted.streams.get(2).toString()), { data_loaders: true, parse_deflines: false });
-  const acceptedPd = reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-parse_deflines"].join("\0"));
+  const acceptedPd = reactor.call("losat_web2_validate", argvOf(["blastp", "-query", "q", "-subject", "s", "-parse_deflines"]));
   assert.equal(acceptedPd.status, 0);
   assert.deepEqual(JSON.parse(acceptedPd.streams.get(2).toString()), { data_loaders: true, parse_deflines: true });
-  const acceptedPdDry = reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-parse_deflines", "-dryrun"].join("\0"));
+  const acceptedPdDry = reactor.call("losat_web2_validate", argvOf(["blastp", "-query", "q", "-subject", "s", "-parse_deflines", "-dryrun"]));
   assert.equal(acceptedPdDry.status, 0);
   assert.deepEqual(JSON.parse(acceptedPdDry.streams.get(2).toString()), { data_loaders: true, parse_deflines: false });
   // NCBI's application start (abi_v2.md §4 `losat_web2_start`, line RG E1w-3a): the *start* JSON, the
   // file of -conffile as a registry file (kind 2), and -dryrun.
-  const started = reactor.call("losat_web2_start", ["tblastx", "-query", "q", "-subject", "s", "-conffile", "e1w3a.ini", "-logfile", "run.log", "-dryrun"].join("\0"));
+  const started = reactor.call("losat_web2_start", argvOf(["tblastx", "-query", "q", "-subject", "s", "-conffile", "e1w3a.ini", "-logfile", "run.log", "-dryrun"]));
   assert.equal(started.status, 0, started.error);
   assert.deepEqual(JSON.parse(started.streams.get(2).toString()), {
     conffile: "e1w3a.ini",
@@ -760,13 +769,17 @@ function checkSurface(reactor, native) {
     out_ascii_pssm: null,
     save_each_pssm: false,
   });
-  const normalizedLog = reactor.call("losat_web2_start", ["tblastx", "-query", "q", "-subject", "s", "-logfile", "logs/"].join("\0"));
+  const normalizedLog = reactor.call("losat_web2_start", argvOf(["tblastx", "-query", "q", "-subject", "s", "-logfile", "logs/"]));
   assert.equal(normalizedLog.status, 0, normalizedLog.error);
   assert.equal(JSON.parse(normalizedLog.streams.get(2).toString()).log_file, "logs/");
   assert.equal(JSON.parse(normalizedLog.streams.get(2).toString()).log_file_name, "logs");
-  const parsed = reactor.call("losat_web2_start", ["blastn", "-query", "q", "-subject", "s", "-parse_deflines"].join("\0"));
+  // The strategy file's name is the command line's file, as a run names it on stream 8 (line RG item F1w-r2).
+  const normalizedStrategy = reactor.call("losat_web2_start", argvOf(["blastp", "-query", "q", "-subject", "s", "-export_search_strategy", "./out/../s.asn"]));
+  assert.equal(normalizedStrategy.status, 0, normalizedStrategy.error);
+  assert.equal(JSON.parse(normalizedStrategy.streams.get(2).toString()).strategy_file, "s.asn");
+  const parsed = reactor.call("losat_web2_start", argvOf(["blastn", "-query", "q", "-subject", "s", "-parse_deflines"]));
   assert.equal(JSON.parse(parsed.streams.get(2).toString()).register_inputs, true, "-parse_deflines reads the inputs together");
-  const conffile = ["blastp", "-query", "q", "-subject", "s", "-conffile", "e1w3a.ini", "-outfmt", "x", "-dryrun"].join("\0");
+  const conffile = argvOf(["blastp", "-query", "q", "-subject", "s", "-conffile", "e1w3a.ini", "-outfmt", "x", "-dryrun"]);
   assert.equal(reactor.call("losat_web2_validate", conffile).error, 'Critical: (106.23) Registry file "e1w3a.ini" not found, aborting.');
   const registry = Buffer.from("[BLAST]\n");
   const begunRegistry = reactor.call("losat_web2_file_begin", 2, "e1w3a.ini", registry.length);
@@ -781,10 +794,10 @@ function checkSurface(reactor, native) {
   const begunNoLoaders = reactor.call("losat_web2_file_begin", 2, "nol.ini", noLoaders.length);
   assert.equal(reactor.call("losat_web2_file_chunk", begunNoLoaders.status, noLoaders).status, 0);
   assert.equal(reactor.call("losat_web2_file_end", begunNoLoaders.status).status, 0);
-  const off = reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-conffile", "nol.ini"].join("\0"));
+  const off = reactor.call("losat_web2_validate", argvOf(["blastp", "-query", "q", "-subject", "s", "-conffile", "nol.ini"]));
   assert.equal(off.status, 0, off.error);
   assert.deepEqual(JSON.parse(off.streams.get(2).toString()), { data_loaders: false, parse_deflines: false });
-  const offPd = reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-conffile", "nol.ini", "-parse_deflines"].join("\0"));
+  const offPd = reactor.call("losat_web2_validate", argvOf(["blastp", "-query", "q", "-subject", "s", "-conffile", "nol.ini", "-parse_deflines"]));
   assert.equal(offPd.status, 0, offPd.error);
   assert.deepEqual(JSON.parse(offPd.streams.get(2).toString()), { data_loaders: false, parse_deflines: true });
   assert.equal(reactor.call("losat_web2_file_release", begunNoLoaders.status).status, 0);
@@ -794,24 +807,24 @@ function checkSurface(reactor, native) {
                       ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast", "-template_type", "coding"],
                       ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast", "-template_type", "coding",
                        "-template_length", "17"]]) {
-    const validated = reactor.call("losat_web2_validate", argv.join("\0"));
+    const validated = reactor.call("losat_web2_validate", argvOf(argv));
     assert.equal(validated.status, -1, argv.join(" "));
     const cli = require("node:child_process").spawnSync(native, argv);
     assert.equal(validated.error, cli.stderr.toString(), `${argv.join(" ")}: the CLI's message`);
   }
   // BLASTX's ranges (line SX, DW-39): validate reads their syntax, the subject range first.
   const blastx = ["blastx", "-query", "q", "-subject", "s"];
-  assert.equal(reactor.call("losat_web2_validate", [...blastx, "-query_loc", "1-9", "-subject_loc", "2-5"].join("\0")).status, 0);
-  assert.match(reactor.call("losat_web2_validate", [...blastx, "-query_loc", "9-1", "-subject_loc", "5-2"].join("\0")).error,
+  assert.equal(reactor.call("losat_web2_validate", argvOf([...blastx, "-query_loc", "1-9", "-subject_loc", "2-5"])).status, 0);
+  assert.match(reactor.call("losat_web2_validate", argvOf([...blastx, "-query_loc", "9-1", "-subject_loc", "5-2"])).error,
                /^LOSAT engine error: Invalid specification of subject location/);
-  assert.match(reactor.call("losat_web2_validate", [...blastx, "-query_loc", "9-1"].join("\0")).error,
+  assert.match(reactor.call("losat_web2_validate", argvOf([...blastx, "-query_loc", "9-1"])).error,
                /^LOSAT engine error: Invalid specification of query location/);
   // The host validates the argv that it runs, with its -num_threads, so a -num_threads in
   // the user's words is a repeated option (abi_v2.md §7). The adapter parses the argv as the
   // CLI does, so the whole message (its usage line too) and an unknown program's are the CLI's.
   for (const argv of [["blastn", "-query", "q", "-subject", "s", "-num_threads", "2", "-num_threads", "1"],
                       ["nosuch", "-query", "q", "-subject", "s"]]) {
-    const validated = reactor.call("losat_web2_validate", argv.join("\0"));
+    const validated = reactor.call("losat_web2_validate", argvOf(argv));
     assert.equal(validated.status, -1, argv.join(" "));
     const cli = require("node:child_process").spawnSync(native, argv);
     assert.equal(validated.error, cli.stderr.toString(), `${argv.join(" ")}: the CLI's error`);
@@ -819,29 +832,29 @@ function checkSurface(reactor, native) {
   // -outfmt (WA2-OP-03, W11): the formats that the CLI writes and 6 and 7 with fields are valid (13 and 14 without
   // the CLI's -out), and the CLI's errors have the CLI's words.
   for (const outfmt of ["6", "0", "6 qseqid sseqid pident", "7 std qcovs", "5", "9", "10 qseqid", "11", "13", "14", "16", "17 SQ", "20"]) {
-    assert.equal(reactor.call("losat_web2_validate", ["blastn", "-query", "q", "-subject", "s", "-outfmt", outfmt].join("\0")).status, 0, outfmt);
+    assert.equal(reactor.call("losat_web2_validate", argvOf(["blastn", "-query", "q", "-subject", "s", "-outfmt", outfmt])).status, 0, outfmt);
   }
   for (const [program, outfmt] of [["blastp", "13"], ["blastx", "11"], ["blastx", "14"]]) {
-    assert.equal(reactor.call("losat_web2_validate", [program, "-query", "q", "-subject", "s", "-outfmt", outfmt].join("\0")).status, 0, `${program} ${outfmt}`);
+    assert.equal(reactor.call("losat_web2_validate", argvOf([program, "-query", "q", "-subject", "s", "-outfmt", outfmt])).status, 0, `${program} ${outfmt}`);
   }
   // The CLI reads the files before its formatting handler checks the delimiter: real files.
   const files = ["-query", path.join(ROOT, "LOSAT/tests/fasta/outfmt0/mask_query.fasta"),
                  "-subject", path.join(ROOT, "LOSAT/tests/fasta/outfmt0/mask_subject.fasta")];
   for (const outfmt of ["abc", "99", "6 delim=; qseqid staxids"]) {
     const argv = ["blastn", ...files, "-outfmt", outfmt];
-    const validated = reactor.call("losat_web2_validate", argv.join("\0"));
+    const validated = reactor.call("losat_web2_validate", argvOf(argv));
     assert.equal(validated.status, -1, outfmt);
     const cli = require("node:child_process").spawnSync(native, argv);
     assert.equal(validated.error, cli.stderr.toString(), `-outfmt ${outfmt}: the CLI's message`);
   }
-  assert.match(reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-out", "x"].join("\0")).error, /not accepted/);
+  assert.match(reactor.call("losat_web2_validate", argvOf(["blastp", "-query", "q", "-subject", "s", "-out", "x"])).error, /not accepted/);
   // The tasks of Session SD and line RG X6, and NCBI's option check of a template
   // (blast_options.c:1247-1261).
   for (const task of ["dc-megablast", "blastn-short", "rmblastn"]) {
-    assert.equal(reactor.call("losat_web2_validate", ["blastn", "-query", "q", "-subject", "s", "-task", task].join("\0")).status, 0, task);
+    assert.equal(reactor.call("losat_web2_validate", argvOf(["blastn", "-query", "q", "-subject", "s", "-task", task])).status, 0, task);
   }
-  assert.match(reactor.call("losat_web2_validate", ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast",
-                                                    "-word_size", "13"].join("\0")).error,
+  assert.match(reactor.call("losat_web2_validate", argvOf(["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast",
+                                                    "-word_size", "13"])).error,
                /^LOSAT query\/options error: Invalid discontiguous template parameters: word size must be either 11 or 12/);
   // BLASTN scores without a Karlin-Altschul table row (WA-FM-01). The CLI meets the tables only
   // when some query context has an ungapped Karlin-Altschul block, which depends on the query's
@@ -870,12 +883,12 @@ function checkSurface(reactor, native) {
       if (status === null) assert.notEqual(cli.status, 0, label);
       else assert.equal(cli.status, status, label);
       if (cli.status === 0) assert.match(cli.stderr.toString(), /^Warning: \[blastn\] Query_1 mq1 query: Could not calculate ungapped Karlin-Altschul/, label);
-      const validated = reactor.call("losat_web2_validate", argv.join("\0"));
+      const validated = reactor.call("losat_web2_validate", argvOf(argv));
       assert.equal(validated.status, 0, `${label}: validate leaves the tables to run`);
     }
     // What validate rejects (the options' checks), the CLI rejects with the same message.
     const options = ["blastn", "-query", path.join(dir, "acgt.fa"), "-subject", path.join(dir, "s.fa"), "-reward", "7", "-evalue", "0"];
-    const validated = reactor.call("losat_web2_validate", options.join("\0"));
+    const validated = reactor.call("losat_web2_validate", argvOf(options));
     assert.equal(validated.status, -1);
     const cli = require("node:child_process").spawnSync(native, options, { env });
     assert.equal(validated.error, cli.stderr.toString(), "the CLI's message");
@@ -956,7 +969,7 @@ function checkSurface(reactor, native) {
   assert.equal(reactor.call("losat_web2_register", "blastp", 1, 1, 1, tiJunk).status, -1);
   assert.match(reactor.call("losat_web2_register", "blastp", 1, 1, 2, tiJunk).error, /^parse_deflines must be 0 or 1, not 2$/);
   // validate omits parse_deflines when an argv fails to parse (Finding 3).
-  const unparsedVal = reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-parse_deflines", "-evalue"].join("\0"));
+  const unparsedVal = reactor.call("losat_web2_validate", argvOf(["blastp", "-query", "q", "-subject", "s", "-parse_deflines", "-evalue"]));
   assert.equal(unparsedVal.status, -1);
   assert.deepEqual(JSON.parse(unparsedVal.streams.get(2).toString()), { data_loaders: true });
   for (const [args, error] of [[["blastp", 2, 1, 0], /^unknown input role 2$/], [["blastp", 0, 2, 0], /^data_loaders must be 0 or 1, not 2$/],
@@ -980,7 +993,7 @@ async function checkPrints(engine, reactor, native) {
   const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("LOSAT_")));
   const cli = (argv) => require("node:child_process").spawnSync(native, argv, { cwd: dir, env, maxBuffer: 1 << 26 });
   const start = (r, argv) => {
-    const started = r.call("losat_web2_start", argv.join("\0"));
+    const started = r.call("losat_web2_start", argvOf(argv));
     assert.equal(started.status, 0, `${argv.join(" ")}: start: ${started.error}`);
     return JSON.parse(started.streams.get(2).toString());
   };
@@ -991,9 +1004,9 @@ async function checkPrints(engine, reactor, native) {
     const json = start(r, argv);
     assert.equal(json.prints, kind, `${label}: what start says the run prints`);
     assert.equal(json.dry_run, false, `${label}: a run that prints is not a dry run`);
-    const validated = r.call("losat_web2_validate", argv.join("\0"));
+    const validated = r.call("losat_web2_validate", argvOf(argv));
     assert.equal(validated.status, 0, `${label}: validate: ${validated.error}`);
-    const run = r.call("losat_web2_run", argv.join("\0"), 0, 0);
+    const run = r.call("losat_web2_run", argvOf(argv), 0, 0);
     assert.equal(run.status, 0, `${label}: run: ${run.error}`);
     const expected = cli(argv);
     assert.equal(expected.status, 0, `${label}: the CLI's exit status`);
@@ -1026,7 +1039,8 @@ async function checkPrints(engine, reactor, native) {
   const logged = prints(["tblastx", ...inputs, "-version", "-logfile", "v.log", "-num_threads", "1"], "version");
   assert.equal(logged.json.log_file, "v.log");
   const made = fs.readFileSync(path.join(dir, "v.log"));
-  assert.deepEqual(storedZipEntries(logged.run.streams.get(8)).map(([name, bytes]) => [name, sha256(bytes)]), [["v.log", sha256(made)]],
+  assert.deepEqual(storedZipEntries(logged.run.streams.get(8)).map(([name, bytes, option]) => [name, sha256(bytes), option]),
+                   [["v.log", sha256(made), "logfile"]],
                    "the file of -logfile (stream 8) is the CLI's");
   fs.rmSync(path.join(dir, "v.log"));
   // A -logfile name with a directory: the CLI opens the file of -logfile before it prints its help and its version;
@@ -1057,7 +1071,7 @@ async function checkPrints(engine, reactor, native) {
                       ["blastp", ...inputs, "-h", "-conffile", "missing.ini", "-num_threads", "1"]]) {
     const label = argv.join(" ");
     start(reactor, argv);
-    const validated = reactor.call("losat_web2_validate", argv.join("\0"));
+    const validated = reactor.call("losat_web2_validate", argvOf(argv));
     const expected = cli(argv);
     assert.notEqual(expected.status, 0, `${label}: the CLI fails`);
     assert.equal(validated.status, -1, `${label}: validate fails`);
@@ -1075,13 +1089,13 @@ async function checkPrints(engine, reactor, native) {
     const expected = cli(argv);
     assert.notEqual(expected.status, 0, `${label}: the CLI fails`);
     const message = expected.stderr.toString().trimEnd();
-    const validated = reactor.call("losat_web2_validate", argv.join("\0"));
+    const validated = reactor.call("losat_web2_validate", argvOf(argv));
     assert.equal(validated.status, -1, `${label}: validate fails`);
     assert.equal(validated.error.trimEnd(), message, `${label}: validate gives the CLI's message`);
     const [query, subject] = sequences[argv[0]].map((residues, kind) =>
       reactor.call("losat_web2_register", argv[0], kind, 1, 0, Buffer.from(`>r${kind}\n${residues}\n`)).status);
     assert.ok(query > 0 && subject > 0, `${label}: the inputs are registered`);
-    const run = reactor.call("losat_web2_run", argv.join("\0"), query, subject);
+    const run = reactor.call("losat_web2_run", argvOf(argv), query, subject);
     for (const handle of [query, subject]) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
     assert.equal(run.status, -1, `${label}: run fails`);
     assert.equal(run.error.trimEnd(), message, `${label}: run gives the CLI's message`);
@@ -1094,7 +1108,7 @@ async function checkPrints(engine, reactor, native) {
   // `-out -h` is the file `-h` of -out, which a run refuses whatever its name (abi_v2.md §4): not the help.
   const out = ["blastp", ...inputs, "-out", "-h", "-num_threads", "1"];
   assert.equal(start(reactor, out).prints, null, "-out -h: not a run that prints");
-  assert.equal(reactor.call("losat_web2_validate", out.join("\0")).error.trimEnd(), "-out is not accepted: a run writes every output format of the program");
+  assert.equal(reactor.call("losat_web2_validate", argvOf(out)).error.trimEnd(), "-out is not accepted: a run writes every output format of the program");
   count++;
   fs.rmSync(dir, { recursive: true });
   return count;
@@ -1329,7 +1343,7 @@ async function checkLogfileNames(engine, native, scratch) {
           }
           const files = standardOutput.has(name) ? [[name, cli.stdout]] : cli.made === undefined ? [] : [[cli.madeName, cli.made]];
           if (!standardOutput.has(name)) assert.equal(cli.stdout.length, 0, `${label}: the CLI's standard output with -out`);
-          const run = reactor.call("losat_web2_run", [...words, "-logfile", name, "-num_threads", "1"].join("\0"), ...handles);
+          const run = reactor.call("losat_web2_run", argvOf([...words, "-logfile", name, "-num_threads", "1"]), ...handles);
           if (waitForWorkers) await waitForWorkers();
           assert.equal(run.status, 0, `${label}: ${run.error}`);
           for (const [format, expected] of outputs) {
@@ -1358,9 +1372,10 @@ async function checkLogfileNames(engine, native, scratch) {
 // -export_search_strategy (line RG item F1w, review 1 S3): the file of a run of two or more query batches at NCBI's
 // default batch sizes (the browser gives no BATCH_SIZE), for each program, on each engine and its thread counts (the
 // threaded engine's parallel search, -num_threads 4 too), against the CLI's file of the same argv: stream 8 holds the
-// CLI's file under the name, and the argv's output (outfmt 6, and outfmt 11's archive, whose options handle the
-// strategy shares) is the CLI's. The queries and subjects are seeded letters, written once into `scratch`; each
-// subject is pieces of the queries, so that the searches find hits.
+// CLI's file under the CLI's name of it (`./s.asn` is `s.asn`, `/var/run/../tmp/<id>.asn` is `/tmp/<id>.asn`, as the
+// *start* names it; line RG item F1w-r2), and the argv's output (outfmt 6, and outfmt 11's archive, whose options
+// handle the strategy shares) is the CLI's. The queries and subjects are seeded letters, written once into `scratch`;
+// each subject is pieces of the queries, so that the searches find hits.
 function seededFasta(seed, records, length, letters, prefix) {
   let state = seed >>> 0;
   const next = () => {
@@ -1422,26 +1437,46 @@ async function checkStrategyFiles(reactor, native, scratch, engine, waitForWorke
       return registered.status;
     });
     for (const format of program === "blastp" || program === "blastx" ? [6, 11] : [6]) {
-      const argv = [program, "-query", "q.fa", "-subject", "s.fa", ...words, "-outfmt", String(format), "-export_search_strategy", "s.asn"];
-      const cli = nativeOnPipes(native, [...argv, "-num_threads", "1", "-out", "o.out"], directory);
-      const label = `${engine.name} ${program} outfmt ${format}`;
-      assert.equal(cli.status, 0, `${label}: native: ${cli.stderr}`);
-      const file = fs.readFileSync(path.join(directory, "s.asn")), out = fs.readFileSync(path.join(directory, "o.out"));
-      const requests = file.toString().split("Blast4-request ::=").length - 1;
-      assert.ok(requests >= 2, `${label}: the CLI wrote ${requests} request(s), not a run of two or more batches`);
-      for (const threads of engine.threads) {
-        const run = reactor.call("losat_web2_run", [...argv, "-num_threads", String(threads)].join("\0"), ...handles);
-        if (waitForWorkers) await waitForWorkers();
-        assert.equal(run.status, 0, `${label} threads ${threads}: ${run.error}`);
-        const sent = run.streams.has(8) ? storedZipEntries(run.streams.get(8)) : [];
-        assert.deepEqual(sent.map(([name, bytes]) => [name, sha256(bytes)]), [["s.asn", sha256(file)]],
-                         `${label} threads ${threads}: the file of the run (stream 8) is the CLI's (${requests} requests)`);
-        const stream = format === 6 ? 6 : CUSTOM_STREAM;
-        assert.equal(sha256(run.streams.get(stream) || Buffer.alloc(0)), sha256(out), `${label} threads ${threads}: outfmt ${format}`);
-        rows++;
+      // [the name typed, the CLI's file, the Web's name of it, more words]. A `..` after a link (`/var/run` is `/run` on
+      // the host that checkLogfileNames requires): the CLI makes `/tmp/<id>.asn`, not the name read lexically
+      // (`/var/tmp/<id>.asn`), and the Web names that file (line RG item F1w-r2's second fix round, 2026-11-28). A
+      // `-logfile` name whose folder as written is missing (`sub/..`) and that is the strategy file's: the run makes
+      // only the strategy file, and the engine labels its entry so (the third fix round's S1).
+      const id = `losat-v-abi-${process.pid}-${engine.name}-strategy`;
+      const names = [[index % 2 === 0 ? "s.asn" : "./s.asn", path.join(directory, "s.asn"), "s.asn", []]];
+      if (index === 0 && format === 6) {
+        names.push([`/var/run/../tmp/${id}.asn`, `/tmp/${id}.asn`, `/tmp/${id}.asn`, []]);
+        names.push(["x.asn", path.join(directory, "x.asn"), "x.asn", ["-logfile", "sub/../x.asn"]]);
       }
-      fs.rmSync(path.join(directory, "s.asn"));
-      fs.rmSync(path.join(directory, "o.out"));
+      for (const [typed, madePath, named, more] of names) {
+        const argv = [program, "-query", "q.fa", "-subject", "s.fa", ...words, "-outfmt", String(format), "-export_search_strategy", typed, ...more];
+        const cli = nativeOnPipes(native, [...argv, "-num_threads", "1", "-out", "o.out"], directory);
+        const label = `${engine.name} ${program} outfmt ${format} ${typed}${more.length > 0 ? ` ${more.join(" ")}` : ""}`;
+        const lexical = typed.startsWith("/") ? path.posix.normalize(typed) : undefined;
+        const lexicalMade = lexical !== undefined && lexical !== madePath && fs.existsSync(lexical);
+        if (lexicalMade) fs.rmSync(lexical);
+        assert.ok(!lexicalMade, `${label}: the CLI made ${lexical}`);
+        const started = reactor.call("losat_web2_start", argvOf(argv));
+        assert.equal(started.status, 0, `${label}: start: ${started.error}`);
+        assert.equal(JSON.parse(started.streams.get(2).toString()).strategy_file, named, `${label}: the start names the CLI's file`);
+        assert.equal(cli.status, 0, `${label}: native: ${cli.stderr}`);
+        const file = fs.readFileSync(madePath), out = fs.readFileSync(path.join(directory, "o.out"));
+        fs.rmSync(madePath);
+        fs.rmSync(path.join(directory, "o.out"));
+        const requests = file.toString().split("Blast4-request ::=").length - 1;
+        assert.ok(requests >= 2, `${label}: the CLI wrote ${requests} request(s), not a run of two or more batches`);
+        for (const threads of engine.threads) {
+          const run = reactor.call("losat_web2_run", argvOf([...argv, "-num_threads", String(threads)]), ...handles);
+          if (waitForWorkers) await waitForWorkers();
+          assert.equal(run.status, 0, `${label} threads ${threads}: ${run.error}`);
+          const sent = run.streams.has(8) ? storedZipEntries(run.streams.get(8)) : [];
+          assert.deepEqual(sent.map(([name, bytes, option]) => [name, sha256(bytes), option]), [[named, sha256(file), "export_search_strategy"]],
+                           `${label} threads ${threads}: the file of the run (stream 8) is the CLI's (${requests} requests)`);
+          const stream = format === 6 ? 6 : CUSTOM_STREAM;
+          assert.equal(sha256(run.streams.get(stream) || Buffer.alloc(0)), sha256(out), `${label} threads ${threads}: outfmt ${format}`);
+          rows++;
+        }
+      }
     }
     for (const handle of handles) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
     fs.rmSync(directory, { recursive: true, force: true });
@@ -1539,8 +1574,8 @@ async function checkLogfileRunFiles(engine, native, scratch) {
       if (!c.db) assert.ok(sHandle.status > 0, `${label} subject: ${sHandle.error}`);
       const targetArgs = c.db ? ["-db", c.db] : ["-subject", c.subject[0]];
       const words = [c.program, "-query", c.query[0], ...targetArgs, ...T, ...(c.extra || []), "-logfile", c.logfile];
-      const validated = reactor.call("losat_web2_validate", words.join("\0"));
-      const run = reactor.call("losat_web2_run", words.join("\0"), qHandle.status, sHandle.status);
+      const validated = reactor.call("losat_web2_validate", argvOf(words));
+      const run = reactor.call("losat_web2_run", argvOf(words), qHandle.status, sHandle.status);
       if (waitForWorkers) await waitForWorkers();
       if (c.expect === "refusal") {
         const expectedError = `a -logfile file '${c.logfile}' that is a file of the run's directory (LOSAT Web reads the run's files and writes none of them) is not supported by LOSAT's ${c.program.toUpperCase()}`;
@@ -1680,7 +1715,8 @@ function writeToolFiles(directory, files) {
 // the search's files, which the engine does not write to. Returns the results row.
 async function checkTool(engine, instance, directory, search, options, scratch) {
   const label = `${engine.name} ${search.cases.join(",")}`;
-  const words = ["windowmasker", ...search.argv];
+  const words = [search.program, ...search.argv];
+  const programLabel = search.program.toUpperCase();
   const before = new Set(filesIn(directory).map((file) => path.relative(directory, file)));
   // The CLI's run, in a folder of the same files.
   const folder = fs.mkdtempSync(path.join(scratch, "tool."));
@@ -1698,13 +1734,17 @@ async function checkTool(engine, instance, directory, search, options, scratch) 
   const reactor = instance.reactor;
   let row;
   if (search.tool === "validate") {
-    const validated = reactor.call("losat_web2_validate", words.join("\0"));
+    const validated = reactor.call("losat_web2_validate", argvOf(words));
     assert.equal(reactor.chunks.size, 0, `${label}: validate emits nothing`);
     if (search.expect === "refusal") {
-      // LOSAT's refusal of a -logfile naming a file of the run's directory (abi_v2.md §4).
-      const named = search.argv[search.argv.indexOf("-logfile") + 1];
+      // LOSAT's refusal of a -logfile or -out naming a file of the run's directory (abi_v2.md §4).
+      const isLog = search.argv.includes("-logfile") && !search.argv.includes("-out");
+      const named = search.argv[search.argv.indexOf(isLog ? "-logfile" : "-out") + 1];
+      const pattern = isLog
+        ? new RegExp(`^Error: a -logfile file '.*' that is a file of the run's directory .* is not supported by LOSAT's ${programLabel}$`)
+        : new RegExp(`^Error: an output file '.*' .* is not supported by LOSAT's ${programLabel}$`);
       assert.equal(validated.status, -1, `${label}: validate refuses the argv`);
-      assert.match(validated.error, /^Error: a -logfile file '.*' that is a file of the run's directory .* is not supported by LOSAT's WINDOWMASKER$/, `${label}: the refusal`);
+      assert.match(validated.error, pattern, `${label}: the refusal`);
       assert.ok(validated.error.includes(`'${named}'`), `${label}: the refusal names ${named}`);
       assert.equal(validated.streams.size, 0, `${label}: nothing emitted`);
     } else if (search.expect === "late_failure") {
@@ -1729,7 +1769,7 @@ async function checkTool(engine, instance, directory, search, options, scratch) 
     row = { engine: engine.name, threads: 0, program: search.program, cases: search.cases, argv: search.argv, formats: {}, frozen: {},
             tool: "validate", status: validated.status };
   } else {
-    const run = reactor.call("losat_web2_tool", words.join("\0"));
+    const run = reactor.call("losat_web2_tool", argvOf(words));
     const frames = (reactor.chunks.get(12) || []).map((chunk) => Buffer.from(chunk));
     if (instance.waitForWorkers) await instance.waitForWorkers();
     assert.equal(run.status, 0, `${label}: ${run.error}`);
@@ -1740,8 +1780,8 @@ async function checkTool(engine, instance, directory, search, options, scratch) 
       const isLog = search.argv.includes("-logfile") && !search.argv.includes("-out");
       const named = search.argv[search.argv.indexOf(isLog ? "-logfile" : "-out") + 1];
       const pattern = isLog
-        ? /^Error: a -logfile file '.*' that is a file of the run's directory .* is not supported by LOSAT's WINDOWMASKER\n$/
-        : /^Error: an output file '.*' .* is not supported by LOSAT's WINDOWMASKER\n$/;
+        ? new RegExp(`^Error: a -logfile file '.*' that is a file of the run's directory .* is not supported by LOSAT's ${programLabel}\n$`)
+        : new RegExp(`^Error: an output file '.*' .* is not supported by LOSAT's ${programLabel}\n$`);
       assert.equal(status, 1, `${label}: the refusal's exit status`);
       assert.match((run.streams.get(3) || "").toString(), pattern, `${label}: the refusal`);
       assert.ok((run.streams.get(3) || "").toString().includes(`'${named}'`), `${label}: the refusal names ${named}`);
@@ -1871,7 +1911,7 @@ async function checkPsiblastAndTblastnPssm(engine, native, scratch) {
         for (const name of fs.readdirSync(cliDir)) fs.rmSync(path.join(cliDir, name), { force: true });
       }
       fs.rmSync(cliDir, { recursive: true, force: true });
-      const started = reactor.call("losat_web2_start", baseArgv.join("\0"));
+      const started = reactor.call("losat_web2_start", argvOf(baseArgv));
       assert.equal(started.status, 0, `${c.id}: start: ${started.error}`);
       const start = JSON.parse(started.streams.get(2).toString());
       assert.equal(start.database, Boolean(c.db), `${c.id}: start.database`);
@@ -1885,7 +1925,7 @@ async function checkPsiblastAndTblastnPssm(engine, native, scratch) {
       };
       let qHandle = 0, qIds, sHandle = 0, shownIds;
       if (start.register_inputs) {
-        const parsed = registerPair([...baseArgv, "-num_threads", "1"].join("\0"), c.id);
+        const parsed = registerPair(argvOf([...baseArgv, "-num_threads", "1"]), c.id);
         qHandle = parsed.query ? parsed.query.handle : 0;
         qIds = parsed.query ? parsed.query.records.map((r) => r.id) : undefined;
         sHandle = parsed.subject ? parsed.subject.handle : 0;
@@ -1910,7 +1950,7 @@ async function checkPsiblastAndTblastnPssm(engine, native, scratch) {
       }
       for (const threads of engine.threads) {
         const label = `${engine.name} n${threads} ${c.id}`;
-        const argv = [...baseArgv, "-num_threads", String(threads)].join("\0");
+        const argv = argvOf([...baseArgv, "-num_threads", String(threads)]);
         let runQHandle = qHandle, runSHandle = sHandle, releasePerThread = false;
         if (start.register_inputs && threads !== 1) {
           const pair = registerPair(argv, label);
@@ -1929,6 +1969,12 @@ async function checkPsiblastAndTblastnPssm(engine, native, scratch) {
         assert.equal(sha256(run.streams.get(3) || Buffer.alloc(0)), sha256(cliStderr), `${label}: diagnostics`);
         const sentFiles = run.streams.has(8) ? storedZipEntries(run.streams.get(8)).sort((a, b) => a[0].localeCompare(b[0])) : [];
         assert.deepEqual(sentFiles.map(([n]) => n), cliPssmFiles.map(([n]) => n), `${label}: stream 8 PSSM files`);
+        // Each file's option, the comment of its entry: the option whose name the file has (`F` or `F.<round>`).
+        const optionOf = (name) => ["-out_ascii_pssm", "-out_pssm"].find((flag) => {
+          const at = c.extra.indexOf(flag);
+          return at >= 0 && (name === c.extra[at + 1] || name.startsWith(`${c.extra[at + 1]}.`));
+        })?.slice(1);
+        assert.deepEqual(sentFiles.map(([, , option]) => option), sentFiles.map(([n]) => optionOf(n)), `${label}: stream 8 PSSM files' options`);
         for (let i = 0; i < sentFiles.length; i++) {
           assert.equal(sha256(sentFiles[i][1]), sha256(cliPssmFiles[i][1]), `${label}: PSSM file ${sentFiles[i][0]}`);
         }
@@ -2002,7 +2048,7 @@ async function main() {
       const reactor = instance.reactor;
       const query = inputPath(search, "-query"), subject = search.database ? undefined : inputPath(search, "-subject");
       const expected = nativeOutputs(options.native, search, scratch);
-      const started = reactor.call("losat_web2_start", search.argv.join("\0"));
+      const started = reactor.call("losat_web2_start", argvOf(search.argv));
       const start = started.status === 0 ? JSON.parse(started.streams.get(2).toString()) : undefined;
       const together = start?.register_inputs === true;
       // The host registers the file of -conffile, then validates the argv, whose *validation* says whether the
@@ -2010,7 +2056,7 @@ async function main() {
       // WQA's D16, 2026-11-20). An argv that validate refuses is read with them on, as before any registry.
       const registry = start?.conffile ? registerRegistry(reactor, search, start.conffile) : null;
       const custom = search.outfmt === undefined ? [] : ["-outfmt", search.outfmt];
-      const first = reactor.call("losat_web2_validate", [...search.argv, ...custom, "-num_threads", "1"].join("\0"));
+      const first = reactor.call("losat_web2_validate", argvOf([...search.argv, ...custom, "-num_threads", "1"]));
       const dataLoaders = first.status === 0 ? JSON.parse(first.streams.get(2).toString()).data_loaders : true;
       const subjectKey = `${program} ${subject} ${dataLoaders} ${inDirectory ? search.cwd : ""}`;
       // An input that the CLI's reader refuses (a first line that may be a Seq-id with the data loaders on) fails
@@ -2048,7 +2094,7 @@ async function main() {
       const named = registerCounts(reactor, countsOn(reactor), search) ?? taxid;
       if (named) named.held === "registered" ? countsRegistered++ : countsKept++;
       for (const threads of engine.threads) {
-        const argv = [...search.argv, ...custom, "-num_threads", String(threads)].join("\0");
+        const argv = argvOf([...search.argv, ...custom, "-num_threads", String(threads)]);
         // The application validates the argv on the instance that holds its counts file, then runs it
         // (abi_v2.md §4): an error of validate is the CLI's first error. So is that of a search that
         // fails without a counts file, whose validate makes the checks of the argv's own search (§7).

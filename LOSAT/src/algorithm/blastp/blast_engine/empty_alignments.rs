@@ -89,11 +89,12 @@ pub(super) fn subject_start_exception(
         .then(bad_alignment)
 }
 
-/// Writes what NCBI has written when `subject_start_exception` ends the run: the prolog of the
-/// format (`PrintProlog`: outfmt 0 to 4's banner and database line, outfmt 20's field names, the
-/// opening of the XML2 and JSON documents) and nothing more. The BLAST archive's error document
-/// is the run's own (`write_run_error_archive`). The pairwise report is written for no query
-/// (`ReportView::prolog_only`).
+/// Writes what NCBI has written when `subject_start_exception` ends the run and the driver has not
+/// written before the search: the prolog of the format (`PrintProlog`: outfmt 20's field names,
+/// the opening of the XML2 and JSON documents) and nothing more. Outfmt 0 to 4's banner and
+/// database line were written before the search (`write_pairwise_prologs`), so the pairwise report,
+/// written for no query (`ReportView::prolog_only`), adds no byte. The BLAST archive's error
+/// document is the run's own (`write_run_error_archive`).
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:244-248
 #[allow(clippy::too_many_arguments)]
@@ -138,7 +139,8 @@ pub(super) fn write_exception_prolog(
     }
 }
 
-/// Refuses, before any byte is written, a query-anchored report (outfmt 1 to 4, `view`) of an
+/// Refuses, before any byte of the query reports (after the prolog that the driver wrote before
+/// the search), a query-anchored report (outfmt 1 to 4, `view`) of an
 /// `-ungapped` search whose final hit lists show an HSP of length 0 where NCBI's merge of the
 /// section frees a segment that it still reads (`pairwise::blastp_section_frees`), unless the
 /// search ends with `subject_start_exception` first. `rows_of` makes the rows of a window of

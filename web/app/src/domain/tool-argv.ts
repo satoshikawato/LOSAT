@@ -354,8 +354,9 @@ export function toolOptionValue(argv: readonly string[], flag: string): string |
 }
 
 // The engine's model of a Linux path walk (`LOSAT/src/report/run_files.rs`: `Walk`, `LINKS`, `SELF`, `THREAD`,
-// `MAX_LINKS`, `WORKING_TREE`, `working_directory`, `file_key`), for the names that it opens as the run's standard
-// output (`OutputName::Stdout`) and for the run's files that an option names (`runFileNamed`).
+// `MAX_LINKS`, `WORKING_TREE`, `working_directory`, `in_working_tree`, `file_key`, `host_file_name`), for the names that
+// it opens as the run's standard output (`OutputName::Stdout`), for the run's files that an option names
+// (`runFileNamed`) and for the names that the engine gives them (`runFileName`).
 /**
  * The working directory's tree on LOSAT Web's Linux (`WORKING_TREE`): the run's working directory is a chain of these
  * components, deeper than a name's `..` reach (`workingDirectory`), as a user's command line runs in a directory of the
@@ -390,9 +391,11 @@ const MAX_PATH_LINKS = 40;
 /**
  * The path that the system opens for `name` in the working directory `cwd`, its links followed and its `.` and `..`
  * taken (the engine's `Walk::resolve`, without the directories that a user cannot search, which fail the run's open);
- * undefined past `MAX_PATH_LINKS` links.
+ * undefined past `MAX_PATH_LINKS` links. With `folder`, each folder of the name (every part but the last) is looked up
+ * as the engine's `output_name` looks it up (`folder_present` after each step): undefined where `folder` says that the
+ * path walked so far is no folder.
  */
-function walkedPath(name: string, cwd: string): string | undefined {
+function walkedPath(name: string, cwd: string, folder?: (path: string) => boolean): string | undefined {
   let resolved = '';
   let links = 0;
   let refused = false;
@@ -418,8 +421,13 @@ function walkedPath(name: string, cwd: string): string | undefined {
     }
   };
   if (!name.startsWith('/')) walk(cwd);
-  walk(name);
-  return refused ? undefined : resolved === '' ? '/' : resolved;
+  const parts = name.split('/');
+  for (const [index, part] of parts.entries()) {
+    step(part);
+    if (refused) return undefined;
+    if (folder !== undefined && index < parts.length - 1 && !folder(resolved === '' ? '/' : resolved)) return undefined;
+  }
+  return resolved === '' ? '/' : resolved;
 }
 
 /**
@@ -431,12 +439,11 @@ function workingDirectory(name: string): string {
 }
 
 /**
- * The file that the path `path` (as `walkedPath` gives it) is, read in the working directory `cwd` (`file_key`): a path
- * in the working directory's tree by its place from the working directory (`\0` and how many directories above it,
- * then the rest: `\0` + `0/m.asnb` for `m.asnb`, `sub/../m.asnb` and `/proc/self/cwd/m.asnb`; `\0` + `1/m.asnb` for
- * `../m.asnb`), as each name has a working directory of its own depth; any other path is itself (`/tmp/m.asnb`).
+ * Where the path `path` (as `walkedPath` gives it) sits from the working directory `cwd` (`in_working_tree`): in the
+ * working directory's tree, `up` directories above `cwd`, then `rest` (without a leading `/`; empty for `cwd` and the
+ * directories above it); undefined for a path outside the tree (`/tmp/m.asnb`).
  */
-function fileKey(path: string, cwd: string): string {
+function inWorkingTree(path: string, cwd: string): { readonly up: number; readonly rest: string } | undefined {
   const depth = cwd.length / WORKING_TREE.length;
   let rest = path;
   let inside = 0;
@@ -444,20 +451,84 @@ function fileKey(path: string, cwd: string): string {
     rest = rest.slice(WORKING_TREE.length);
     inside += 1;
   }
-  return inside > 0 ? `\0${depth - inside}${rest}` : path;
+  return inside > 0 ? { up: depth - inside, rest: rest.startsWith('/') ? rest.slice(1) : rest } : undefined;
+}
+
+/**
+ * A file that a name opens: the file itself (`key`, the engine's `file_key`: a path in the working directory's tree by
+ * its place from the working directory, `\0` and how many directories above it, then the rest: `\0` + `0/m.asnb` for
+ * `m.asnb`, `sub/../m.asnb` and `/proc/self/cwd/m.asnb`; `\0` + `1/m.asnb` for `../m.asnb`, as each name has a working
+ * directory of its own depth; any other path itself, `/tmp/m.asnb`), and the name that the engine gives the run's file
+ * (`name`, `host_file_name`: in the working directory's tree its path from the run's directory, `m.asnb`, `sub/m.asnb`,
+ * `../m.asnb`; outside it the path that the option's reading opens, `opened`).
+ */
+interface OpenedFile {
+  readonly key: string;
+  readonly name: string;
+}
+
+/**
+ * The run's directory as the engine has it (docs/web/abi_v2.md §3): the folders that the paths of its files give (`sub`
+ * of `sub/x.txt`, `a` and `a/b` of `a/b/c.fa`), its files being no folders. A name is then read as the engine reads it
+ * in that directory (`folder_present`, `run_entry`): every folder that the name looks up inside the run's directory must
+ * be one of these (`nosub/../m.asnb`, `input.fa/../m.asnb` open no file), and a name that is one of them is a folder,
+ * which opens no file (`-out sub`). Undefined where the run's directory is not known: no folder is looked up.
+ */
+type RunFolders = ReadonlySet<string> | undefined;
+
+/** The folders of a run's directory whose files have the paths `names` (`DirectoryFile.name`; `RunFolders`). */
+function runFolders(names: readonly string[]): ReadonlySet<string> {
+  const folders = new Set<string>();
+  for (const name of names) {
+    const parts = name.split('/');
+    for (let end = 1; end < parts.length; end++) folders.add(parts.slice(0, end).join('/'));
+  }
+  return folders;
+}
+
+/**
+ * The lookup of the folders of a name read in the working directory `cwd` (`walkedPath`'s `folder`): inside the run's
+ * directory a folder of `folders`; any other path a folder (the model's, which the engine knows better: above the run's
+ * directory a home's folders, `../nosub/../m.asnb` opening `../m.asnb`, and outside the working directory's tree "the
+ * directories that the name gives" where a user makes files, docs/web/abi_v2.md §4, where the engine's lists of the
+ * host's directories also refuse a name, `/etc/x/m.asnb`, which the app does not have). Undefined without `folders`.
+ */
+function folderLookup(folders: RunFolders, cwd: string): ((path: string) => boolean) | undefined {
+  if (folders === undefined) return undefined;
+  return (path) => !path.startsWith(`${cwd}/`) || folders.has(path.slice(cwd.length + 1));
+}
+
+/**
+ * The file that the walked path `path` is, opened by a name read in `cwd` (`OpenedFile`; `opened`: the name that the
+ * engine gives a file outside the working directory's tree), or undefined where it is no file: the working directory or
+ * a directory above it (`/proc/self/cwd`), and a folder of the run's directory (`folders`).
+ */
+function openedFile(path: string, opened: string, cwd: string, folders: RunFolders): OpenedFile | undefined {
+  const place = inWorkingTree(path, cwd);
+  if (place === undefined) return { key: path, name: opened };
+  if (place.rest === '' || (place.up === 0 && folders?.has(place.rest) === true)) return undefined;
+  return { key: `\0${place.up}/${place.rest}`, name: `${'../'.repeat(place.up)}${place.rest}` };
 }
 
 /**
  * The file that the system opens for the output name `name` as typed (`-out`; a name that the engine gives a run's
- * file, `host_file_name`): its walk in its working directory (`walkedPath`, `workingDirectory`) as `fileKey`. A name whose
- * last part is empty, `.` or `..` is a directory and opens no file; undefined then and past `MAX_PATH_LINKS` links.
+ * file, `host_file_name`), walked in its working directory (`walkedPath`, `workingDirectory`), its folders looked up in
+ * the run's directory (`folders`), as the engine's `output_name` opens it. A name whose last part is empty, `.` or `..`
+ * is a directory and opens no file, and `-` and a name that the engine opens as the run's standard output
+ * (`isStandardOutputName`) open none of the run's files; undefined then, for a name through a folder that the run's
+ * directory does not have, and past `MAX_PATH_LINKS` links. Outside the working directory's tree the engine names the
+ * file by the name read by its words where that walks to the file, else by its path (`/var/run/../tmp/m.asnb` makes
+ * `/tmp/m.asnb`, as the system steps back from the link's target).
  */
-function outputFile(name: string): string | undefined {
+function outputFile(name: string, folders?: RunFolders): OpenedFile | undefined {
   const parts = name.split('/');
-  if (['', '.', '..'].includes(parts[parts.length - 1]!)) return undefined;
+  if (name === '-' || ['', '.', '..'].includes(parts[parts.length - 1]!)) return undefined;
   const cwd = workingDirectory(name);
-  const path = walkedPath(name, cwd);
-  return path === undefined ? undefined : fileKey(path, cwd);
+  const path = walkedPath(name, cwd, folderLookup(folders, cwd));
+  if (path === undefined || path === `${PROC_SELF}/fd/1` || path === `${PROC_THREAD}/fd/1`) return undefined;
+  // A relative name stays in the working directory's tree, whose files the engine names by their place.
+  const typed = lexicalPath(name);
+  return openedFile(path, name.startsWith('/') && walkedPath(typed, cwd) === path ? typed : path, cwd, folders);
 }
 
 /** The bytes that NCBI's `NStr::TruncateSpaces` takes off both ends of a string (C `isspace`). */
@@ -489,37 +560,96 @@ function lexicalPath(path: string): string {
 }
 
 /**
- * The file that the `-logfile` value `name` opens (`log_file_name` of `LOSAT/src/blastinput/ncbi_environment.rs` on
- * Unix, then the system's walk, `log_key` of `run_files.rs`) as `fileKey`: NCBI makes a relative name absolute in the
- * working directory, its spaces at both ends cut (`absolute_path`), and reads it by its words (`lexicalPath`:
- * `sub/../run.log` is `run.log`, `/var/run/../tmp/run.log` is `/var/tmp/run.log`, where the system's walk of `-out`
- * reaches `/tmp`), keeps its first 2047 bytes, and the system opens what is left. Undefined for NCBI's special names (`-`
- * is the standard error; the empty name and `/dev/null` keep no messages) and past `MAX_PATH_LINKS` links.
+ * NCBI's `CDirEntry::Reset` of a path (`PathRules::reset`, Unix): without the `/`s at its end, a lone `/` kept.
  */
-function logFile(name: string): string | undefined {
+function resetPath(path: string): string {
+  return path === '/' ? path : path.replace(/\/+$/, '');
+}
+
+/**
+ * The directory that NCBI checks for the `-logfile` name `name` before it opens its log (`LogFileName::directory` of
+ * `log_file_name`: `GetDir` of the name as written, `Reset`): its part before the last `/` (`sub/..` of
+ * `sub/../run.log`, `.` for `run.log`), or undefined where NCBI checks none (a name of `/`s only). An empty directory
+ * (`//run.log`) is none, which no log opens in.
+ */
+function logDirectory(name: string): string | undefined {
+  const reset = resetPath(name);
+  if (reset === '') return undefined;
+  const at = reset.lastIndexOf('/');
+  return resetPath(at < 0 ? './' : reset.slice(0, at + 1));
+}
+
+/**
+ * The file that the `-logfile` value `name` opens (`log_file_name` of `LOSAT/src/blastinput/ncbi_environment.rs` on
+ * Unix, then the system's walk, `log_name` and `log_key` of `run_files.rs`): NCBI checks that the directory of the name
+ * as written is one (`logDirectory`, walked as the system walks it: `nosub/../run.log` without a folder `nosub` opens no
+ * log), makes a relative name absolute in the working directory, its spaces at both ends cut (`absolute_path`), and
+ * reads it by its words (`lexicalPath`: `sub/../run.log` is `run.log`, `/var/run/../tmp/run.log` is `/var/tmp/run.log`,
+ * where the system's walk of `-out` reaches `/tmp`), keeps its first 2047 bytes, and the system opens what is left, the
+ * name that the engine gives a file outside the working directory's tree. The folders are looked up in the run's
+ * directory (`folders`). Undefined for NCBI's special names (`-` is the standard error; the empty name and `/dev/null`
+ * keep no messages), for a name that opens no file (the messages then stay on the standard error) and past
+ * `MAX_PATH_LINKS` links.
+ */
+function logFile(name: string, folders?: RunFolders): OpenedFile | undefined {
   if (name === '-' || name === '' || name === '/dev/null') return undefined;
   const typed = truncateSpaces(name);
   const cwd = workingDirectory(typed);
+  const folder = folderLookup(folders, cwd);
+  const directory = logDirectory(name);
+  if (directory === '') return undefined;
+  if (directory !== undefined) {
+    const walked = walkedPath(directory, cwd, folder);
+    if (walked === undefined || (folder !== undefined && !folder(walked))) return undefined;
+  }
   const absolute = name.startsWith('/') ? name : lexicalPath(`${cwd}/${typed.startsWith('/') ? typed.slice(1) : typed}`);
   const bytes = new TextEncoder().encode(absolute);
   const kept = bytes.length > NCBI_LOG_NAME_BYTES ? new TextDecoder().decode(bytes.subarray(0, NCBI_LOG_NAME_BYTES)) : absolute;
-  const path = walkedPath(lexicalPath(kept), cwd);
-  return path === undefined ? undefined : fileKey(path, cwd);
+  const opened = lexicalPath(kept);
+  const path = walkedPath(opened, cwd, folder);
+  return path === undefined ? undefined : openedFile(path, opened, cwd, folders);
 }
 
 /**
  * Whether the run's file `fileName` (the name that the engine gives it: its path from the run's directory, `m.asnb`,
  * `sub/m.asnb`, `../m.asnb`, or outside the working directory's tree its path, `/tmp/m.asnb`; `host_file_name`) is
  * the file that the value `value` of `option` opens: `-out` as the system opens the name typed (`outputFile`), `-logfile`
- * as NCBI reads it (`logFile`). Each name is read in the run's working directory by the engine's model (`fileKey`), so
+ * as NCBI reads it (`logFile`). Each name is read in the run's working directory by the engine's model (`file_key`), so
  * every spelling of one file is that file: `sub/../m.asnb` (with a folder `sub`), `.//m.asnb`, `sub//m.asnb` and
- * `/proc/self/cwd/m.asnb` are `m.asnb` and `sub/m.asnb` (WW4e, 2026-11-28; before, only `./` was cut). A name through a
- * folder that the run's directory does not have (`nosub/../m.asnb`) opens no file: its run fails with NCBI's "File is
- * not accessible" (exit status 1), as `isStandardOutputName` takes a name that the system refuses.
+ * `/proc/self/cwd/m.asnb` are `m.asnb` and `sub/m.asnb` (WW4e, 2026-11-28; before, only `./` was cut). The run made the
+ * file, so its folders are not looked up: a name through a folder that the run's directory does not have
+ * (`nosub/../m.asnb`) opens no file (`runFileName`), and its run fails with NCBI's "File is not accessible" (exit
+ * status 1) or, for `-logfile`, keeps its messages on the standard error.
  */
 function runFileNamed(option: '-out' | '-logfile', value: string, fileName: string): boolean {
-  const opened = option === '-out' ? (value === '-' ? undefined : outputFile(value)) : logFile(value);
-  return opened !== undefined && opened === outputFile(fileName);
+  const opened = option === '-out' ? outputFile(value) : logFile(value);
+  return opened !== undefined && opened.key === outputFile(fileName)?.key;
+}
+
+/**
+ * The name that the engine gives the run's file that the value `value` of `option` opens (`host_file_name` of
+ * `LOSAT/src/report/run_files.rs`, the name of the file of a tool's run, `ToolFile.name`): `-out` as the system opens
+ * the name typed (`output_name`), `-logfile` as NCBI reads it (`log_name`). In the working directory's tree, the file's
+ * path from the run's directory (`m.asnb` for `m.asnb`, `./m.asnb`, `sub/../m.asnb` and `/proc/self/cwd/m.asnb`;
+ * `sub/m.asnb` for `sub//m.asnb`; `../m.asnb` for `sub/../../m.asnb`; `run.log` for `-logfile run.log/` and
+ * ` run.log`); outside it, the path that the option's reading opens (`/tmp/m.asnb` for `-out /var/run/../tmp/m.asnb`,
+ * `/var/tmp/run.log` for `-logfile /var/run/../tmp/run.log`). `directory`, the paths of the files of the run's
+ * directory (`DirectoryFile.name`), gives its folders (`RunFolders`): a name through a folder that the run's directory
+ * does not have or through one of its files (`nosub/../m.asnb`, `input.fa/../m.asnb`, `-logfile nosub/../run.log`), a
+ * folder of the run (`sub`) and a directory (`m.asnb/`, `/proc/self/cwd`) open no file. Undefined there, for `-` and the
+ * names of `-logfile` that keep no messages (`""`, `/dev/null`), and for an `-out` that the engine opens as the run's
+ * standard output (`/dev/stdout`). Without `directory`, no folder is looked up.
+ *
+ * The model of the names is the app's (`walkedPath`), which the engine knows better (WW4h, 2026-11-28): folders outside
+ * the run's directory are present (above it, a home's folders, as docs/web/abi_v2.md §4 has it: `../nosub/../m.asnb`
+ * is `../m.asnb` on the engine too; outside the working directory's tree, also where the engine's lists of the host's
+ * directories refuse the name, `/etc/x/m.asnb`), the devices and the files of procfs are files (`/dev/null`,
+ * `/dev/stderr`: the engine loses or refuses their writes), a file of the run's directory is named (`-out input.fa`:
+ * LOSAT Web refuses it), and the system's limits of a name's length are not checked.
+ */
+export function runFileName(option: '-out' | '-logfile', value: string, directory?: readonly string[]): string | undefined {
+  const folders = directory === undefined ? undefined : runFolders(directory);
+  return (option === '-out' ? outputFile(value, folders) : logFile(value, folders))?.name;
 }
 
 /**

@@ -420,13 +420,13 @@ describe('ToolDraft and SearchDraft.useCounts', () => {
     draft.ensureLoaded();
     await sleep(20);
     draft.setFastaPaste('>q\nACGTACGT\n');
-    draft.setOutName('sub/../../c.counts');
+    draft.setOutName('./../c.counts');
     expect((await draft.submit()).ok).toBe(true);
     for (let i = 0; i < 200 && coordinator.state.get().runs.find(isToolRun)?.status !== 'completed'; i++) await sleep(5);
-    // The FakeEngine names the file by the -out typed; the engine names it `../c.counts` (its path from the run's directory).
+    // The FakeEngine names the file as the engine does: `../c.counts`, its path from the run's directory (WW4h).
     const counts = coordinator.sessionMadeCounts()[0]!;
-    expect(counts.name).toBe('sub/../../c.counts');
-    draft.useCountsForMask(counts.runId, counts.runNumber, counts.key, '../c.counts', counts.size);
+    expect(counts.name).toBe('../c.counts');
+    draft.useCountsForMask(counts.runId, counts.runNumber, counts.key, counts.name, counts.size);
     draft.setFastaPaste('>q\nACGTACGT\n');
     expect((await draft.submit()).ok).toBe(true);
     const mask = submitted[1]![0]!;

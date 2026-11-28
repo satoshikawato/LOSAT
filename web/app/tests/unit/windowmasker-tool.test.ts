@@ -3,7 +3,7 @@
 // Coordinator queue (search -> tool -> search, cancel, non-zero exit, Data worker end), and
 // DataService tool output storage / OPFS-backed session inflation.
 import { gzipSync } from 'node:zlib';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { sha256Hex } from 'losat';
 import { parseToolDescription } from 'losat/domain';
 import {
@@ -314,12 +314,172 @@ describe('ToolDraft and SearchDraft.useCounts', () => {
       [new File([new Uint8Array([1])], 'wm.nin'), new File([new Uint8Array([2])], 'wm.nsq')],
       ['db/wm.nin', 'db/wm.nsq'],
     );
-    expect(draft.state.get().blastDbIn).toBe('db/wm');
+    expect(draft.inName()).toBe('db/wm');
     expect(draft.state.get().runFilesError).toBeUndefined();
 
     draft.addRunFiles([new File([new Uint8Array([3])], 'wm.nin')], ['db/wm.nin']);
     expect(draft.state.get().runFilesError).toContain('db/wm.nin');
     expect(draft.state.get().runFiles).toHaveLength(2);
+  });
+
+  it('writes a found BLAST database with a space as -in "my dbs/wm" for -infmt blastdb, and refuses one with a double quote (line WW, WW4d)', async () => {
+    const { draft, submitted } = setupDraft();
+    draft.setStage('mask');
+    draft.setField('-infmt', 'blastdb');
+    draft.addRunFiles(
+      ['nin', 'nhr', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `wm.${ext}`)),
+      ['my dbs/wm.nin', 'my dbs/wm.nhr', 'my dbs/wm.nsq'],
+    );
+    expect(draft.inName()).toBe('"my dbs/wm"');
+    expect(draft.databaseRefusal()).toBeUndefined();
+    const inValue = (argv: readonly string[]) => argv[argv.indexOf('-in') + 1];
+    expect(inValue(draft.previewArgv())).toBe('"my dbs/wm"');
+    expect(draft.previewArgv()).toEqual(expect.arrayContaining(['-infmt', 'blastdb']));
+    draft.setUstatFile(new File(['counts'], 'c.ustat'));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect((await draft.submit()).ok).toBe(true);
+    const req = submitted[0]![0]!;
+    expect(inValue(req.argv)).toBe('"my dbs/wm"');
+    expect(req.argv[req.argv.indexOf('-ustat') + 1]).toBe('c.ustat');
+    expect(req.directory.map((entry) => entry.name).sort()).toEqual(['c.ustat', 'my dbs/wm.nhr', 'my dbs/wm.nin', 'my dbs/wm.nsq']);
+
+    const { draft: other } = setupDraft();
+    other.setField('-infmt', 'blastdb');
+    other.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `wm.${ext}`)), ['q"d/wm.nin', 'q"d/wm.nsq']);
+    expect(other.inName()).toBe('');
+    expect(other.databaseRefusal()).toBe('A database named "q"d/wm" cannot be in -in: a double quote there starts or ends a name.');
+  });
+
+  // Line WW, WW4d R1 (review finding 1): the refusal is worked out from the draft (the files of the run, -infmt, a name
+  // typed), so it lasts as long as its cause, and a name found earlier does not run in its place.
+  it('keeps refusing a found database named with a double quote while its files are in the run: the Input block, the check and Run LOSAT, and no name found earlier runs (line WW, WW4d R1)', async () => {
+    const refused = 'A database named "q"/w" cannot be in -in: a double quote there starts or ends a name.';
+    const { draft, submitted } = setupDraft();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    draft.setField('-infmt', 'blastdb');
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `wm.${ext}`)), ['db/wm.nin', 'db/wm.nsq']);
+    const inValue = () => draft.previewArgv()[draft.previewArgv().indexOf('-in') + 1];
+    expect(inValue()).toBe('db/wm');
+    // A second database, which the files of the run now name (the shortest name), and whose name -in cannot carry.
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `w.${ext}`)), ['q"/w.nin', 'q"/w.nsq']);
+    expect(draft.previewArgv()).not.toContain('db/wm');
+    expect(draft.databaseRefusal()).toBe(refused);
+    expect(draft.inName()).toBe('');
+    await vi.waitFor(() => expect(draft.state.get().validation).toEqual({ state: 'invalid', message: refused }));
+    // Edits that cleared the old one-shot error keep it now: its cause is still there.
+    draft.setField('-sformat', 'binary');
+    draft.setStage('mask');
+    // Mask's -in is FASTA here (its own -infmt): the files name nothing.
+    expect(draft.databaseRefusal()).toBeUndefined();
+    draft.setStage('mk_counts');
+    draft.resetOptions();
+    expect(draft.databaseRefusal()).toBe(refused);
+    await vi.waitFor(() => expect(draft.state.get().validation).toEqual({ state: 'invalid', message: refused }));
+    expect(await draft.submit()).toEqual({ ok: false, message: refused });
+    expect(submitted).toHaveLength(0);
+    // Without the refused database's files, the files name the other database again.
+    for (const entry of draft.state.get().runFiles.filter((file) => file.name.startsWith('q"/'))) draft.removeRunFile(entry.key);
+    expect(draft.databaseRefusal()).toBeUndefined();
+    expect(inValue()).toBe('db/wm');
+    // A name typed is the user's, whatever the files hold.
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `w.${ext}`)), ['q"/w.nin', 'q"/w.nsq']);
+    draft.setBlastDbIn('db/wm');
+    expect(draft.databaseRefusal()).toBeUndefined();
+    await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('ok'));
+    expect((await draft.submit()).ok).toBe(true);
+    expect(submitted[0]![0]!.argv[submitted[0]![0]!.argv.indexOf('-in') + 1]).toBe('db/wm');
+  });
+
+  // Line WW, WW4d R1 (review finding 3): -in is a SeqDB name list only with -infmt blastdb; with -infmt seqids (or
+  // -fa_list) it is one file's name, which the files of the run do not name, quote or refuse.
+  it('names no database for -infmt seqids, whose -in is one file name: no quotes and no refusal; -infmt blastdb then names it (line WW, WW4d R1)', async () => {
+    const { draft } = setupDraft();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    draft.setField('-infmt', 'seqids');
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `wm.${ext}`)), ['my dbs/wm.nin', 'my dbs/wm.nsq']);
+    expect(draft.previewArgv()).not.toContain('"my dbs/wm"');
+    expect(draft.inName()).toBe('');
+    draft.setBlastDbIn('my ids.txt');
+    expect(draft.previewArgv()[draft.previewArgv().indexOf('-in') + 1]).toBe('my ids.txt');
+    draft.setBlastDbIn('');
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `w.${ext}`)), ['q"/w.nin', 'q"/w.nsq']);
+    expect(draft.state.get().runFilesError).toBeUndefined();
+    expect(draft.databaseRefusal()).toBeUndefined();
+    expect(draft.inName()).toBe('');
+    // -fa_list: -in names a file of FASTA file names.
+    draft.setField('-infmt', '');
+    draft.setField('-fa_list', true);
+    expect(draft.usesFastaBox()).toBe(false);
+    expect(draft.databaseRefusal()).toBeUndefined();
+    expect(draft.inName()).toBe('');
+    // -infmt blastdb: the files of the run name -in (the shortest name, refused here).
+    draft.setField('-fa_list', false);
+    draft.setField('-infmt', 'blastdb');
+    expect(draft.databaseRefusal()).toBe('A database named "q"/w" cannot be in -in: a double quote there starts or ends a name.');
+    for (const entry of draft.state.get().runFiles.filter((file) => file.name.startsWith('q"/'))) draft.removeRunFile(entry.key);
+    expect(draft.inName()).toBe('"my dbs/wm"');
+  });
+
+  // Line WW, WW4d R2 (review N1): an Input name typed and then cleared is no name: the database of the run's files names
+  // -in again at once, and its refusal comes back, without waiting for the next file added.
+  it('takes a cleared Input name as none: the found database and its refusal come back at once (line WW, WW4d R2)', async () => {
+    const refused = 'A database named "q"/w" cannot be in -in: a double quote there starts or ends a name.';
+    const { draft } = setupDraft();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    draft.setField('-infmt', 'blastdb');
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `wm.${ext}`)), ['my dbs/wm.nin', 'my dbs/wm.nsq']);
+    draft.setBlastDbIn('typed/db');
+    expect(draft.inName()).toBe('typed/db');
+    draft.setBlastDbIn('  ');
+    expect(draft.inName()).toBe('"my dbs/wm"');
+    expect(draft.previewArgv()[draft.previewArgv().indexOf('-in') + 1]).toBe('"my dbs/wm"');
+    draft.setBlastDbIn('typed/db');
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `w.${ext}`)), ['q"/w.nin', 'q"/w.nsq']);
+    expect(draft.databaseRefusal()).toBeUndefined();
+    draft.setBlastDbIn('');
+    expect(draft.databaseRefusal()).toBe(refused);
+    await vi.waitFor(() => expect(draft.state.get().validation).toEqual({ state: 'invalid', message: refused }));
+    expect(await draft.submit()).toEqual({ ok: false, message: refused });
+  });
+
+  // Line WW, WW4d R2 (review N2): makeblastdb's rule for the three tabs: words of Additional options that name -in give
+  // -in themselves, so the database of the run's files is not written, its refusal does not apply, and no Input name is
+  // asked for.
+  it('writes no found database and refuses none when Additional options name -in (line WW, WW4d R2)', async () => {
+    const { draft, submitted } = setupDraft();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    draft.setField('-infmt', 'blastdb');
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `w.${ext}`)), ['q"/w.nin', 'q"/w.nsq']);
+    expect(draft.databaseRefusal()).toBeDefined();
+    draft.setExtra('-in other');
+    expect(draft.databaseRefusal()).toBeUndefined();
+    expect(draft.inName()).toBe('');
+    expect(draft.previewArgv().filter((word) => word === '-in')).toHaveLength(1);
+    expect(draft.previewArgv().slice(-2)).toEqual(['-in', 'other']);
+    await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('ok'));
+    expect((await draft.submit()).ok).toBe(true);
+    const argv = submitted[0]![0]!.argv;
+    expect(argv.filter((word) => word === '-in')).toHaveLength(1);
+    expect(argv.slice(-2)).toEqual(['-in', 'other']);
+    // A database that the list can carry is not written either: the words' -in is the one -in.
+    for (const entry of draft.state.get().runFiles) draft.removeRunFile(entry.key);
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `wm.${ext}`)), ['my dbs/wm.nin', 'my dbs/wm.nsq']);
+    expect(draft.previewArgv()).not.toContain('"my dbs/wm"');
+    draft.setExtra('');
+    expect(draft.inName()).toBe('"my dbs/wm"');
+  });
+
+  // Line WW (dev defect found by the WW4d R2 review): WindowMasker reads a nucleotide database, so the files of the run
+  // name the nucleotide one in a folder that holds both kinds.
+  it('names the nucleotide database of the run files for -in, also beside a protein one with a shorter name (line WW, WW4d R2)', async () => {
+    const { draft } = setupDraft();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    draft.setField('-infmt', 'blastdb');
+    draft.addRunFiles(
+      ['db/p.pin', 'db/p.psq', 'db/nuc.nin', 'db/nuc.nsq'].map((name, i) => new File([new Uint8Array([i])], name.slice(3))),
+      ['db/p.pin', 'db/p.psq', 'db/nuc.nin', 'db/nuc.nsq'],
+    );
+    expect(draft.inName()).toBe('db/nuc');
   });
 
   it('SearchDraft.useCounts switches to BLASTN with -window_masker_db file attached', () => {
@@ -420,13 +580,13 @@ describe('ToolDraft and SearchDraft.useCounts', () => {
     draft.ensureLoaded();
     await sleep(20);
     draft.setFastaPaste('>q\nACGTACGT\n');
-    draft.setOutName('sub/../../c.counts');
+    draft.setOutName('./../c.counts');
     expect((await draft.submit()).ok).toBe(true);
-    for (let i = 0; i < 200 && coordinator.state.get().runs.find(isToolRun)?.status !== 'completed'; i++) await sleep(5);
-    // The FakeEngine names the file by the -out typed; the engine names it `../c.counts` (its path from the run's directory).
+    expect((await runEnd(coordinator, coordinator.state.get().runs.find(isToolRun)!.snapshot.runId)).status).toBe('completed');
+    // The FakeEngine names the file as the engine does: `../c.counts`, its path from the run's directory (WW4h).
     const counts = coordinator.sessionMadeCounts()[0]!;
-    expect(counts.name).toBe('sub/../../c.counts');
-    draft.useCountsForMask(counts.runId, counts.runNumber, counts.key, '../c.counts', counts.size);
+    expect(counts.name).toBe('../c.counts');
+    draft.useCountsForMask(counts.runId, counts.runNumber, counts.key, counts.name, counts.size);
     draft.setFastaPaste('>q\nACGTACGT\n');
     expect((await draft.submit()).ok).toBe(true);
     const mask = submitted[1]![0]!;

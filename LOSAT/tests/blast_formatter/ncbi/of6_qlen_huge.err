@@ -1,0 +1,3 @@
+Error: NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objmgr/seq_map.cpp", line 367: Error: (CSeqMapException::eSeqDataError) Invalid sequence length
+

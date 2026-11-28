@@ -25,6 +25,7 @@ import {
   isStandardOutputName,
   maskDataName,
   maskOutfmtDefault,
+  runFileName,
   toolFileOptionLabel,
 } from '../../src/domain/tool-argv';
 import {
@@ -361,6 +362,170 @@ describe("the run's files that -out and -logfile name (WW4e)", () => {
   });
 });
 
+/**
+ * The 33 rows of the WW4e probe (ww4e/probe/web-after.jsonl, 2026-11-28: dustmasker through the Masking tab with the
+ * reactors of Web run 46112132724, in a run directory of input.fa and the folder sub/ holding sub/x.txt): `-out` and
+ * `-logfile` (undefined: not given), and the names of the files that the engine's run made for each (null: none), with
+ * its exit status. The 26 rows that the native run also ran made the same files.
+ */
+const ENGINE_RUN_FILES: ReadonlyArray<readonly [out: string | undefined, log: string | undefined, outFile: string | null, logFile: string | null, status: number]> = [
+  ['m.asnb', undefined, 'm.asnb', null, 0],
+  ['./m.asnb', undefined, 'm.asnb', null, 0],
+  ['.//m.asnb', undefined, 'm.asnb', null, 0],
+  ['sub/../m.asnb', undefined, 'm.asnb', null, 0],
+  ['sub//../m.asnb', undefined, 'm.asnb', null, 0],
+  ['./sub/./../m.asnb', undefined, 'm.asnb', null, 0],
+  ['sub/m.asnb', undefined, 'sub/m.asnb', null, 0],
+  ['sub//m.asnb', undefined, 'sub/m.asnb', null, 0],
+  ['./sub/m.asnb', undefined, 'sub/m.asnb', null, 0],
+  ['nosub/../m.asnb', undefined, null, null, 1],
+  ['input.fa/../m.asnb', undefined, null, null, 1],
+  ['/proc/self/cwd/m.asnb', undefined, 'm.asnb', null, 0],
+  ['/proc/self/cwd/sub/../m.asnb', undefined, 'm.asnb', null, 0],
+  ['../m.asnb', undefined, '../m.asnb', null, 0],
+  ['sub/../../m.asnb', undefined, '../m.asnb', null, 0],
+  ['m.asnb/', undefined, null, null, 1],
+  [undefined, 'run.log', null, 'run.log', 0],
+  [undefined, './run.log', null, 'run.log', 0],
+  [undefined, 'sub/../run.log', null, 'run.log', 0],
+  [undefined, 'nosub/../run.log', null, null, 0],
+  [undefined, 'sub//run.log', null, 'sub/run.log', 0],
+  [undefined, '/proc/self/cwd/run.log', null, 'run.log', 0],
+  ['m.asnb', 'sub/../m.asnb', 'm.asnb', 'm.asnb', 0],
+  ['sub/../m.asnb', './m.asnb', 'm.asnb', 'm.asnb', 0],
+  [undefined, 'run.log/', null, 'run.log', 0],
+  [undefined, ' run.log', null, 'run.log', 0],
+  ['/tmp/m.asnb', undefined, '/tmp/m.asnb', null, 0],
+  ['/tmp//m.asnb', undefined, '/tmp/m.asnb', null, 0],
+  ['/var/run/../tmp/m.asnb', undefined, '/tmp/m.asnb', null, 0],
+  ['/var/lock/m.asnb', undefined, '/var/lock/m.asnb', null, 0],
+  ['../nosub/../m.asnb', undefined, '../m.asnb', null, 0],
+  ['/var/run/../tmp/x.out', '/var/run/../tmp/x.out', '/tmp/x.out', '/var/tmp/x.out', 0],
+  [undefined, '/var/run/../tmp/run.log', null, '/var/tmp/run.log', 0],
+];
+
+/** The run's directory of the probes (WW4e, WW4h): the pasted FASTA and the folder sub/ with one file. */
+const PROBE_DIRECTORY = ['input.fa', 'sub/x.txt'] as const;
+const probeDirectory = (names: readonly string[] = PROBE_DIRECTORY) => names.map((name) => ({ name, file: new Blob(['x\n']) }));
+
+describe("the name that the engine gives a run's file, in the FakeEngine's runs too (WW4h)", () => {
+  const rows = ENGINE_RUN_FILES.map(([out, log, outFile, logFile, status]) => ({ out, log, outFile, logFile, status }));
+
+  it.each(rows)("-out '$out' -logfile '$log': the engine's names $outFile and $logFile", ({ out, log, outFile, logFile }) => {
+    if (out !== undefined) expect(runFileName('-out', out, PROBE_DIRECTORY)).toBe(outFile ?? undefined);
+    if (log !== undefined) expect(runFileName('-logfile', log, PROBE_DIRECTORY)).toBe(logFile ?? undefined);
+  });
+
+  it.each(rows)("the FakeEngine's dustmasker -out '$out' -logfile '$log': the engine's files and exit status $status", async ({ out, log, outFile, logFile, status }) => {
+    const argv = ['dustmasker', '-in', 'input.fa', ...(out === undefined ? [] : ['-out', out]), '-outfmt', 'maskinfo_asn1_bin', ...(log === undefined ? [] : ['-logfile', log])];
+    const run = await new FakeEngine().runTool(argv, { directory: probeDirectory() });
+    expect(run.status).toBe(status);
+    expect(run.files.map((file) => file.name).sort()).toEqual([...new Set([outFile, logFile].filter((name) => name !== null))].sort());
+    if (status !== 0) expect(await run.stderr.text()).toContain(`Error:  Argument "out". File is not accessible:  \`${out}'`);
+  });
+
+  it('reads the other names of the WW4h probe as the engine: folders, directories, streams and the special names', () => {
+    // The WW4h probe (ww4h/probe/engine.jsonl, 2026-11-28: each tool on the reactors of Web run 46124737526 in Node, in
+    // a run directory of input.fa, prot.fa, bn.asn and sub/x.txt): null where the run made no file.
+    const names: ReadonlyArray<readonly ['-out' | '-logfile', string, string | null]> = [
+      ['-out', 'sub', null],
+      ['-out', '/proc/self/cwd', null],
+      ['-out', 'nosub/m.out', null],
+      ['-out', '-', null],
+      ['-out', '/dev/stdout', null],
+      ['-logfile', 'sub', null],
+      ['-logfile', 'sub/', null],
+      ['-logfile', ' sub/../run.log', null],
+      ['-logfile', 'sub/../nosub/../run.log', null],
+      ['-logfile', 'nosub/run.log', null],
+      ['-logfile', '../run.log', '../run.log'],
+      ['-logfile', '-', null],
+      ['-logfile', '', null],
+      ['-logfile', '/dev/null', null],
+    ];
+    for (const [option, value, file] of names) expect(runFileName(option, value, PROBE_DIRECTORY), `${option} '${value}'`).toBe(file ?? undefined);
+    // Without the run's directory no folder is looked up.
+    expect(runFileName('-out', 'nosub/../m.asnb')).toBe('m.asnb');
+    expect(runFileName('-logfile', 'nosub/../run.log')).toBe('run.log');
+    expect(runFileName('-out', 'm.asnb/')).toBeUndefined();
+    // A file's folders are the run's folders, at any depth; a file is none.
+    expect(runFileName('-out', 'a/b/../m.out', ['a/b/c.fa'])).toBe('a/m.out');
+    expect(runFileName('-out', 'a/b/c.fa/../m.out', ['a/b/c.fa'])).toBeUndefined();
+  });
+
+  it("fails a run whose -out opens no file with each tool's words, and names the folder's file", async () => {
+    // The engine's runs of `-out nosub/../m.out` (WW4h probe): the exit status and the last line of the standard error.
+    const words: ReadonlyArray<readonly [argv: readonly string[], status: number, last: string | undefined]> = [
+      [['dustmasker', '-in', 'input.fa'], 1, 'Error:  Argument "out". File is not accessible:  `nosub/../m.out\''],
+      [['segmasker', '-in', 'prot.fa'], 1, 'Argument "out". File is not accessible:  `nosub/../m.out\''],
+      [['convert2blastmask', '-in', 'input.fa', '-masking_algorithm', 'dust', '-masking_options', 'window=64'], 1, 'Argument "out". File is not accessible:  `nosub/../m.out\''],
+      [['windowmasker', '-mk_counts', '-in', 'input.fa'], 0, undefined],
+      [['windowmasker', '-convert', '-in', 'c.counts'], 0, undefined],
+      [['windowmasker', '-ustat', 'c.counts', '-in', 'input.fa'], 1, 'Error:  Argument "out". File is not accessible:  `nosub/../m.out\''],
+      [['blast_formatter', '-archive', 'bn.asn'], 1, 'Command line argument error: Argument "out". File is not accessible:  `nosub/../m.out\''],
+    ];
+    const directory = probeDirectory(['input.fa', 'prot.fa', 'bn.asn', 'c.counts', 'sub/x.txt']);
+    for (const [argv, status, last] of words) {
+      const failed = await new FakeEngine().runTool([...argv, '-out', 'nosub/../m.out'], { directory });
+      expect(failed.status, argv.join(' ')).toBe(status);
+      expect(failed.files, argv.join(' ')).toEqual([]);
+      const lines = (await failed.stderr.text()).split('\n').filter((line) => line !== '');
+      if (last !== undefined) expect(lines[lines.length - 1], argv.join(' ')).toBe(last);
+      const made = await new FakeEngine().runTool([...argv, '-out', 'sub/../m.out'], { directory });
+      expect(made.status, argv.join(' ')).toBe(0);
+      expect(made.files.map((file) => file.name), argv.join(' ')).toEqual(['m.out']);
+    }
+    // A run given no directory has an empty one, as the engine's: `sub/m.out` has no folder.
+    expect((await new FakeEngine().runTool(['segmasker', '-in', 'prot.fa', '-out', 'sub/m.out'])).status).toBe(1);
+    // The standard output's names write there, and `-logfile -` there too: no file.
+    const streams = await new FakeEngine().runTool(['dustmasker', '-in', 'input.fa', '-out', '/dev/stdout', '-logfile', '-'], { directory });
+    expect(streams.files).toEqual([]);
+    expect(await streams.stdout.text()).toContain(FAKE_MARKER);
+    expect(await streams.stderr.text()).toContain(FAKE_MARKER);
+  });
+
+  it("names makeblastdb's database and log as the engine, and fails a -logfile that makeblastdb cannot open", async () => {
+    const directory = probeDirectory();
+    const run = (words: readonly string[]) => new FakeEngine().runTool(['makeblastdb', '-in', 'input.fa', '-dbtype', 'nucl', ...words], { directory });
+    // The engine's database files (WW4h probe): by their path in the run's directory, folders made where missing.
+    for (const [out, base] of [
+      ['db', 'db'],
+      ['./db', 'db'],
+      ['db/', 'db'],
+      ['sub/../db', 'db'],
+      ['sub/db', 'sub/db'],
+      ['nosub/db', 'nosub/db'],
+      ['sub', 'sub'],
+    ] as const) {
+      const made = await run(['-out', out]);
+      expect(made.status, out).toBe(0);
+      expect(made.files.map((file) => file.name), out).toEqual([`${base}.nhr`, `${base}.nin`, `${base}.nsq`]);
+    }
+    const named = await new FakeEngine().runTool(['makeblastdb', '-in', 'sub/../input.fa', '-dbtype', 'nucl'], { directory });
+    expect(named.files.map((file) => file.name)).toEqual(['input.fa.nhr', 'input.fa.nin', 'input.fa.nsq']);
+    // -logfile: makeblastdb opens it as NCBI's log and as an output; where the output does not open, exit status 1.
+    const db = ['db.nhr', 'db.nin', 'db.nsq'];
+    const error = (name: string) => `Command line argument error: Argument "logfile". File is not accessible:  \`${name}'\n`;
+    for (const [log, status, files, stderr] of [
+      ['sub/../run.log', 0, [...db, 'run.log'], ''],
+      ['../run.log', 0, [...db, '../run.log'], ''],
+      ['/dev/null', 0, db, ''],
+      ['nosub/../run.log', 1, [], error('nosub/../run.log')],
+      ['nosub/run.log', 1, [], error('nosub/run.log')],
+      ['sub', 1, [], error('sub')],
+      ['sub/', 1, [], error('sub/')],
+      [' sub/../run.log', 1, [], error(' sub/../run.log')],
+      ['run.log/', 1, ['run.log'], ''],
+      ['', 1, [], ''],
+    ] as const) {
+      const made = await run(['-out', 'db', '-logfile', log]);
+      expect(made.status, `-logfile '${log}'`).toBe(status);
+      expect(made.files.map((file) => file.name), `-logfile '${log}'`).toEqual(files);
+      expect(await made.stderr.text(), `-logfile '${log}'`).toBe(stderr);
+    }
+  });
+});
+
 describe('MaskingDraft', () => {
   function setup(options: { readonly validate?: 'fake' | 'ok' } = {}) {
     const fake = new FakeEngine();
@@ -469,15 +634,94 @@ describe('MaskingDraft', () => {
     Object.defineProperty(nin, 'webkitRelativePath', { value: 'dbs/db.nin' });
     Object.defineProperty(nsq, 'webkitRelativePath', { value: 'dbs/db.nsq' });
     draft.dropInputFiles([nin, nsq]);
-    expect(draft.state.get().blastDbIn).toBe('dbs/db');
+    expect(draft.inName()).toBe('dbs/db');
     expect(draft.previewArgv()).toEqual(['dustmasker', '-in', 'dbs/db', '-infmt', 'blastdb']);
     expect((await draft.submit()).ok).toBe(true);
     expect(queued[0]!.argv).toEqual(['dustmasker', '-in', 'dbs/db', '-infmt', 'blastdb']);
     expect(queued[0]!.directory.map((entry) => entry.name)).toEqual(['dbs/db.nin', 'dbs/db.nsq']);
 
+    // A cleared name is none: the files of the run name -in again (line WW, WW4d R2); without them, none is given.
     draft.setBlastDbIn('');
+    expect(draft.inName()).toBe('dbs/db');
+    for (const entry of draft.state.get().runFiles) draft.removeRunFile(entry.key);
     const refused = await draft.submit();
     expect(refused).toEqual({ ok: false, message: 'Enter an input name or open files.' });
+  });
+
+  // Line WW, WW4d R1: dustmasker's and segmasker's -in with -infmt blastdb is a SeqDB name list, as WindowMasker's
+  // (measured against NCBI BLAST+ 2.17.0: a name with a space is read quoted, a double quote splits it).
+  it('writes a database whose path holds a space quoted in -in with -infmt blastdb, and refuses one named with a double quote, in the Input block, the check and Run LOSAT (line WW, WW4d R1)', async () => {
+    for (const tool of ['dustmasker', 'segmasker'] as const) {
+      const { draft, queued } = setup({ validate: 'ok' });
+      draft.ensureLoaded();
+      draft.setTool(tool);
+      await described(draft, tool);
+      draft.setField('-infmt', 'blastdb');
+      // The database of the tool's kind: protein for segmasker, nucleotide for dustmasker (WW4d R2).
+      const exts = tool === 'segmasker' ? ['pin', 'psq'] : ['nin', 'nsq'];
+      draft.addRunFiles(
+        exts.map((ext, i) => new File([new Uint8Array([i])], `db.${ext}`)),
+        exts.map((ext) => `my dbs/db.${ext}`),
+      );
+      expect(draft.inName()).toBe('"my dbs/db"');
+      expect(draft.previewArgv()).toEqual([tool, '-in', '"my dbs/db"', '-infmt', 'blastdb']);
+      await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('ok'));
+      expect((await draft.submit()).ok).toBe(true);
+      expect(queued[0]!.argv).toEqual([tool, '-in', '"my dbs/db"', '-infmt', 'blastdb']);
+
+      // A database whose name -in cannot carry, which the files of the run now name (the shortest name).
+      const message = 'A database named "q"/d" cannot be in -in: a double quote there starts or ends a name.';
+      draft.addRunFiles(
+        exts.map((ext, i) => new File([new Uint8Array([i])], `d.${ext}`)),
+        exts.map((ext) => `q"/d.${ext}`),
+      );
+      expect(draft.databaseRefusal()).toBe(message);
+      expect(draft.inName()).toBe('');
+      await vi.waitFor(() => expect(draft.state.get().validation).toEqual({ state: 'invalid', message }));
+      expect(await draft.submit()).toEqual({ ok: false, message });
+      expect(queued).toHaveLength(1);
+
+      // With FASTA input, -in is one file's name: the files of the run name nothing, quote nothing and refuse nothing.
+      draft.setField('-infmt', 'fasta');
+      expect(draft.databaseRefusal()).toBeUndefined();
+    }
+  });
+
+  // Line WW, WW4d R2 (review N1, N2): a cleared Input name is none, and words of Additional options that name -in give -in
+  // themselves (makeblastdb's rule, one for the three tabs): the found database is not written and not refused.
+  it('takes a cleared Input name as none, and writes and refuses no found database when Additional options name -in (line WW, WW4d R2)', async () => {
+    const message = 'A database named "q"/d" cannot be in -in: a double quote there starts or ends a name.';
+    const { draft, queued } = setup({ validate: 'ok' });
+    draft.ensureLoaded();
+    await described(draft, 'dustmasker');
+    draft.setField('-infmt', 'blastdb');
+    draft.addRunFiles(['nin', 'nsq'].map((ext, i) => new File([new Uint8Array([i])], `d.${ext}`)), ['q"/d.nin', 'q"/d.nsq']);
+    draft.setBlastDbIn('typed');
+    expect(draft.databaseRefusal()).toBeUndefined();
+    draft.setBlastDbIn('');
+    expect(draft.databaseRefusal()).toBe(message);
+    await vi.waitFor(() => expect(draft.state.get().validation).toEqual({ state: 'invalid', message }));
+    draft.setExtra('-in other');
+    expect(draft.databaseRefusal()).toBeUndefined();
+    await vi.waitFor(() => expect(draft.state.get().validation.state).toBe('ok'));
+    expect((await draft.submit()).ok).toBe(true);
+    expect(queued[0]!.argv).toEqual(['dustmasker', '-infmt', 'blastdb', '-in', 'other']);
+  });
+
+  // Line WW (dev defect found by the WW4d R2 review): segmasker reads a protein database and dustmasker a nucleotide one,
+  // so the files of the run name the database of that kind in a folder that holds both.
+  it("names the run files' database of the tool's kind: protein for segmasker, nucleotide for dustmasker (line WW, WW4d R2)", async () => {
+    const { draft } = setup({ validate: 'ok' });
+    draft.ensureLoaded();
+    await described(draft, 'dustmasker');
+    draft.setField('-infmt', 'blastdb');
+    const names = ['db/p.pin', 'db/p.psq', 'db/nuc.nin', 'db/nuc.nsq'];
+    draft.addRunFiles(names.map((name, i) => new File([new Uint8Array([i])], name.slice(3))), names);
+    expect(draft.inName()).toBe('db/nuc');
+    draft.setTool('segmasker');
+    await described(draft, 'segmasker');
+    draft.setField('-infmt', 'blastdb');
+    expect(draft.inName()).toBe('db/p');
   });
 
   it("reports NCBI's error while convert2blastmask's required options are missing, as the command line does", async () => {

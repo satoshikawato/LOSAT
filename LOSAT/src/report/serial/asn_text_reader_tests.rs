@@ -349,6 +349,45 @@ fn values_split_at_every_byte() {
     );
 }
 
+/// Runs of 9 to 17 spaces (more than the eight bytes the white-space reader takes a step, so that
+/// the end of a read splits a step, and the reader of a line feed and its indentation gives up
+/// after the spaces) that end in a tab, CR LF, LF CR, a comment, a negative number, a value, a
+/// `}` and a `--` at the end of the text; each text whole and cut at every length.
+#[test]
+fn space_runs_split_at_every_byte() {
+    for n in 9..=17 {
+        let sp = " ".repeat(n);
+        let text = format!(
+            "Demo ::= {{\n{sp}\ta 1 ,\n{sp}\r\n{sp}b 2 ,\n{sp}\n\r{sp}c 3 ,\n{sp}-- c --{sp}d 4 ,\n\
+             {sp}e\n{sp}-1 ,\n{sp}g{sp}-1 ,\n{sp}f 5{sp}}}{sp}--"
+        );
+        let text = text.as_bytes();
+        for cut in 0..=text.len() {
+            walk_every_source(&format!("{n} spaces cut {cut}"), &text[..cut]);
+        }
+        // The whole text is read to its end: every member, the two negative numbers, and the end
+        // of the text in the comment after the last run (the error at its end, on line 11).
+        let walked = walk(SliceSource::new(text));
+        for id in ["a", "b", "c", "d", "e", "g", "f"] {
+            let step = format!("id {}", show(id.as_bytes()));
+            assert!(
+                walked.iter().any(|s| s.starts_with(&step)),
+                "{n}: {id}: {walked:?}"
+            );
+        }
+        assert_eq!(
+            walked.iter().filter(|s| s.contains("-1")).count(),
+            2,
+            "{n}: {walked:?}"
+        );
+        let end = walked.last().unwrap();
+        assert!(
+            end.contains("WhiteSpaceEof") && end.ends_with(&format!("@{}:11", text.len())),
+            "{n}: {end}"
+        );
+    }
+}
+
 /// A frame open in a literal walk (`Frame`, kept by its fields between the operations): a
 /// SEQUENCE being read (`members`), a list (`list`) or a CHOICE's variant (`choice`).
 struct Level {

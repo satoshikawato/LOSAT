@@ -580,6 +580,15 @@ fn is_white_space_or_dash(c: u8) -> bool {
     matches!(c, b' ' | b'\t' | b'\r' | b'\n' | b'-')
 }
 
+/// `SkipWhiteSpace`'s rule for a `-`, from the byte after it (`None` where that byte is not read
+/// yet): `true` where the `-` is the byte found (a negative number), `false` where it starts a
+/// comment (`--`) or the byte after it is still to be read.
+// NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:221-229
+#[inline(always)]
+fn ends_at_dash(next: Option<u8>) -> bool {
+    next.is_some_and(|next| next != b'-')
+}
+
 /// `FirstIdChar` (objistrasn.cpp:118-121).
 pub(crate) fn is_first_id_char(c: u8) -> bool {
     c.is_ascii_alphabetic() || c == b'_'
@@ -954,9 +963,7 @@ impl<S: AsnSource> Reader<S> {
         let line_feed = usize::from(rest.first() == Some(&b'\n'));
         let i = after_spaces(rest, line_feed);
         if let Some(&c) = rest.get(i) {
-            if !is_white_space_or_dash(c)
-                || (c == b'-' && rest.get(i + 1).is_some_and(|&next| next != b'-'))
-            {
+            if !is_white_space_or_dash(c) || (c == b'-' && ends_at_dash(rest.get(i + 1).copied())) {
                 self.add_lines(line_feed);
                 return (pos + i, c.into());
             }
@@ -984,22 +991,20 @@ impl<S: AsnSource> Reader<S> {
                 let Some(&c) = rest.get(i) else {
                     break None;
                 };
-                if !matches!(c, b'\t' | b'\r' | b'\n' | b'-') {
+                if !is_white_space_or_dash(c) {
                     // The byte found.
                     self.add_lines(lines);
                     return (pos + i, c.into());
                 }
                 match c {
                     b'\t' => i += 1,
-                    b'-' => match rest.get(i + 1) {
-                        // A `-` that does not start a comment (a negative number).
-                        Some(&next) if next != b'-' => {
-                            self.add_lines(lines);
-                            return (pos + i, b'-'.into());
-                        }
-                        _ => break Some(c),
-                    },
-                    // A line end.
+                    // A `-` that does not start a comment (a negative number).
+                    b'-' if ends_at_dash(rest.get(i + 1).copied()) => {
+                        self.add_lines(lines);
+                        return (pos + i, b'-'.into());
+                    }
+                    b'-' => break Some(c),
+                    // A line end (`after_spaces` took the spaces).
                     _ => {
                         i += 1;
                         lines += 1;
@@ -1024,7 +1029,11 @@ impl<S: AsnSource> Reader<S> {
                 Some(b'-') => match self.src.byte_at(pos + 1) {
                     // The end of the text after a `-`: `PeekChar` one byte ahead fails at the `-`.
                     None => break,
-                    Some(b'-') => match self.comment_at(pos + 2) {
+                    next if ends_at_dash(next) => {
+                        self.add_lines(lines);
+                        return (pos, b'-'.into());
+                    }
+                    _ => match self.comment_at(pos + 2) {
                         Some((end, end_lines)) => (pos, lines) = (end, lines + end_lines),
                         None => {
                             // `comment_at` set `pos` where the text ends.
@@ -1032,10 +1041,6 @@ impl<S: AsnSource> Reader<S> {
                             return (self.pos, END_OF_TEXT);
                         }
                     },
-                    Some(_) => {
-                        self.add_lines(lines);
-                        return (pos, b'-'.into());
-                    }
                 },
                 Some(c) => pos = self.end_of_line_at(pos, c),
             }

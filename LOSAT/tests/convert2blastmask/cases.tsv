@@ -291,3 +291,81 @@ opt_flush_xml	-in in/lc.fa -masking_algorithm dust -masking_options 'aaaaaaaaaaa
 # order_txt, order_bin (as dustmasker's order_*: 300 lower-case intervals under a -parse_seqids id with a DEL byte; ncbi/<name>.merged is NCBI's 2>&1 stream of a run of its own; M4a-1b part 6) frozen 2026-11-14 by ad-M4a-3 with the local official release.
 order_txt	-in in/order_del_lc.fa -masking_algorithm dust -masking_options o -parse_seqids
 order_bin	-in in/order_del_lc.fa -masking_algorithm dust -masking_options o -parse_seqids -outfmt maskinfo_asn1_bin
+# ww4c_* (line WW item WW4c, the Supported mark of LOSAT Web's Masking tab): a row for each combination of the program that -masking_algorithm names (not_set, dust, seg, windowmasker, repeat, other), a -masking_options text of visible ASCII (t) or with a byte outside it (u: NCBI writes # and posts error 803.7 in the ASN.1 formats), -parse_seqids and -outfmt that no row had, in/ids.fa. Frozen 2026-11-28 by ad-WW-21 (WW4c) with the local official NCBI BLAST+ 2.17.0 release.
+ww4c_notset_t_int	-in in/ids.fa -masking_algorithm not_set -masking_options 'window=64 level=20 linker=1' -outfmt interval
+ww4c_notset_t_mibin	-in in/ids.fa -masking_algorithm not_set -masking_options 'window=64 level=20 linker=1' -outfmt maskinfo_asn1_bin
+ww4c_notset_t_mitxt_ps	-in in/ids.fa -masking_algorithm not_set -masking_options 'window=64 level=20 linker=1' -parse_seqids
+ww4c_notset_t_int_ps	-in in/ids.fa -masking_algorithm not_set -masking_options 'window=64 level=20 linker=1' -outfmt interval -parse_seqids
+ww4c_notset_t_mibin_ps	-in in/ids.fa -masking_algorithm not_set -masking_options 'window=64 level=20 linker=1' -outfmt maskinfo_asn1_bin -parse_seqids
+ww4c_notset_t_mixml_ps	-in in/ids.fa -masking_algorithm not_set -masking_options 'window=64 level=20 linker=1' -outfmt maskinfo_xml -parse_seqids
+ww4c_notset_u_mitxt	-in in/ids.fa -masking_algorithm not_set -masking_options 'é window=64'
+ww4c_notset_u_int	-in in/ids.fa -masking_algorithm not_set -masking_options 'é window=64' -outfmt interval
+ww4c_notset_u_mibin	-in in/ids.fa -masking_algorithm not_set -masking_options 'é window=64' -outfmt maskinfo_asn1_bin
+ww4c_notset_u_mixml	-in in/ids.fa -masking_algorithm not_set -masking_options 'é window=64' -outfmt maskinfo_xml
+ww4c_notset_u_mitxt_ps	-in in/ids.fa -masking_algorithm not_set -masking_options 'é window=64' -parse_seqids
+ww4c_notset_u_int_ps	-in in/ids.fa -masking_algorithm not_set -masking_options 'é window=64' -outfmt interval -parse_seqids
+ww4c_notset_u_mibin_ps	-in in/ids.fa -masking_algorithm not_set -masking_options 'é window=64' -outfmt maskinfo_asn1_bin -parse_seqids
+ww4c_notset_u_mixml_ps	-in in/ids.fa -masking_algorithm not_set -masking_options 'é window=64' -outfmt maskinfo_xml -parse_seqids
+ww4c_dust_u_int	-in in/ids.fa -masking_algorithm dust -masking_options 'é window=64' -outfmt interval
+ww4c_dust_u_mitxt_ps	-in in/ids.fa -masking_algorithm dust -masking_options 'é window=64' -parse_seqids
+ww4c_dust_u_int_ps	-in in/ids.fa -masking_algorithm dust -masking_options 'é window=64' -outfmt interval -parse_seqids
+ww4c_dust_u_mibin_ps	-in in/ids.fa -masking_algorithm dust -masking_options 'é window=64' -outfmt maskinfo_asn1_bin -parse_seqids
+ww4c_dust_u_mixml_ps	-in in/ids.fa -masking_algorithm dust -masking_options 'é window=64' -outfmt maskinfo_xml -parse_seqids
+ww4c_seg_t_int	-in in/ids.fa -masking_algorithm seg -masking_options 'window=64 level=20 linker=1' -outfmt interval
+ww4c_seg_t_mibin	-in in/ids.fa -masking_algorithm seg -masking_options 'window=64 level=20 linker=1' -outfmt maskinfo_asn1_bin
+ww4c_seg_t_mixml	-in in/ids.fa -masking_algorithm seg -masking_options 'window=64 level=20 linker=1' -outfmt maskinfo_xml
+ww4c_seg_t_mitxt_ps	-in in/ids.fa -masking_algorithm seg -masking_options 'window=64 level=20 linker=1' -parse_seqids
+ww4c_seg_t_int_ps	-in in/ids.fa -masking_algorithm seg -masking_options 'window=64 level=20 linker=1' -outfmt interval -parse_seqids
+ww4c_seg_t_mibin_ps	-in in/ids.fa -masking_algorithm seg -masking_options 'window=64 level=20 linker=1' -outfmt maskinfo_asn1_bin -parse_seqids
+ww4c_seg_t_mixml_ps	-in in/ids.fa -masking_algorithm seg -masking_options 'window=64 level=20 linker=1' -outfmt maskinfo_xml -parse_seqids
+ww4c_seg_u_mitxt	-in in/ids.fa -masking_algorithm seg -masking_options 'é window=64'
+ww4c_seg_u_int	-in in/ids.fa -masking_algorithm seg -masking_options 'é window=64' -outfmt interval
+ww4c_seg_u_mibin	-in in/ids.fa -masking_algorithm seg -masking_options 'é window=64' -outfmt maskinfo_asn1_bin
+ww4c_seg_u_mixml	-in in/ids.fa -masking_algorithm seg -masking_options 'é window=64' -outfmt maskinfo_xml
+ww4c_seg_u_mitxt_ps	-in in/ids.fa -masking_algorithm seg -masking_options 'é window=64' -parse_seqids
+ww4c_seg_u_int_ps	-in in/ids.fa -masking_algorithm seg -masking_options 'é window=64' -outfmt interval -parse_seqids
+ww4c_seg_u_mibin_ps	-in in/ids.fa -masking_algorithm seg -masking_options 'é window=64' -outfmt maskinfo_asn1_bin -parse_seqids
+ww4c_seg_u_mixml_ps	-in in/ids.fa -masking_algorithm seg -masking_options 'é window=64' -outfmt maskinfo_xml -parse_seqids
+ww4c_wm_t_int	-in in/ids.fa -masking_algorithm windowmasker -masking_options 'window=64 level=20 linker=1' -outfmt interval
+ww4c_wm_t_mixml	-in in/ids.fa -masking_algorithm windowmasker -masking_options 'window=64 level=20 linker=1' -outfmt maskinfo_xml
+ww4c_wm_t_mitxt_ps	-in in/ids.fa -masking_algorithm windowmasker -masking_options 'window=64 level=20 linker=1' -parse_seqids
+ww4c_wm_t_int_ps	-in in/ids.fa -masking_algorithm windowmasker -masking_options 'window=64 level=20 linker=1' -outfmt interval -parse_seqids
+ww4c_wm_t_mibin_ps	-in in/ids.fa -masking_algorithm windowmasker -masking_options 'window=64 level=20 linker=1' -outfmt maskinfo_asn1_bin -parse_seqids
+ww4c_wm_t_mixml_ps	-in in/ids.fa -masking_algorithm windowmasker -masking_options 'window=64 level=20 linker=1' -outfmt maskinfo_xml -parse_seqids
+ww4c_wm_u_mitxt	-in in/ids.fa -masking_algorithm windowmasker -masking_options 'é window=64'
+ww4c_wm_u_int	-in in/ids.fa -masking_algorithm windowmasker -masking_options 'é window=64' -outfmt interval
+ww4c_wm_u_mibin	-in in/ids.fa -masking_algorithm windowmasker -masking_options 'é window=64' -outfmt maskinfo_asn1_bin
+ww4c_wm_u_mixml	-in in/ids.fa -masking_algorithm windowmasker -masking_options 'é window=64' -outfmt maskinfo_xml
+ww4c_wm_u_mitxt_ps	-in in/ids.fa -masking_algorithm windowmasker -masking_options 'é window=64' -parse_seqids
+ww4c_wm_u_int_ps	-in in/ids.fa -masking_algorithm windowmasker -masking_options 'é window=64' -outfmt interval -parse_seqids
+ww4c_wm_u_mibin_ps	-in in/ids.fa -masking_algorithm windowmasker -masking_options 'é window=64' -outfmt maskinfo_asn1_bin -parse_seqids
+ww4c_wm_u_mixml_ps	-in in/ids.fa -masking_algorithm windowmasker -masking_options 'é window=64' -outfmt maskinfo_xml -parse_seqids
+ww4c_repeat_t_int	-in in/ids.fa -masking_algorithm repeat -masking_options 'window=64 level=20 linker=1' -outfmt interval
+ww4c_repeat_t_mibin	-in in/ids.fa -masking_algorithm repeat -masking_options 'window=64 level=20 linker=1' -outfmt maskinfo_asn1_bin
+ww4c_repeat_t_mitxt_ps	-in in/ids.fa -masking_algorithm repeat -masking_options 'window=64 level=20 linker=1' -parse_seqids
+ww4c_repeat_t_int_ps	-in in/ids.fa -masking_algorithm repeat -masking_options 'window=64 level=20 linker=1' -outfmt interval -parse_seqids
+ww4c_repeat_t_mibin_ps	-in in/ids.fa -masking_algorithm repeat -masking_options 'window=64 level=20 linker=1' -outfmt maskinfo_asn1_bin -parse_seqids
+ww4c_repeat_t_mixml_ps	-in in/ids.fa -masking_algorithm repeat -masking_options 'window=64 level=20 linker=1' -outfmt maskinfo_xml -parse_seqids
+ww4c_repeat_u_mitxt	-in in/ids.fa -masking_algorithm repeat -masking_options 'é window=64'
+ww4c_repeat_u_int	-in in/ids.fa -masking_algorithm repeat -masking_options 'é window=64' -outfmt interval
+ww4c_repeat_u_mibin	-in in/ids.fa -masking_algorithm repeat -masking_options 'é window=64' -outfmt maskinfo_asn1_bin
+ww4c_repeat_u_mixml	-in in/ids.fa -masking_algorithm repeat -masking_options 'é window=64' -outfmt maskinfo_xml
+ww4c_repeat_u_mitxt_ps	-in in/ids.fa -masking_algorithm repeat -masking_options 'é window=64' -parse_seqids
+ww4c_repeat_u_int_ps	-in in/ids.fa -masking_algorithm repeat -masking_options 'é window=64' -outfmt interval -parse_seqids
+ww4c_repeat_u_mibin_ps	-in in/ids.fa -masking_algorithm repeat -masking_options 'é window=64' -outfmt maskinfo_asn1_bin -parse_seqids
+ww4c_repeat_u_mixml_ps	-in in/ids.fa -masking_algorithm repeat -masking_options 'é window=64' -outfmt maskinfo_xml -parse_seqids
+ww4c_other_t_int	-in in/ids.fa -masking_algorithm other -masking_options 'window=64 level=20 linker=1' -outfmt interval
+ww4c_other_t_mibin	-in in/ids.fa -masking_algorithm other -masking_options 'window=64 level=20 linker=1' -outfmt maskinfo_asn1_bin
+ww4c_other_t_mixml	-in in/ids.fa -masking_algorithm other -masking_options 'window=64 level=20 linker=1' -outfmt maskinfo_xml
+ww4c_other_t_mitxt_ps	-in in/ids.fa -masking_algorithm other -masking_options 'window=64 level=20 linker=1' -parse_seqids
+ww4c_other_t_int_ps	-in in/ids.fa -masking_algorithm other -masking_options 'window=64 level=20 linker=1' -outfmt interval -parse_seqids
+ww4c_other_t_mibin_ps	-in in/ids.fa -masking_algorithm other -masking_options 'window=64 level=20 linker=1' -outfmt maskinfo_asn1_bin -parse_seqids
+ww4c_other_t_mixml_ps	-in in/ids.fa -masking_algorithm other -masking_options 'window=64 level=20 linker=1' -outfmt maskinfo_xml -parse_seqids
+ww4c_other_u_mitxt	-in in/ids.fa -masking_algorithm other -masking_options 'é window=64'
+ww4c_other_u_int	-in in/ids.fa -masking_algorithm other -masking_options 'é window=64' -outfmt interval
+ww4c_other_u_mibin	-in in/ids.fa -masking_algorithm other -masking_options 'é window=64' -outfmt maskinfo_asn1_bin
+ww4c_other_u_mixml	-in in/ids.fa -masking_algorithm other -masking_options 'é window=64' -outfmt maskinfo_xml
+ww4c_other_u_mitxt_ps	-in in/ids.fa -masking_algorithm other -masking_options 'é window=64' -parse_seqids
+ww4c_other_u_int_ps	-in in/ids.fa -masking_algorithm other -masking_options 'é window=64' -outfmt interval -parse_seqids
+ww4c_other_u_mibin_ps	-in in/ids.fa -masking_algorithm other -masking_options 'é window=64' -outfmt maskinfo_asn1_bin -parse_seqids
+ww4c_other_u_mixml_ps	-in in/ids.fa -masking_algorithm other -masking_options 'é window=64' -outfmt maskinfo_xml -parse_seqids

@@ -122,12 +122,13 @@ fn run_masks(
             .expect("a key with a default or a mandatory key")
     };
     let outfmt = args.value("outfmt").expect("-outfmt has a default");
-    let input = args.os_value("in").expect("-in has a default");
-    let mut reader = MaskFromFasta::new(
-        Box::new(open_input_file("in", input, stdin).map_err(file_failure)?),
-        args.flag("parse_seqids"),
-    )?;
+    let mut reader = input_reader(args, stdin)?;
     let mut out = args.output_file("out", out).map_err(file_failure)?;
+    // LOSAT Web's refusal of an output that it does not write (`OpenFiles::create`), as soon as
+    // `-out` is opened (windowmasker's place and words).
+    if let Some(reason) = out.refusal() {
+        return Err(Failure::Refused(unsupported(reason)));
+    }
     let mut writer = writer(
         outfmt,
         &bytes("masking_algorithm"),
@@ -183,6 +184,24 @@ fn writer(outfmt: &str, algorithm: &[u8], options: Vec<u8>) -> MaskInfoWriter {
 struct MaskedRecord {
     best_id: ParsedSeqId,
     mask: Vec<(u32, u32)>,
+}
+
+// No NCBI counterpart: `run_masks` up to `-out`, which LOSAT Web's check takes too (review of
+// WW4c, F1, 2026-11-28).
+/// The first steps of `run_masks`: `-in` opened and its reader made (`MaskFromFasta::new`), before
+/// `-out`.
+fn input_reader<'a>(args: &Args, stdin: &'a mut Cin<'_>) -> Result<MaskFromFasta<'a>, Failure> {
+    let input = args.os_value("in").expect("-in has a default");
+    MaskFromFasta::new(
+        Box::new(open_input_file("in", input, stdin).map_err(file_failure)?),
+        args.flag("parse_seqids"),
+    )
+}
+
+/// Whether the run with `args` reaches `-out`: its first steps (`input_reader`) pass (LOSAT Web's
+/// check, `super::check`, refuses `-out` only then; review of WW4c, F1).
+pub(super) fn reaches_out(args: &Args, stdin: &mut Cin<'_>) -> bool {
+    input_reader(args, stdin).is_ok()
 }
 
 /// `CMaskFromFasta`: NCBI's `CFastaReader` with its flags

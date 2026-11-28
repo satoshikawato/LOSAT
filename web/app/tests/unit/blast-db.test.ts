@@ -692,6 +692,65 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     expect(draft.readiness()).toBe('Found nucleotide database (nucdb/nt), not a protein database for BLASTP.');
   });
 
+  it("searches two makeblastdb runs' databases of one name as -db and -filtering_db, each in its run's folder, and remembers neither (line WW, WW4b2 R1 findings 3 and 5)", async () => {
+    const memory = memoryStore({ subject: { name: 'nucdb/nt', folder: 'nucdb' }, filtering: { name: 'rep/repeats', folder: 'rep' } });
+    const { draft, coordinator, runCalls } = setup(memory);
+    // A made database's files: the File's own name is the base name; the run's folder comes in the names given.
+    const made = (run: number) => ({
+      files: ['nin', 'nhr', 'nsq'].map((ext) => diskFile(`input.fa.${ext}`, `${ext}${run}`)),
+      names: ['nin', 'nhr', 'nsq'].map((ext) => `run${run}/input.fa.${ext}`),
+    });
+    pasteQuery(draft);
+    draft.setSubjectSource('database');
+    const first = made(1);
+    const second = made(2);
+    await draft.setSubjectDatabaseFiles(first.files, first.names, { made: true });
+    draft.setFilteringDbEnabled(true);
+    await draft.setFilteringDbFiles(second.files, second.names, { made: true });
+    await draft.idle();
+    expect(draft.state.get().database.selected).toBe('run1/input.fa');
+    expect(draft.state.get().filteringDb.selected).toBe('run2/input.fa');
+    expect(memory.data).toEqual({});
+    draft.selectSubjectDatabase('run1/input.fa');
+    draft.selectFilteringDb('run2/input.fa');
+    expect(memory.data).toEqual({});
+    expectReady(draft);
+
+    await submitAndWait(draft, coordinator);
+    const req = runCalls[0]!;
+    expect(req.argv).toEqual(expect.arrayContaining(['-db', 'run1/input.fa', FILTERING_DB_FLAG, 'run2/input.fa']));
+    expect(mountedNames(req)).toEqual([...first.names, ...second.names].sort());
+    expect(memory.data).toEqual({});
+
+    // A folder that the user picks is remembered again.
+    await pickNucDb(draft);
+    await draft.idle();
+    expect(memory.data.subject).toEqual({ name: 'nucdb/nt', folder: 'nucdb' });
+  });
+
+  it('remembers no made database after the subject source goes to FASTA and back, and a reload offers none (line WW, WW4b2 R3 F1)', async () => {
+    const memory = memoryStore({ subject: { name: 'nucdb/nt', folder: 'nucdb' } });
+    const { draft } = setup(memory);
+    const files = ['nin', 'nhr', 'nsq'].map((ext) => diskFile(`mydb.${ext}`, ext));
+    const names = ['nin', 'nhr', 'nsq'].map((ext) => `run1/db/mydb.${ext}`);
+    // "Use as Database (-db)": the made database replaces the remembered folder's.
+    await draft.setSubjectDatabaseFiles(files, names, { made: true });
+    await draft.idle();
+    expect(draft.state.get().database.selected).toBe('run1/db/mydb');
+    expect(memory.data.subject).toBeUndefined();
+    // "FASTA sequences", then "Database -db" again, then the made database chosen in the list.
+    draft.setSubjectSource('fasta');
+    draft.setSubjectSource('database');
+    draft.selectSubjectDatabase('run1/db/mydb');
+    expect(draft.state.get().database.selected).toBe('run1/db/mydb');
+    expect(memory.data.subject).toBeUndefined();
+
+    const reloaded = setup(memory).draft;
+    await reloaded.idle();
+    expect(reloaded.state.get().subjectSource).toBe('fasta');
+    expect(reloaded.state.get().database.remembered).toBeUndefined();
+  });
+
   it('asks for the files again after a reload when files were chosen, in Run LOSAT and while reading (S4-5)', async () => {
     const memory = memoryStore({ subject: { name: 'nuc5' } });
     const { draft } = setup(memory);

@@ -3034,7 +3034,8 @@ those of OIDs 0 to 197 or 198 and 256 (with OIDs 1 and 257, 200 or 201 Seq-align
 `m2.200.6` and `m2.201.6`); `tc_h1_*` holds a clean title and one with 0xFF, taxid 99990 (the last entry of
 `tests/seqdb/taxdb`'s databases), which `tc_qh1` reads in that order and `tc_qh1r` in the other, a batch each with
 `BATCH_SIZE=50` (rows `h1.*`: the batch whose load looks the taxid up first writes the damaged taxonomy database's
-text); `tc_qslotu` reads OID 258
+text; `h1.later.*` and `h1.off.*` of outfmt 0, 5, 16 and 18 write the second batch's formatter posts, and in outfmt
+5, 16 and 18 the offset errors of the report's own taxonomy lookups after them); `tc_qslotu` reads OID 258
 with OIDs 4 to 13 (11 loads), then OIDs 2 and 258 (rows `slot.r6t`; `tc_qslotu1`, its first query, is the near
 input of BLASTN's, which writes that batch's rows before it refuses).
 NCBI BLAST+ 2.17.0 reads a reported subject's definition line where it makes the Seq-aligns of its query batch, and

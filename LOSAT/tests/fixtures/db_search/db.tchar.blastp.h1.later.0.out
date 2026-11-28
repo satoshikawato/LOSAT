@@ -1,0 +1,100 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: tc_h1_p
+           2 sequences; 140 total letters
+
+
+
+Query= qa clean
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+k0 clean                                                              125     4e-45
+
+
+>k0 clean
+Length=60
+
+ Score = 125 bits (313),  Expect = 4e-45, Method: Compositional matrix adjust.
+ Identities = 60/60 (100%), Positives = 60/60 (100%), Gaps = 0/60 (0%)
+
+Query  1   QSADKKATTWDSIQAEIDALCNMFATITDANVKYEMCDSWKAQYRKQLGRTVEQYCRDRK  60
+           QSADKKATTWDSIQAEIDALCNMFATITDANVKYEMCDSWKAQYRKQLGRTVEQYCRDRK
+Sbjct  1   QSADKKATTWDSIQAEIDALCNMFATITDANVKYEMCDSWKAQYRKQLGRTVEQYCRDRK  60
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.126    0.391    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 6222
+
+
+Query= qb bad
+
+Length=80
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+k1 cee#                                                               170     2e-62
+
+
+>k1 cee#
+Length=80
+
+ Score = 170 bits (430),  Expect = 2e-62, Method: Compositional matrix adjust.
+ Identities = 80/80 (100%), Positives = 80/80 (100%), Gaps = 0/80 (0%)
+
+Query  1   NRHARVGRHRMWPTMNKAVRFWCFWLDKAIPYFGSECPPKFLGVYVVWTIKQRNGPINCD  60
+           NRHARVGRHRMWPTMNKAVRFWCFWLDKAIPYFGSECPPKFLGVYVVWTIKQRNGPINCD
+Sbjct  1   NRHARVGRHRMWPTMNKAVRFWCFWLDKAIPYFGSECPPKFLGVYVVWTIKQRNGPINCD  60
+
+Query  61  KQNRFDDCTVWIAIMIWMHN  80
+           KQNRFDDCTVWIAIMIWMHN
+Sbjct  61  KQNRFDDCTVWIAIMIWMHN  80
+
+
+
+Lambda      K        H        a         alpha
+   0.331    0.142    0.556    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 8142
+
+
+  Database: tc_h1_p
+    Posted date:  Nov 28, 2026  10:51 AM
+  Number of letters in database: 140
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

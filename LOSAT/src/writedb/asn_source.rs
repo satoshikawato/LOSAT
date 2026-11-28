@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::sync::OnceLock;
 
-use super::asn_defline::{generate_asn_bioseq_title, HandleKey, TseFeatureIndex};
+use super::asn_defline::{generate_asn_bioseq_title, AsnTitle, HandleKey, TseFeatureIndex};
 use super::bioseq::SeqData;
 use super::deflines::best_non_local_rank;
 use super::fasta_source::pack::Ncbi4naBuilder;
@@ -262,7 +262,14 @@ impl<'a> AsnStream<'a> {
             Err(ReadError::Std(what)) => return Err(WriteDbError::Other(what.to_string())),
             Err(ReadError::Unsupported(what)) => return Err(WriteDbError::Unsupported(what)),
         };
-        SeqEntrySource::from_root(value, is_set, skip_unver).map(Some)
+        let source = SeqEntrySource::from_root(value, is_set, skip_unver)?;
+        // NCBI's scope indexes the entry when it takes it, before any title, even for an entry
+        // whose Bioseqs makeblastdb then skips (`found`).
+        // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:559-575
+        for post in source.features.start_entry()? {
+            warn(&post);
+        }
+        Ok(Some(source))
     }
 }
 
@@ -304,6 +311,8 @@ pub(crate) struct AsnBioseq {
     pub(crate) binary_header: Option<Vec<u8>>,
     pub(crate) cfastareader_defline: Option<Vec<u8>>,
     pub(crate) title: Vec<u8>,
+    /// The other titles that NCBI may make instead of `title` (`AsnTitle::alternatives`).
+    pub(crate) title_alternatives: Vec<Vec<u8>>,
     pub(crate) descr_taxids: Vec<i32>,
 }
 
@@ -422,7 +431,10 @@ impl SeqEntrySource {
         let is_na = matches!(mol, 1 | 2 | 4);
 
         let ancestors = self.ancestor_descrs(slot.parent_set);
-        let generated_title = generate_asn_bioseq_title(
+        let AsnTitle {
+            text: generated_title,
+            alternatives: title_alternatives,
+        } = generate_asn_bioseq_title(
             bio_idx,
             &slot.ids,
             &slot.descr,
@@ -512,6 +524,7 @@ impl SeqEntrySource {
             binary_header,
             cfastareader_defline,
             title,
+            title_alternatives,
             descr_taxids,
         })
     }

@@ -1,0 +1,40 @@
+Bioseq-set ::= {
+  class genbank,
+  seq-set {
+    seq {
+      id { genbank { accession "AB009100", version 1 } },
+      descr { molinfo { biomol genomic } },
+      inst { repr ref, mol dna, length 30, ext ref whole prf { accession "PRF1119" } }
+    },
+    set {
+      class nuc-prot,
+      seq-set {
+        seq {
+          id { prf { name "PRF1119" } },
+          descr { title "nuc 119", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00119", version 1 }, location int { from 2, to 20, id prf { accession "PRF1119" } } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id prf { name "PRF1119" } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00119", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 119" } }, location whole genbank { accession "BAA00119", version 1 } }
+          } } }
+        }
+      }
+    },
+    seq {
+      id { genbank { accession "AB009200", version 1 } },
+      descr { title "blocker holder", molinfo { biomol genomic } },
+      inst { repr raw, mol dna, length 10, seq-data iupacna "ACGTACGTAC" },
+      annot { { data ftable {
+        { data imp { key "misc_feature" }, location int { from 0, to 9, id prf { name "OTHERPRF", accession "PRF2000" } } }
+      } } }
+    }
+  }
+}

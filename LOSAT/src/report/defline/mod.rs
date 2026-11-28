@@ -473,6 +473,15 @@ pub(crate) fn generate_defline_core(
     // only to assemble `penult`. Avoid cloning `decoded` when no prefix/suffix/MAG applies.
     let penult = if !inp.leave_prefix_suffix {
         let prefix = set_prefix(inp, &main_title, multispecies);
+        // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:2886-2911,3029-3039
+        if inp.is_delta
+            && (inp.unordered
+                || matches!(inp.mi_tech, mol_info::TECH_HTGS_1 | mol_info::TECH_HTGS_2))
+        {
+            if let Some(feats) = feats {
+                feats.suffix_length_walk();
+            }
+        }
         let suffix = set_suffix(inp, &main_title, organelle, append_complete);
         let mag: &[u8] = if !inp.metagenome_source.is_empty() {
             if prefix.is_empty() {

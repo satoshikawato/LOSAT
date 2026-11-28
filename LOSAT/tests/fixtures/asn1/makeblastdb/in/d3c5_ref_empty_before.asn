@@ -1,0 +1,32 @@
+Bioseq-set ::= {
+  class genbank,
+  seq-set {
+    seq {
+      id { genbank { accession "AB009001", version 1 } },
+      descr { title "ref ext", molinfo { biomol genomic } },
+      inst { repr ref, mol dna, length 10, ext ref empty prf { name "OTHERPRF", accession "PRF2000" } }
+    },
+    set {
+      class nuc-prot,
+      seq-set {
+        seq {
+          id { prf { name "PRF1119" } },
+          descr { title "nuc 119", molinfo { biomol genomic } },
+          inst { repr raw, mol dna, length 30, seq-data iupacna "CGCACGCTTCAGAGCATGCCTCATGAGCGG" },
+          annot { { data ftable {
+            { data cdregion { frame one }, product whole genbank { accession "BAA00119", version 1 }, location int { from 2, to 20, id prf { accession "PRF1119" } } },
+            { data biosrc { org { taxname "Escherichia coli" } }, location int { from 0, to 29, id prf { name "PRF1119" } } }
+          } } }
+        },
+        seq {
+          id { genbank { accession "BAA00119", version 1 } },
+          descr { molinfo { biomol peptide } },
+          inst { repr raw, mol aa, length 10, seq-data ncbieaa "MKKKKKKKKK" },
+          annot { { data ftable {
+            { data prot { name { "probe protein 119" } }, location whole genbank { accession "BAA00119", version 1 } }
+          } } }
+        }
+      }
+    }
+  }
+}

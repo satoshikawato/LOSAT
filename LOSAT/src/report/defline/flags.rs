@@ -160,6 +160,10 @@ pub(crate) trait DeflineFeatures {
 
     /// For `x_SetTitleFromProtein`: `x_GetGeneRefViaCDS` of the CDS that `cds_for_product`
     /// finds, read only where the title needs it, as NCBI does.
+    /// `x_SetSuffix`'s walk of the sequence map of a `delta` sequence (HTGS-1/2 or `UNORDERED`),
+    /// which looks up the length of each `whole` segment and may throw.
+    fn suffix_length_walk(&self) {}
+
     fn gene_via_cds(&self) -> Option<GeneViaCdsInfo> {
         None
     }

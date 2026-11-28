@@ -390,8 +390,8 @@ fn all_frozen_ncbi_2_17_0_asn1_cases_match_byte_for_byte() {
         checked += 1;
     }
     assert!(
-        checked >= 168,
-        "expected >= 168 frozen cases, got {checked}"
+        checked >= 200,
+        "expected >= 200 frozen cases, got {checked}"
     );
 }
 
@@ -653,16 +653,16 @@ fn d3c6_autodef_and_ub_cases_are_refused_cleanly() {
 /// without a version that two Bioseqs in two Seq-id trees have with one version, one of them the
 /// Bioseq of the CDS; and a packed `pir` accession alone whose name match NCBI skips when
 /// another Seq-id of the entry has an accession of its prefix that is not packed, which here
-/// only an alignment annotation (whose Seq-ids LOSAT does not read) may hold.
+/// only an alignment annotation (whose Seq-ids LOSAT does not read) may hold; a name match that
+/// an earlier title resolves at one pick of a tie only; and a CDS label from a product whose
+/// parts carry the protein features.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:1438-1510,1564-1572
 /// NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:865-882
+/// NCBI reference (598d8ae6): c++/src/objmgr/seqdesc_ci.cpp:84-96,258-283
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/feature.cpp:179-197
 #[test]
 fn d3c5_scope_order_cases_are_refused_cleanly() {
-    let env_default = MakedbEnv {
-        skip_unverified: false,
-        scan_cfastareader: true,
-    };
     let pir_accession_with_align_annot = br#"Seq-entry ::= seq {
   id { other { accession "NM_000814", version 1 }, pir { name "PIR814" }, gi 900814 },
   descr { molinfo { biomol mRNA }, source { org { taxname "Homo sapiens" } } },
@@ -702,37 +702,70 @@ fn d3c5_scope_order_cases_are_refused_cleanly() {
         ),
         ("tie_across_trees", tie_across_trees.as_slice()),
     ] {
-        let dir = TempDir::unique(&format!("asn1-refuse-inline-{label}"));
-        let dir_str = dir_string(&dir);
-        let words = vec![
-            "-in".into(),
-            "-".into(),
-            "-input_type".into(),
-            "asn1_txt".into(),
-            "-dbtype".into(),
-            "nucl".into(),
-            "-title".into(),
-            "T".into(),
-            "-out".into(),
-            format!("{dir_str}/db"),
-        ];
-        let (rc, _, stderr) = run_case(&words, env_default, bytes);
-        assert_refusal(
+        refuse_scope_order(
             label,
-            rc,
-            &stderr,
+            bytes,
+            "nucl",
             "changes with the Bioseq NCBI's object manager",
         );
-        for entry in std::fs::read_dir(&dir).unwrap() {
-            let fname = entry.unwrap().file_name().to_string_lossy().into_owned();
-            assert!(
-                !fname.ends_with(".nin")
-                    && !fname.ends_with(".nhr")
-                    && !fname.ends_with(".nsq")
-                    && !fname.ends_with(".ndb"),
-                "{label}: volume/LMDB file {fname} was left behind after refusal"
-            );
-        }
+    }
+    // A titled `ref` X whose reference two PDB Bioseqs match alike: at one pick (a `ref` to the
+    // name-matched `prf` accession) X's descriptor iterator resolves that accession, at the other
+    // it does not; a `ref` to another `prf` accession then makes the handle that blocks the name
+    // match, so the protein's title depends on the pick (`Fixed::Maybe`). NCBI's own two picks
+    // are frozen as `t_d3c5_ref_chain_then_blocker` and `t_d3c5_ref_raw_then_blocker`.
+    // An NM title whose CDS product is a `seg` protein with a protein feature on its part: NCBI
+    // maps that feature onto the product and names the CDS after it.
+    let fix_m = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/asn1/makeblastdb/in");
+    for (label, file, dbtype, substr) in [
+        (
+            "tie_ref_chain_then_blocker",
+            "d3c5_refuse_tie_ref_chain_then_blocker.asn",
+            "prot",
+            "changes with the Bioseq NCBI's object manager",
+        ),
+        (
+            "nm_product_seg_part_prot",
+            "d3c5_refuse_nm_product_seg_part_prot.asn",
+            "nucl",
+            "CDS product whose sequence map",
+        ),
+    ] {
+        let bytes = std::fs::read(fix_m.join(file)).unwrap();
+        refuse_scope_order(label, &bytes, dbtype, substr);
+    }
+}
+
+/// Runs `makeblastdb` on `bytes` and checks that it refuses with `substr` and leaves no volume.
+fn refuse_scope_order(label: &str, bytes: &[u8], dbtype: &str, substr: &str) {
+    let env_default = MakedbEnv {
+        skip_unverified: false,
+        scan_cfastareader: true,
+    };
+    let dir = TempDir::unique(&format!("asn1-refuse-inline-{label}"));
+    let dir_str = dir_string(&dir);
+    let words = vec![
+        "-in".into(),
+        "-".into(),
+        "-input_type".into(),
+        "asn1_txt".into(),
+        "-dbtype".into(),
+        dbtype.into(),
+        "-title".into(),
+        "T".into(),
+        "-out".into(),
+        format!("{dir_str}/db"),
+    ];
+    let (rc, _, stderr) = run_case(&words, env_default, bytes);
+    assert_refusal(label, rc, &stderr, substr);
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let fname = entry.unwrap().file_name().to_string_lossy().into_owned();
+        assert!(
+            ![".nin", ".nhr", ".nsq", ".ndb", ".pin", ".phr", ".psq", ".pdb"]
+                .iter()
+                .any(|ext| fname.ends_with(ext)),
+            "{label}: volume/LMDB file {fname} was left behind after refusal"
+        );
     }
 }
 

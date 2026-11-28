@@ -376,7 +376,29 @@ pub(crate) enum ShownSubjects<'a> {
     },
 }
 
-impl ShownSubjects<'_> {
+impl<'a> ShownSubjects<'a> {
+    /// The Seq-align id of subject `index` (`subjects`, the records of the report's subjects): a
+    /// `-subject` record's (`FastaRecord::seq_id`), a reported database sequence's
+    /// (`query_anchored::database_seq_id`).
+    pub(crate) fn seq_id<'r>(
+        &self,
+        index: usize,
+        subjects: &'r [FastaRecord],
+    ) -> crate::report::seqid::SeqId<'r>
+    where
+        'a: 'r,
+    {
+        match self {
+            ShownSubjects::Fasta { .. } => subjects[index].seq_id(),
+            ShownSubjects::Database { reported, .. } => {
+                crate::report::query_anchored::database_seq_id(
+                    reported.parsed_subject(index),
+                    reported.oid(index),
+                )
+            }
+        }
+    }
+
     /// The taxonomy database's messages of the query `ordinal`'s own fetches, which follow its
     /// warnings where `PRE_FETCH_SEQS_LIMIT` turned its batch's prefetch off
     /// (`ReportedSubjects::fetch_by_query`); empty otherwise.
@@ -1140,6 +1162,13 @@ pub(super) fn pairwise_hits(
             };
             for list in lists {
                 let subject = &subjects[list.oid];
+                // Whether the rows' Seq-ids match (`seqid::relation::row_matches`): a query mask
+                // that misses the query's row then goes through the subject's (`query_row_masks`).
+                let pair = !query_masks.is_empty()
+                    && crate::seqid::relation::row_matches(
+                        query.seq_id(),
+                        shown.seq_id(list.oid, subjects),
+                    );
                 for hsp in &list.hsps {
                     if !has_seqalign(hsp, options.gapped) {
                         continue;
@@ -1182,11 +1211,24 @@ pub(super) fn pairwise_hits(
                     if html_masks.is_some() {
                         row_masks.clear();
                     }
+                    let stored = &a.subject_stored_gaps;
+                    let subject_row = pair.then(|| crate::report::query_anchored::LocRow {
+                        letters: a.sseq.as_bytes(),
+                        // A stored `-` is a residue of the subject (in order).
+                        residue: |column: usize| {
+                            a.sseq.as_bytes()[column] != b'-'
+                                || stored.binary_search(&(column as u32)).is_ok()
+                        },
+                        seq_range: (hit.s_start as u32 - 1, hit.s_end as u32 - 1),
+                        plus: true,
+                        width: 1,
+                    });
                     let query_seq = query_row_masks(
                         a.qseq,
                         (a.qstart, a.qend),
                         a.frame,
                         &query_masks,
+                        subject_row.filter(|row| !row.letters.is_empty()),
                         &mut row_masks,
                     );
                     if let Some(table) = html_masks.as_deref_mut() {
@@ -1251,11 +1293,21 @@ pub(super) fn pairwise_hits(
     // A `-subject_loc` subject can show runs of its record outside the interval
     // (`FastaRecord::archive_lowercase_runs`). `-db_soft_mask` and `-db_hard_mask`: the stored
     // masks by NCBI's Seq-id (`ReportedSubjects::shown_db_masks`).
+    // A subject's mask goes through the query's row where their Seq-ids match (`RowPairs`).
+    let pairs = |hits: &[PairwiseHit]| {
+        crate::seqid::relation::RowPairs::of(
+            hits.iter().map(|hit| (hit.hit.q_idx, hit.hit.s_idx)),
+            |q_idx| queries[q_idx as usize].seq_id(),
+            |s_idx| shown.seq_id(s_idx as usize, subjects),
+        )
+    };
     if let Some(masks) = db_subject_masks(shown, &hits) {
-        super::x_soft_subject::x_set_subject_row_masks(&mut hits, &masks, html_masks);
+        let pairs = pairs(&hits);
+        super::x_soft_subject::x_set_subject_row_masks(&mut hits, &masks, &pairs, html_masks);
     } else if subjects.iter().any(FastaRecord::has_lowercase_runs) {
         let kept = super::x_soft_subject::x_subject_masks(&hits, subjects);
-        super::x_soft_subject::x_set_subject_row_masks(&mut hits, &kept, html_masks);
+        let pairs = pairs(&hits);
+        super::x_soft_subject::x_set_subject_row_masks(&mut hits, &kept, &pairs, html_masks);
     }
     Ok(hits)
 }
@@ -1280,12 +1332,15 @@ pub(super) fn pairwise_hits(
 /// case. A mask of another frame never shows on the row (`x_OutputSeq` passes over it), so the
 /// row does not hold it. The row comes back so, as the hit records that the library API and
 /// LOSAT Web hand out show it. An HSP without query letters (an ungapped HSP of length 0,
-/// `-window_size 0`) has no mask.
-fn query_row_masks(
+/// `-window_size 0`) has no mask. `subject` is the subject's row where the rows' Seq-ids match: a
+/// mask that misses the query's row and meets the subject's range goes to its columns
+/// (`x_FillLocList` takes the first row whose id matches, line RG-KB item 12d).
+fn query_row_masks<R: Fn(usize) -> bool>(
     row: String,
     ends: (i32, i32),
     frame: i8,
     query_masks: &[(i8, MaskSeek<u32>)],
+    subject: Option<crate::report::query_anchored::LocRow<'_, R>>,
     masks: &mut crate::report::query_anchored::HspMasks,
 ) -> String {
     let Some((_, seek)) = query_masks
@@ -1299,16 +1354,20 @@ fn query_row_masks(
     }
     let (first, last) = (ends.0.min(ends.1), ends.0.max(ends.1));
     let range = ((first - 1) as u32, (last - 1) as u32);
-    masks.add_meeting(seek, range.0, range.1, |from, to| (from, to, frame));
+    let also = subject.as_ref().map(|subject| subject.seq_range);
+    masks.add_meeting(seek, range.0, range.1, also, |from, to| (from, to, frame));
     let letters = row.as_bytes();
     masks.set_row_met(
         0,
         frame,
-        letters,
-        |column| letters[column] != b'-',
-        range,
-        frame > 0,
-        3,
+        crate::report::query_anchored::LocRow {
+            letters,
+            residue: |column: usize| letters[column] != b'-',
+            seq_range: range,
+            plus: frame > 0,
+            width: 3,
+        },
+        subject,
     );
     if masks.row(0).is_none() {
         return row;

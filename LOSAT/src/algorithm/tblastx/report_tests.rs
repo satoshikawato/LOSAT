@@ -59,6 +59,7 @@ fn rows_keep_the_seqalign_identities_of_their_hsps() {
         &code,
         &placements,
         &placements,
+        Default::default,
         None,
     );
     let counts: Vec<(usize, usize)> = rows
@@ -324,7 +325,15 @@ fn query_masks_convert_with_ncbis_frame_formulas() {
     // One `HspMasks` for the three rows, as the rows' builders keep one.
     let mut row_masks = crate::report::query_anchored::HspMasks::default();
     let mut plus = b"AAAAAAAAAA".to_vec();
-    assert!(query_row_masks(&mut plus, 1, 0, 29, &masks, &mut row_masks));
+    assert!(query_row_masks(
+        &mut plus,
+        1,
+        0,
+        29,
+        &masks,
+        None,
+        &mut row_masks
+    ));
     assert_eq!(&plus, b"AAaaaAAAAA");
     // Frame -1 residue i covers 0-based nucleotides 27-3i..29-3i: the mask 18-23 covers
     // residues 2 and 3 only.
@@ -335,6 +344,7 @@ fn query_masks_convert_with_ncbis_frame_formulas() {
         0,
         29,
         &masks,
+        None,
         &mut row_masks
     ));
     assert_eq!(&minus, b"AAaaAAAAAA");
@@ -346,6 +356,7 @@ fn query_masks_convert_with_ncbis_frame_formulas() {
         1,
         27,
         &masks,
+        None,
         &mut row_masks
     ));
     assert_eq!(row_masks.row(0), None);
@@ -362,7 +373,7 @@ fn row_masks_keep_the_order_of_the_shown_masks() {
     let mut row = b"AAAAAAAAAA".to_vec();
     let mut row_masks = crate::report::query_anchored::HspMasks::default();
     assert!(
-        query_row_masks(&mut row, -1, 0, 29, &masks, &mut row_masks),
+        query_row_masks(&mut row, -1, 0, 29, &masks, None, &mut row_masks),
         "masks meet the row"
     );
     assert_eq!(row_masks.row(0), Some((&[(2, 3, -1), (6, 7, -1)][..], -1)));
@@ -445,7 +456,7 @@ fn mask_seek_lowercases_the_letters_of_the_full_scan() {
             let mut full = vec![b'A'; ((high - low + 1) / 3) as usize];
             let mut seek = full.clone();
             lowercase_query_row_full_scan(&mut full, frame, low, high, &masks);
-            let met = query_row_masks(&mut seek, frame, low, high, &masks, &mut row_masks);
+            let met = query_row_masks(&mut seek, frame, low, high, &masks, None, &mut row_masks);
             assert_eq!(seek, full, "frame {frame} low {low} high {high}");
             // A lower-case letter has its mask (an empty range meets a row and shows none).
             assert!(met || !full.iter().any(u8::is_ascii_lowercase));

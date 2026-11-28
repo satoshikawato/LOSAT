@@ -354,6 +354,7 @@ fn the_pairwise_reads_are_those_of_the_writers_rows() {
         crate::algorithm::blastn::pairwise::QueryRecords::new(&queries, &query_input, &queries, 0),
         crate::algorithm::blastn::x_subject_store::SubjectLetters::new(&subjects, None),
         &masks,
+        crate::report::record::SubjectNames::Records(&subjects),
         false,
     );
     let rows = pairwise_hits(&hit_lists, &rows, None, None).unwrap();
@@ -496,6 +497,7 @@ fn ungapped_query_loc_read_order_matches_writer_for_lifted_and_class_n_hsps() {
         QueryRecords::new(&searched_queries, &query_input, &full_queries, 0),
         SubjectLetters::new(&subjects, None),
         &masks,
+        crate::report::record::SubjectNames::Records(&subjects),
         true,
     );
     let writer_rows = pairwise_hits(&shifted_lists, &rows_builder, None, None).unwrap();

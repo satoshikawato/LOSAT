@@ -32,7 +32,6 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::core::composition_adjustment::redo_alignment::EMatrixAdjustRule;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
-use crate::report::seqid::SeqId;
 use crate::report::serial::{write_query_to, SerialFormat};
 
 /// Writes the documents of every query of `hitlists` (indexed by query) to `writer`, each
@@ -117,11 +116,7 @@ pub(super) fn query_records_of<'a>(
         let s_idx = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
         let subject = subjects.len() as u32;
         subjects.push(SubjectRecord {
-            id: match (shown.parsed_subject(s_idx), shown.oid(s_idx)) {
-                (Some(parsed), _) => SeqId::Db(parsed.alignment_id()),
-                (None, Some(db_oid)) => SeqId::BlOrdId(db_oid),
-                (None, None) => SeqId::Local(&subject_records[s_idx].local_id),
-            },
+            id: shown.seq_id(s_idx, subject_records),
             searched_length: i32::try_from(subject_letters.length(s_idx))?,
             // A database's sequences have no subject remap (`RunRecord::remaps_subjects`).
             offset: i32::try_from(ranges.subjects.offset(s_idx))?,

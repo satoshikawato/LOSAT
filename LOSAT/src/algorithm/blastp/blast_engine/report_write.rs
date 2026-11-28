@@ -136,6 +136,40 @@ pub(super) struct ReportView<'a> {
     pub(super) prolog_only: bool,
 }
 
+impl<'a> ReportView<'a> {
+    /// The names of the reported subjects as the Seq-align and archive writers take them: a
+    /// database's ordinals with its OID map, definition and parsed ids, else the subject records.
+    fn subject_names(&self) -> crate::report::record::SubjectNames<'a> {
+        match (
+            self.listed_subjects.as_ref(),
+            self.pairwise_database.as_ref(),
+            self.database,
+        ) {
+            (Some(listed), Some(pairwise), Some(database)) => {
+                crate::report::record::SubjectNames::Database {
+                    ordinals: &listed.ordinals,
+                    oids: database.oid_map(),
+                    title: &pairwise.definition,
+                    parsed: self.listed_parsed,
+                }
+            }
+            _ => crate::report::record::SubjectNames::Records(self.subject_records),
+        }
+    }
+
+    /// The pairs of the outfmt 0 rows `rows` whose rows' Seq-ids match (the query's record and the
+    /// subject's Seq-align id, `seqid::relation::RowPairs`), whose masks `x_FillLocList` may place
+    /// through the other row (`set_row_masks`).
+    fn row_pairs(&self, rows: &[PairwiseHit]) -> crate::seqid::relation::RowPairs {
+        let names = self.subject_names();
+        crate::seqid::relation::RowPairs::of(
+            rows.iter().map(|row| (row.hit.q_idx, row.hit.s_idx)),
+            |q_idx| self.query_records[q_idx as usize].seq_id(),
+            |s_idx| names.seq_id(s_idx as usize),
+        )
+    }
+}
+
 /// Outfmt 8, 9 and 12: the Seq-annot of each query with alignments
 /// (`seqalign::write_blastp_seqalign`), as ASN.1 text, ASN.1 binary or JSON, flushed when written.
 ///
@@ -153,11 +187,6 @@ pub(super) fn write_seqalign(
         ranges,
         query_records,
         query_lengths,
-        database,
-        listed_subjects,
-        listed_parsed,
-        pairwise_database,
-        subject_records,
         hit_lists,
         engine_counts,
         ..
@@ -165,21 +194,7 @@ pub(super) fn write_seqalign(
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
     // The Seq-annot of each query with alignments (`seqalign`).
     let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
-    let subjects = match (
-        listed_subjects.as_ref(),
-        pairwise_database.as_ref(),
-        database,
-    ) {
-        (Some(listed), Some(pairwise), Some(database)) => {
-            crate::report::record::SubjectNames::Database {
-                ordinals: &listed.ordinals,
-                oids: database.oid_map(),
-                title: &pairwise.definition,
-                parsed: listed_parsed,
-            }
-        }
-        _ => crate::report::record::SubjectNames::Records(subject_records),
-    };
+    let subjects = view.subject_names();
     seqalign::write_blastp_seqalign(
         serial,
         // psiblast's own "Blast Type" in every round, and rpsblast's.
@@ -225,10 +240,6 @@ pub(super) fn write_archive(
         contexts,
         gapped_params,
         database,
-        listed_subjects,
-        listed_parsed,
-        pairwise_database,
-        subject_records,
         hit_lists,
         engine_counts,
         call_batches,
@@ -263,21 +274,7 @@ pub(super) fn write_archive(
         context
     };
     let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
-    let subject_names = match (
-        listed_subjects.as_ref(),
-        pairwise_database.as_ref(),
-        database,
-    ) {
-        (Some(listed), Some(pairwise), Some(database)) => {
-            crate::report::record::SubjectNames::Database {
-                ordinals: &listed.ordinals,
-                oids: database.oid_map(),
-                title: &pairwise.definition,
-                parsed: listed_parsed,
-            }
-        }
-        _ => crate::report::record::SubjectNames::Records(subject_records),
-    };
+    let subject_names = view.subject_names();
     let masks = result_query_masks(args.app, query_frames, &ranges.query_input.placements);
     let spans = batch_spans();
     let call = archive::ArchiveCall {
@@ -1049,10 +1046,12 @@ pub(super) fn write_pairwise(
                     if let Some(query_masks) = phi_query_masks.as_deref() {
                         if !rows.is_empty() {
                             let no_masks = Default::default();
+                            let pairs = report_view.row_pairs(&rows);
                             set_row_masks(
                                 &mut rows,
                                 Some(query_masks),
                                 [&no_masks, &no_masks],
+                                &pairs,
                                 None,
                             );
                         }
@@ -1169,10 +1168,12 @@ pub(super) fn write_pairwise(
             };
             let no_masks = Default::default();
             html_masks = args.html.is_some().then(Vec::new);
+            let pairs = report_view.row_pairs(&rows);
             set_row_masks(
                 rows.to_mut(),
                 query_masks.as_deref(),
                 [&lcase_masks, db_subject_masks.as_ref().unwrap_or(&no_masks)],
+                &pairs,
                 html_masks.as_mut(),
             );
         }

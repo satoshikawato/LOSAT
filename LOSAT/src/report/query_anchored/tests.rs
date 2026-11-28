@@ -36,6 +36,17 @@ fn sequence(name: &str) -> &'static [u8] {
         .expect("a probe sequence")
 }
 
+/// `Sequences::rows_match` of the probes: a probe's labels are its records' ids, which match where
+/// they are equal (one record as the query and a subject, `Hsps::set_query_bioseq`).
+pub(super) fn labels_match(sequences: &impl Sequences, a: SeqKey, b: SeqKey) -> bool {
+    let label = |seq| {
+        let mut out = Vec::new();
+        sequences.label(seq, &mut out);
+        out
+    };
+    a == b || label(a) == label(b)
+}
+
 /// A probe's sequences as the report shows them: `-subject` labels `Query_N` and `Subject_N`.
 struct Probe {
     query: &'static [u8],
@@ -46,6 +57,10 @@ struct Probe {
 }
 
 impl Sequences for Probe {
+    fn rows_match(&self, a: SeqKey, b: SeqKey) -> bool {
+        super::tests::labels_match(self, a, b)
+    }
+
     fn letters(&self, seq: SeqKey, from: u32, to: u32, out: &mut Vec<u8>) {
         let letters = match seq {
             SeqKey::Query => self.query,

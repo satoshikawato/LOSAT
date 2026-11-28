@@ -157,6 +157,21 @@ impl<'a> ShownSubjects<'a> {
             Self::Database { reported, .. } => reported.parsed_subject(rank),
         }
     }
+
+    /// The Seq-align id of the subject of rank `rank` (`records`, the subject set's records): its
+    /// parsed Seq-align id (`parsed_subject`), else the OID's `gnl|BL_ORD_ID|n` or the record's
+    /// local id.
+    pub(super) fn seq_id(
+        &self,
+        rank: usize,
+        records: &'a [FastaRecord],
+    ) -> crate::report::seqid::SeqId<'a> {
+        match (self.parsed_subject(rank), self.oid(rank)) {
+            (Some(parsed), _) => crate::report::seqid::SeqId::Db(parsed.alignment_id()),
+            (None, Some(oid)) => crate::report::seqid::SeqId::BlOrdId(oid),
+            (None, None) => crate::report::seqid::SeqId::Local(&records[rank].local_id),
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:759-835,1411-1458:
@@ -526,6 +541,7 @@ pub(super) fn render(
         Some(std::sync::Arc::new(pairwise_hits(
             query_records,
             subject_records,
+            shown,
             subject_letters,
             hitlists,
             scoring,
@@ -1460,6 +1476,9 @@ pub(super) fn hsp_scores(
 fn pairwise_hits(
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
+    // The subjects' Seq-align ids (`ShownSubjects::seq_id`), which `query_row_masks` compares with
+    // the query's.
+    shown: &ShownSubjects<'_>,
     subject_letters: SubjectLetters<'_>,
     hitlists: &[KappaResultHitList],
     scoring: LocalStageDScoring,
@@ -1510,6 +1529,13 @@ fn pairwise_hits(
             // The subject's letters, or (EXPERIMENT, LOSAT_X_TBNSTORE) its packed form, of which
             // the translations and the rows below read windows.
             let subject_seq = subject_letters.nt(oid);
+            // Whether the rows' Seq-ids match (`seqid::relation::row_matches`): a query mask that
+            // misses the query's row then goes through the subject's (`query_row_masks`).
+            let pair = !report_masks.is_empty()
+                && crate::seqid::relation::row_matches(
+                    query_records[q_idx].seq_id(),
+                    shown.seq_id(oid, subject_records),
+                );
             let mut translation = TargetTranslation::of(subject_seq, &code);
             for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
                 let hsp = &linked.hsp;
@@ -1558,11 +1584,24 @@ fn pairwise_hits(
                         if html_masks.is_some() {
                             row_masks.clear();
                         }
+                        // The subject's row in its record's nucleotides (`record_coordinates`).
+                        let s_shift = ranges.subjects.offset(oid) as u32;
+                        let subject_row = pair.then(|| crate::report::query_anchored::LocRow {
+                            letters: sseq.as_bytes(),
+                            residue: |column: usize| sseq.as_bytes()[column] != b'-',
+                            seq_range: (
+                                (s_start.min(s_end) - 1) as u32 + s_shift,
+                                (s_start.max(s_end) - 1) as u32 + s_shift,
+                            ),
+                            plus: frame > 0,
+                            width: 3,
+                        });
                         let qseq = query_row_masks(
                             qseq,
                             &report_masks,
-                            hsp.q_start,
-                            hsp.q_end,
+                            (hsp.q_start, hsp.q_end),
+                            ranges.queries.offset(q_idx) as u32,
+                            subject_row.filter(|row| !row.letters.is_empty()),
                             &mut row_masks,
                         )?;
                         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2120-2154
@@ -1883,34 +1922,42 @@ fn write_pairwise(
 /// and the Web adapter show it (and outfmt 0, which gets no lists, `query_anchored::output_seq`).
 /// A query with masks is a FASTA record, which holds no `-` (a PSSM query's search sets none).
 /// The subject row has no masks: it is a translation (width 3, a frame of ±1 to 3), and the
-/// subjects' masks have no frame (`anchored`), so NCBI shows none of them there.
-fn query_row_masks(
+/// subjects' masks have no frame (`anchored`), so NCBI shows none of them there. The masks and the
+/// row are placed in the query record's positions (`q_shift`, `-query_loc`'s start), which
+/// `x_FillLocList` compares with the subject's row `subject` (in its record's nucleotides, given
+/// where the rows' Seq-ids match): a mask that misses the query's row and meets the subject's goes
+/// to the subject row's columns (line RG-KB item 12d).
+fn query_row_masks<R: Fn(usize) -> bool>(
     row: String,
     report_masks: &[(usize, usize)],
-    q_start: i32,
-    q_end: i32,
+    (q_start, q_end): (i32, i32),
+    q_shift: u32,
+    subject: Option<crate::report::query_anchored::LocRow<'_, R>>,
     masks: &mut crate::report::query_anchored::HspMasks,
 ) -> Result<String> {
     if report_masks.is_empty() {
         return Ok(row);
     }
     let range = (
-        u32::try_from(q_start)?,
-        u32::try_from(q_end)?.saturating_sub(1),
+        u32::try_from(q_start)? + q_shift,
+        u32::try_from(q_end)?.saturating_sub(1) + q_shift,
     );
     let letters = row.as_bytes();
     masks.set_row(
         0,
         0,
-        letters,
-        |column| letters[column] != b'-',
-        range,
-        true,
-        1,
+        crate::report::query_anchored::LocRow {
+            letters,
+            residue: |column: usize| letters[column] != b'-',
+            seq_range: range,
+            plus: true,
+            width: 1,
+        },
+        subject,
         report_masks
             .iter()
             .filter(|&&(left, right)| left < right)
-            .map(|&(left, right)| (left as u32, right as u32 - 1, 0)),
+            .map(|&(left, right)| (left as u32 + q_shift, right as u32 - 1 + q_shift, 0)),
     );
     if masks.row(0).is_none() {
         return Ok(row);

@@ -255,28 +255,36 @@ impl<'a> SubjectNames<'a> {
     pub fn record(&self, index: usize, offset: usize, database_length: i32) -> SubjectRecord<'a> {
         match *self {
             SubjectNames::Records(records) => SubjectRecord {
-                id: records[index].seq_id(),
+                id: self.seq_id(index),
                 searched_length: records[index].seq().len() as i32,
                 offset: offset as i32,
                 use_this_seqid: &[],
             },
+            SubjectNames::Database { parsed, .. } => SubjectRecord {
+                id: self.seq_id(index),
+                searched_length: database_length,
+                offset: 0,
+                use_this_seqid: crate::report::db_subject::use_this_seqid(
+                    parsed.get(index).and_then(Option::as_deref),
+                ),
+            },
+        }
+    }
+
+    /// The Seq-align id of subject `index` (by rank for a database): a record's
+    /// (`FastaRecord::seq_id`), a database sequence's (`query_anchored::database_seq_id`).
+    pub(crate) fn seq_id(&self, index: usize) -> SeqId<'a> {
+        match *self {
+            SubjectNames::Records(records) => records[index].seq_id(),
             SubjectNames::Database {
                 ordinals,
                 oids,
                 parsed,
                 ..
-            } => {
-                let subject = parsed.get(index).and_then(Option::as_deref);
-                SubjectRecord {
-                    id: match subject {
-                        Some(subject) => SeqId::Db(subject.alignment_id()),
-                        None => SeqId::BlOrdId(oids.oid(ordinals[index])),
-                    },
-                    searched_length: database_length,
-                    offset: 0,
-                    use_this_seqid: crate::report::db_subject::use_this_seqid(subject),
-                }
-            }
+            } => crate::report::query_anchored::database_seq_id(
+                parsed.get(index).and_then(Option::as_deref),
+                oids.oid(ordinals[index]),
+            ),
         }
     }
 }

@@ -2872,7 +2872,8 @@ fn query_nomask_sequence(ctx: &QueryContext) -> &[u8] {
 /// (the record's lower-case runs with `-lcase_masking`, `x_soft_subject::x_subject_masks`; a
 /// masked database search's masks, `db_mask_search::shown_db_subject_masks`), at the columns of
 /// `x_FillLocList` (`query_anchored::fill_row_loc_list`: a mask position outside the aligned range
-/// is the row's first or last residue), which `x_OutputSeq` puts in lower case when it writes the
+/// is the row's first or last residue; a mask that misses its own row goes through the other where
+/// the pair's Seq-ids match, `pairs`), which `x_OutputSeq` puts in lower case when it writes the
 /// row. The lists are not kept (`query_anchored::output_seq`): one `HspMasks` serves every row,
 /// except under `-html`, where each HSP's go to `html_masks` in the order of `hits`
 /// (`HspMasks::copy_rows`, `report::pairwise::HtmlRowMasks`: their spans).
@@ -2880,71 +2881,86 @@ fn set_row_masks(
     hits: &mut [PairwiseHit],
     query_masks: Option<&[Vec<(i32, i32)>]>,
     subject_masks: [&std::collections::HashMap<(u32, u32), Vec<(i32, i32)>>; 2],
+    pairs: &crate::seqid::relation::RowPairs,
     mut html_masks: Option<&mut Vec<crate::report::query_anchored::HspMasks>>,
 ) {
+    use crate::report::query_anchored::LocRow;
     let mut masks = crate::report::query_anchored::HspMasks::default();
     for hit in hits {
         if html_masks.is_some() {
             masks.clear();
         }
         let query = query_masks.map_or(&[][..], |masks| &masks[hit.hit.q_idx as usize][..]);
-        // A row without letters (`-ungapped`'s HSP of length 0, whose range ends before it
-        // starts) has no mask.
-        if let Some(shown) = hit
-            .query_seq
-            .as_mut()
-            .filter(|row| !query.is_empty() && !row.is_empty())
-        {
-            let mut letters = std::mem::take(shown).into_bytes();
-            let row = &letters;
-            masks.set_row(
-                0,
-                0,
-                row,
-                // A `-` is a residue at a column of `query_stored_gaps` (a PSSM query's gap
-                // residue).
-                |column| {
-                    row[column] != b'-'
-                        || hit
-                            .query_stored_gaps
-                            .binary_search(&(column as u32))
-                            .is_ok()
-                },
-                (hit.hit.q_start as u32 - 1, hit.hit.q_end as u32 - 1),
-                true,
-                1,
-                query.iter().map(|&(from, to)| (from as u32, to as u32, 0)),
-            );
-            masks.lower_row(0, &mut letters);
-            *shown = String::from_utf8(letters).expect("ASCII alignment row");
-        }
         let key = (hit.hit.q_idx, hit.hit.s_idx);
         let mut runs = subject_masks
             .iter()
             .filter_map(|masks| masks.get(&key))
             .flatten()
             .peekable();
-        if let Some(shown) = hit
-            .subject_seq
-            .as_mut()
-            .filter(|row| !row.is_empty() && runs.peek().is_some())
-        {
-            let mut letters = std::mem::take(shown).into_bytes();
-            let row = &letters;
+        // A row without letters (`-ungapped`'s HSP of length 0, whose range ends before it
+        // starts) has no mask.
+        let query_row = hit.query_seq.as_deref().filter(|row| !row.is_empty());
+        let subject_row = hit.subject_seq.as_deref().filter(|row| !row.is_empty());
+        let (query_stored, subject_stored) = (&hit.query_stored_gaps, &hit.subject_stored_gaps);
+        let query_loc = query_row.map(|row| LocRow {
+            letters: row.as_bytes(),
+            // A `-` is a residue at a column of `query_stored_gaps` (a PSSM query's gap
+            // residue).
+            residue: move |column: usize| {
+                row.as_bytes()[column] != b'-'
+                    || query_stored.binary_search(&(column as u32)).is_ok()
+            },
+            seq_range: (hit.hit.q_start as u32 - 1, hit.hit.q_end as u32 - 1),
+            plus: true,
+            width: 1,
+        });
+        let subject_loc = subject_row.map(|row| LocRow {
+            letters: row.as_bytes(),
             // A stored `-` is a residue of the subject (`PairwiseHit::subject_stored_gaps`).
-            let stored = &hit.subject_stored_gaps;
-            masks.set_row(
-                1,
-                0,
-                row,
-                |column| row[column] != b'-' || stored.contains(&(column as u32)),
-                (hit.hit.s_start as u32 - 1, hit.hit.s_end as u32 - 1),
-                true,
-                1,
-                runs.map(|&(from, to)| (from as u32, to as u32, 0)),
-            );
-            masks.lower_row(1, &mut letters);
-            *shown = String::from_utf8(letters).expect("ASCII alignment row");
+            residue: move |column: usize| {
+                row.as_bytes()[column] != b'-' || subject_stored.contains(&(column as u32))
+            },
+            seq_range: (hit.hit.s_start as u32 - 1, hit.hit.s_end as u32 - 1),
+            plus: true,
+            width: 1,
+        });
+        let pair = pairs.matches(key.0, key.1);
+        let set_query = match query_loc {
+            Some(own) if !query.is_empty() => {
+                masks.set_row(
+                    0,
+                    0,
+                    own,
+                    subject_loc.filter(|_| pair),
+                    query.iter().map(|&(from, to)| (from as u32, to as u32, 0)),
+                );
+                true
+            }
+            _ => false,
+        };
+        let set_subject = match subject_loc {
+            Some(own) if runs.peek().is_some() => {
+                masks.set_row(
+                    1,
+                    0,
+                    own,
+                    query_loc.filter(|_| pair),
+                    runs.map(|&(from, to)| (from as u32, to as u32, 0)),
+                );
+                true
+            }
+            _ => false,
+        };
+        let rows = [
+            (0, set_query, &mut hit.query_seq),
+            (1, set_subject, &mut hit.subject_seq),
+        ];
+        for (row, set, shown) in rows {
+            if let Some(shown) = shown.as_mut().filter(|_| set) {
+                let mut letters = std::mem::take(shown).into_bytes();
+                masks.lower_row(row, &mut letters);
+                *shown = String::from_utf8(letters).expect("ASCII alignment row");
+            }
         }
         if let Some(table) = html_masks.as_deref_mut() {
             table.push(masks.copy_rows());

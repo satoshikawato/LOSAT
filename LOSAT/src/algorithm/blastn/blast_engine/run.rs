@@ -5543,6 +5543,7 @@ fn post_process_hits_and_write(
                 subject: subject_masks.as_deref(),
                 database: database_masks.as_deref(),
             },
+            report_write::subject_names_of(report),
             report.ungapped,
         )
     });

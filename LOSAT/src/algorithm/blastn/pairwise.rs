@@ -10,7 +10,7 @@ use crate::common::GapEditOp;
 #[cfg(test)]
 use crate::core::blast_encoding::encode_iupac_to_blastna;
 use crate::report::pairwise::PairwiseHit;
-use crate::report::query_anchored::MaskSeek;
+use crate::report::query_anchored::{LocRow, MaskSeek};
 use crate::stats::{
     compute_karlin_params_ungapped, score_freq_profile_from_probabilities, KarlinParams,
 };
@@ -112,6 +112,7 @@ impl<'a> Rows<'a> {
         queries: QueryRecords<'a>,
         subjects: SubjectLetters<'a>,
         masks: &DisplayMasks<'_>,
+        subject_names: crate::report::record::SubjectNames<'a>,
         ungapped: bool,
     ) -> Self {
         let query_masks: Vec<Vec<MaskedInterval>> = masks
@@ -140,6 +141,7 @@ impl<'a> Rows<'a> {
             subjects,
             query_masks,
             subject_masks,
+            subject_names,
             ungapped,
         }
     }
@@ -282,6 +284,8 @@ pub(crate) struct Rows<'a> {
     /// database sequence with `-db_soft_mask`, its stored masks as stored
     /// (`DisplayMasks::database`).
     subject_masks: Option<Vec<Vec<MaskedInterval>>>,
+    /// The subjects' Seq-align ids, which `x_FillLocList` compares with the queries' (`list`).
+    subject_names: crate::report::record::SubjectNames<'a>,
     /// Whether the search is ungapped (`-ungapped`, Dense-diag Seq-aligns).
     ungapped: bool,
 }
@@ -323,6 +327,23 @@ impl Rows<'_> {
                 &subject_masks[s_idx],
                 &hsp_list.hsps,
             )))
+        });
+        // Whether the rows' Seq-ids match (`seqid::relation::row_matches`, the query's record and
+        // the subject's Seq-align id): `x_FillLocList` then places a mask that misses its own row
+        // through the other (`set_query_row_masks`), asked only of a list with masks.
+        let pair = hsp_list.hsps.first().is_some_and(|hsp| {
+            let (q_idx, s_idx) = (hsp.q_idx as usize, hsp.s_idx as usize);
+            (list_subject_masks.is_some()
+                || self
+                    .query_masks
+                    .get(q_idx)
+                    .is_some_and(|masks| !masks.is_empty()))
+                && queries.searched().get(q_idx).is_some_and(|query| {
+                    crate::seqid::relation::row_matches(
+                        query.seq_id(),
+                        self.subject_names.seq_id(s_idx),
+                    )
+                })
         });
         for hsp in &hsp_list.hsps {
             let query = queries
@@ -396,15 +417,24 @@ impl Rows<'_> {
             // API and the Web adapter; the lists are left to the next HSP
             // (`query_anchored::output_seq`).
             masks.clear();
+            let step = if hsp.s_start > hsp.s_end { -1 } else { 1 };
             set_query_row_masks(
                 masks,
                 &query_row,
                 hsp.q_start,
                 &self.query_masks[hsp.q_idx as usize],
+                pair.then(|| loc_row(&subject_row, hsp.s_start, step))
+                    .flatten(),
             );
             if let Some(subject_masks) = &list_subject_masks {
-                let step = if hsp.s_start > hsp.s_end { -1 } else { 1 };
-                set_subject_row_masks(masks, &subject_row, hsp.s_start, step, subject_masks);
+                set_subject_row_masks(
+                    masks,
+                    &subject_row,
+                    hsp.s_start,
+                    step,
+                    subject_masks,
+                    pair.then(|| loc_row(&query_row, hsp.q_start, 1)).flatten(),
+                );
             }
             masks.lower_row(0, &mut query_row);
             masks.lower_row(1, &mut subject_row);
@@ -702,36 +732,64 @@ fn row_range(letters: &[u8], first: usize, step: isize) -> Option<(usize, usize)
     ))
 }
 
+/// The row `letters`, whose residues lie at the positions from `first` (1-based) by `step`, as
+/// `x_FillLocList` places masks on it (`query_anchored::LocRow`); `None` for a row without
+/// residues.
+fn loc_row(
+    letters: &[u8],
+    first: usize,
+    step: isize,
+) -> Option<LocRow<'_, impl Fn(usize) -> bool + Copy + '_>> {
+    let (low, high) = row_range(letters, first, step)?;
+    Some(LocRow {
+        letters,
+        residue: move |column: usize| letters[column] != b'-',
+        seq_range: (low as u32, high as u32),
+        plus: step > 0,
+        width: 1,
+    })
+}
+
 /// Sets the query's row of `masks` (`HspMasks::set_row`) to the masks of `shown` that meet the
-/// row `letters`, whose residues lie at the positions from `first` (1-based) on. The query's
-/// `shown` are disjoint and in order (`merged`), so the masks that can meet the row's span are
-/// found by binary search.
-fn set_query_row_masks(
+/// row `letters`, whose residues lie at the positions from `first` (1-based) on, or the subject's
+/// row `subject` (given where the rows' Seq-ids match). The query's `shown` are disjoint and in
+/// order (`merged`), so the masks that can meet a row's span are found by binary search; those
+/// between the two rows' spans meet neither row and stay off the list (`fill_row_loc_list`).
+fn set_query_row_masks<R: Fn(usize) -> bool>(
     masks: &mut crate::report::query_anchored::HspMasks,
     letters: &[u8],
     first: usize,
     shown: &[MaskedInterval],
+    subject: Option<LocRow<'_, R>>,
 ) {
     if shown.is_empty() {
         return;
     }
-    let Some((low, high)) = row_range(letters, first, 1) else {
+    let Some(own) = loc_row(letters, first, 1) else {
         return;
     };
-    let candidates = &shown[shown.partition_point(|mask| mask.end <= low)
-        ..shown.partition_point(|mask| mask.start <= high)];
+    let meeting = |(low, high): (u32, u32)| {
+        shown.partition_point(|mask| mask.end <= low as usize)
+            ..shown.partition_point(|mask| mask.start <= high as usize)
+    };
+    let mut candidates = meeting(own.seq_range);
+    if let Some(subject) = &subject {
+        let other = meeting(subject.seq_range);
+        if candidates.is_empty() {
+            candidates = other;
+        } else if !other.is_empty() {
+            candidates = candidates.start.min(other.start)..candidates.end.max(other.end);
+        }
+    }
     if candidates.is_empty() {
         return;
     }
     masks.set_row(
         0,
         0,
-        letters,
-        |column| letters[column] != b'-',
-        (low as u32, high as u32),
-        true,
-        1,
-        super::anchored::shown_masks(candidates),
+        own,
+        subject,
+        super::anchored::shown_masks(&shown[candidates]),
     );
 }
 
@@ -745,27 +803,27 @@ fn subject_mask_seek(regions: impl Iterator<Item = MaskedInterval>) -> MaskSeek<
 
 /// Sets the subject's row of `masks` (`HspMasks::set_row`) to the masks of `shown`
 /// (`subject_mask_seek`) that meet the row `letters`, whose residues lie at the positions from
-/// `first` (1-based) by `step`, in the order of the subject's list.
-fn set_subject_row_masks(
+/// `first` (1-based) by `step`, or the query's row `query` (given where the rows' Seq-ids match,
+/// which `x_FillLocList` tries first), in the order of the subject's list.
+fn set_subject_row_masks<R: Fn(usize) -> bool>(
     masks: &mut crate::report::query_anchored::HspMasks,
     letters: &[u8],
     first: usize,
     step: isize,
     shown: &MaskSeek<usize>,
+    query: Option<LocRow<'_, R>>,
 ) {
-    let Some((low, high)) = row_range(letters, first, step) else {
+    let Some(own) = loc_row(letters, first, step) else {
         return;
     };
-    masks.add_meeting(shown, low, high, |from, to| (from as u32, to as u32, 0));
-    masks.set_row_met(
-        1,
-        0,
-        letters,
-        |column| letters[column] != b'-',
-        (low as u32, high as u32),
-        step > 0,
-        1,
-    );
+    let (low, high) = own.seq_range;
+    let also = query
+        .as_ref()
+        .map(|query| (query.seq_range.0 as usize, query.seq_range.1 as usize));
+    masks.add_meeting(shown, low as usize, high as usize, also, |from, to| {
+        (from as u32, to as u32, 0)
+    });
+    masks.set_row_met(1, 0, own, query);
 }
 
 /// The ungapped Karlin-Altschul block of a blastn query, from its composition; `None`

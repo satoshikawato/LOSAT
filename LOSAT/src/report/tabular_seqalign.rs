@@ -650,6 +650,11 @@ impl Sequences for RowLetters<'_> {
     fn label(&self, _seq: SeqKey, _out: &mut Vec<u8>) {}
 
     fn masks(&self, _seq: SeqKey, _out: &mut Vec<crate::report::query_anchored::Mask>) {}
+
+    // A row of a Seq-align file shows no masks (`masks`), so `fill_loc_list` asks no relation.
+    fn rows_match(&self, a: SeqKey, b: SeqKey) -> bool {
+        a == b
+    }
 }
 
 #[cfg(test)]

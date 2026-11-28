@@ -1,8 +1,9 @@
 //! Outfmt 0's masks of an HSP's row (`fill_row_loc_list`) against `fill_loc_list` over the HSP's
-//! `CAlnMap` (line RG, item T4a1).
+//! `CAlnMap` (line RG, item T4a1; through the other row where the rows' Seq-ids match, line RG-KB
+//! item 12d).
 
 use super::aln_vec::{AlnMap, MapBuffers};
-use super::{fill_loc_list, fill_row_loc_list, Denseg, Mask, SeqKey};
+use super::{fill_loc_list, fill_row_loc_list, Denseg, LocRow, Mask, SeqKey, NO_ROW};
 
 /// A small xorshift generator: the cases are the same on every run.
 struct Rng(u64);
@@ -73,51 +74,105 @@ fn random_denseg(rng: &mut Rng) -> Denseg {
     }
 }
 
+/// Masks inside, outside and across the ends of the row `lo..=hi`, adjacent, of one position, at
+/// its first position (column 0 or the row's first residue), with frames, added to `masks`.
+fn random_masks(rng: &mut Rng, (lo, hi): (u32, u32), masks: &mut Vec<Mask>) {
+    for _ in 0..1 + rng.below(4) {
+        let from = (lo + rng.below(hi - lo + 12)).saturating_sub(6);
+        let to = from + rng.below(8);
+        masks.push((from, to, rng.below(3) as i8 - 1));
+    }
+    if let Some(&(_, to, frame)) = masks.last() {
+        masks.push((to + 1, to + 1 + rng.below(3), frame));
+    }
+    masks.push((lo, lo, 0));
+}
+
+/// The letters of row `row` of `ds`: `A` for a residue's column, `-` for a gap's.
+fn row_letters(ds: &Denseg, row: usize) -> Vec<u8> {
+    (0..ds.lens.len())
+        .flat_map(|s| {
+            let letter = if ds.starts[s * 2 + row] >= 0 {
+                b'A'
+            } else {
+                b'-'
+            };
+            std::iter::repeat_n(letter, ds.lens[s] as usize)
+        })
+        .collect()
+}
+
 #[test]
 fn row_loc_list_matches_fill_loc_list() {
     let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
     let mut buffers = MapBuffers::default();
     // One buffer of gap runs and one list for every row, as a reused `HspMasks` keeps them.
-    let (mut gaps, mut list) = (Vec::new(), Vec::new());
+    let (mut gaps, mut list) = ([Vec::new(), Vec::new()], Vec::new());
     for case in 0..20_000 {
         let ds = random_denseg(&mut rng);
         let map = AlnMap::new_in(&ds, &mut buffers).unwrap();
         for row in 0..2 {
             let (lo, hi) = (map.seq_start(row), map.seq_stop(row));
-            // Masks inside, outside and across the row's ends, adjacent, of one position, at
-            // its first position (column 0 or the row's first residue), with frames.
             let mut masks: Vec<Mask> = Vec::new();
-            for _ in 0..1 + rng.below(4) {
-                let from = (lo + rng.below(hi - lo + 12)).saturating_sub(6);
-                let to = from + rng.below(8);
-                masks.push((from, to, rng.below(3) as i8 - 1));
-            }
-            if let Some(&(_, to, frame)) = masks.last() {
-                masks.push((to + 1, to + 1 + rng.below(3), frame));
-            }
-            masks.push((lo, lo, 0));
-            let letters: Vec<u8> = (0..ds.lens.len())
-                .flat_map(|s| {
-                    let letter = if ds.starts[s * 2 + row] >= 0 {
-                        b'A'
-                    } else {
-                        b'-'
-                    };
-                    std::iter::repeat_n(letter, ds.lens[s] as usize)
-                })
-                .collect();
+            random_masks(&mut rng, (lo, hi), &mut masks);
+            let letters = row_letters(&ds, row);
+            let own = LocRow {
+                letters: &letters,
+                residue: |column: usize| letters[column] != b'-',
+                seq_range: (lo, hi),
+                plus: map.is_positive_strand(row),
+                width: map.width(row),
+            };
             list.clear();
             fill_row_loc_list(
-                &letters,
-                |column| letters[column] != b'-',
-                (lo, hi),
-                map.is_positive_strand(row),
-                map.width(row),
+                Some(&own),
+                NO_ROW.as_ref(),
                 masks.iter().copied(),
                 &mut gaps,
                 &mut list,
             );
-            let expected = fill_loc_list(&map, map.seq_key(row), None, &masks);
+            // The rows of two sequences whose ids do not match.
+            let expected = fill_loc_list(&map, map.seq_key(row), |a, b| a == b, &masks);
+            assert_eq!(list, expected, "case {case} row {row} {masks:?}");
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4292-4338
+// The rows of a pair whose Seq-ids match (`seqid::relation::RowPairs`): each row's masks go to the
+// first of the two rows, in the rows' order, whose range they meet; `fill_row_loc_list` with the
+// query's row first and the subject's second against `fill_loc_list` over the HSP's map with every
+// row matching every mask, for the masks of each row.
+#[test]
+fn pair_loc_list_matches_fill_loc_list() {
+    let mut rng = Rng(0x5851_f42d_4c95_7f2d);
+    let mut buffers = MapBuffers::default();
+    let (mut gaps, mut list) = ([Vec::new(), Vec::new()], Vec::new());
+    for case in 0..20_000 {
+        let ds = random_denseg(&mut rng);
+        let map = AlnMap::new_in(&ds, &mut buffers).unwrap();
+        let letters = &[row_letters(&ds, 0), row_letters(&ds, 1)];
+        let rows = [0, 1].map(|row| LocRow {
+            letters: &letters[row],
+            residue: move |column: usize| letters[row][column] != b'-',
+            seq_range: (map.seq_start(row), map.seq_stop(row)),
+            plus: map.is_positive_strand(row),
+            width: map.width(row),
+        });
+        for row in 0..2 {
+            // Masks about both rows' ranges, in the coordinates of either.
+            let mut masks: Vec<Mask> = Vec::new();
+            random_masks(&mut rng, rows[row].seq_range, &mut masks);
+            random_masks(&mut rng, rows[1 - row].seq_range, &mut masks);
+            list.clear();
+            fill_row_loc_list(
+                Some(&rows[0]),
+                Some(&rows[1]),
+                masks.iter().copied(),
+                &mut gaps,
+                &mut list,
+            );
+            let expected = fill_loc_list(&map, map.seq_key(row), |_, _| true, &masks);
             assert_eq!(list, expected, "case {case} row {row} {masks:?}");
         }
     }

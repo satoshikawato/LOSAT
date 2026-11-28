@@ -158,8 +158,10 @@ pub(super) fn x_scan(
 pub(super) fn x_set_subject_row_masks(
     hits: &mut [PairwiseHit],
     kept: &std::collections::HashMap<(u32, u32), Vec<(i32, i32)>>,
+    pairs: &crate::seqid::relation::RowPairs,
     mut html_masks: Option<&mut Vec<crate::report::query_anchored::HspMasks>>,
 ) {
+    use crate::report::query_anchored::LocRow;
     let mut masks = crate::report::query_anchored::HspMasks::default();
     for (index, hit) in hits.iter_mut().enumerate() {
         let Some(runs) = kept.get(&(hit.hit.q_idx, hit.hit.s_idx)) else {
@@ -172,14 +174,35 @@ pub(super) fn x_set_subject_row_masks(
         let mut letters = std::mem::take(row).into_bytes();
         // A stored `-` is a residue of the subject (`PairwiseHit::subject_stored_gaps`, in order).
         let stored = &hit.subject_stored_gaps;
+        // Where the rows' Seq-ids match, `x_FillLocList` tries the query's row first: its
+        // nucleotides from the first to the last, three a residue, on the frame's strand.
+        let query = hit
+            .query_seq
+            .as_deref()
+            .filter(|row| !row.is_empty() && pairs.matches(hit.hit.q_idx, hit.hit.s_idx))
+            .map(|row| LocRow {
+                letters: row.as_bytes(),
+                residue: |column: usize| row.as_bytes()[column] != b'-',
+                seq_range: (
+                    hit.hit.q_start.min(hit.hit.q_end) as u32 - 1,
+                    hit.hit.q_start.max(hit.hit.q_end) as u32 - 1,
+                ),
+                plus: hit.query_frame.is_none_or(|frame| frame > 0),
+                width: 3,
+            });
         masks.set_row(
             1,
             0,
-            &letters,
-            |column| letters[column] != b'-' || stored.binary_search(&(column as u32)).is_ok(),
-            (hit.hit.s_start as u32 - 1, hit.hit.s_end as u32 - 1),
-            true,
-            1,
+            LocRow {
+                letters: &letters,
+                residue: |column: usize| {
+                    letters[column] != b'-' || stored.binary_search(&(column as u32)).is_ok()
+                },
+                seq_range: (hit.hit.s_start as u32 - 1, hit.hit.s_end as u32 - 1),
+                plus: true,
+                width: 1,
+            },
+            query,
             runs.iter().map(|&(from, to)| (from as u32, to as u32, 0)),
         );
         masks.lower_row(1, &mut letters);

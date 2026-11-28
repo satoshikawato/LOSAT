@@ -53,6 +53,25 @@ pub(crate) enum SeqalignSubjects<'a> {
     },
 }
 
+impl<'a> SeqalignSubjects<'a> {
+    /// The Seq-align id of subject `s_idx`: a record's (`FastaRecord::seq_id`), a database
+    /// sequence's (`query_anchored::database_seq_id`).
+    pub(crate) fn seq_id(&self, s_idx: usize) -> SeqId<'a> {
+        match self {
+            Self::Records { records, .. } => records[s_idx].seq_id(),
+            Self::Database {
+                ordinals,
+                oids,
+                parsed,
+                ..
+            } => crate::report::query_anchored::database_seq_id(
+                parsed.get(s_idx).and_then(Option::as_deref),
+                oids.oid(ordinals[s_idx]),
+            ),
+        }
+    }
+}
+
 /// The report records of one query's HSPs (`hits`, in report order, with their engine counts):
 /// one subject record per run of HSPs of a subject and one HSP record per HSP, replacing the
 /// contents of `subject_records` and `hsp_records`. The Seq-annot formats (outfmt 8, 9, 12) and
@@ -83,23 +102,14 @@ pub(crate) fn query_records_of<'a>(
                     offset: i32::try_from(placements.offset(s_idx))?,
                     use_this_seqid: &[],
                 },
-                SeqalignSubjects::Database {
-                    ordinals,
-                    oids,
-                    parsed,
-                    ..
-                } => {
-                    let subject = parsed.get(s_idx).and_then(Option::as_deref);
-                    SubjectRecord {
-                        id: match subject {
-                            Some(subject) => SeqId::Db(subject.alignment_id()),
-                            None => SeqId::BlOrdId(oids.oid(ordinals[s_idx])),
-                        },
-                        searched_length: i32::try_from(subject_letters.length(s_idx))?,
-                        offset: 0,
-                        use_this_seqid: crate::report::db_subject::use_this_seqid(subject),
-                    }
-                }
+                SeqalignSubjects::Database { parsed, .. } => SubjectRecord {
+                    id: subjects.seq_id(s_idx),
+                    searched_length: i32::try_from(subject_letters.length(s_idx))?,
+                    offset: 0,
+                    use_this_seqid: crate::report::db_subject::use_this_seqid(
+                        parsed.get(s_idx).and_then(Option::as_deref),
+                    ),
+                },
             });
         }
         hsp_records.push(HspRecord {

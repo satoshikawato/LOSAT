@@ -793,7 +793,10 @@ pub(crate) fn xml_query_masks(
 /// lists, `query_anchored::output_seq`). `false` when no mask meets the row. With
 /// `-query_loc` a mask's label is the frame of the searched letters, which can differ from the
 /// frame the record gives the same letters: NCBI then shows a mask of another frame on the row
-/// (`locFrame` equal to `frame`), and so does LOSAT.
+/// (`locFrame` equal to `frame`), and so does LOSAT. `subject` is the subject's row where its
+/// Seq-id matches the query's (`seqid::relation::RowPairs`): a mask that misses the query's row
+/// and meets the subject's range goes to the subject row's columns (`x_FillLocList` takes the
+/// first row whose id matches, line RG-KB item 12d).
 ///
 /// The scan of a frame's ranges (`MaskSeek::for_each_meeting`; graduated 2026-10-27, the switch
 /// was `LOSAT_X_TBXMASKSEEK`) starts at the first range whose end, or the end of a range before
@@ -808,21 +811,34 @@ fn query_row_masks(
     low: i32,
     high: i32,
     masks: &[FrameMasks],
+    subject: Option<SubjectRow<'_>>,
     row_masks: &mut crate::report::query_anchored::HspMasks,
 ) -> bool {
+    let also = subject.map(|subject| (subject.low, subject.high));
     for frame_masks in masks.iter().filter(|masks| masks.frame == frame) {
-        row_masks.add_meeting(&frame_masks.seek, low, high, |from, to| {
+        row_masks.add_meeting(&frame_masks.seek, low, high, also, |from, to| {
             (from.max(0) as u32, to.max(0) as u32, frame)
         });
     }
+    // A row of TBLASTX's ungapped HSP holds a residue in every column.
+    let residue = |_: usize| true;
     row_masks.set_row_met(
         0,
         frame,
-        row,
-        |_| true,
-        (low.max(0) as u32, high.max(0) as u32),
-        frame > 0,
-        3,
+        crate::report::query_anchored::LocRow {
+            letters: row,
+            residue,
+            seq_range: (low.max(0) as u32, high.max(0) as u32),
+            plus: frame > 0,
+            width: 3,
+        },
+        subject.map(|subject| crate::report::query_anchored::LocRow {
+            letters: subject.letters,
+            residue,
+            seq_range: (subject.low.max(0) as u32, subject.high.max(0) as u32),
+            plus: subject.plus,
+            width: 3,
+        }),
     );
     if row_masks.row(0).is_none() {
         return false;
@@ -858,6 +874,7 @@ pub(crate) fn pairwise_hits(
     db_code: &GeneticCode,
     query_placements: &Placements,
     subject_placements: &Placements,
+    pairs: impl FnOnce() -> crate::seqid::relation::RowPairs,
     mut html_masks: Option<&mut Vec<crate::report::query_anchored::HspMasks>>,
 ) -> Vec<PairwiseHit> {
     let rows = PairwiseRows::new(
@@ -869,6 +886,7 @@ pub(crate) fn pairwise_hits(
         db_code,
         query_placements,
         subject_placements,
+        pairs,
     );
     debug_assert!(seqalign_identities.is_none_or(|identities| identities.len() == hits.len()));
     let mut window = Vec::new();
@@ -944,6 +962,31 @@ pub(crate) fn set_row_positives(hits: &mut [PairwiseHit], matrix: ScoringMatrix)
     }
 }
 
+/// The pairs of the HSPs `hits` whose rows' Seq-ids match (`seqid::relation::RowPairs`: the query's
+/// record and the subject's Seq-align id, `subjects`), whose query masks `x_FillLocList` may
+/// place through the subject's row (`query_row_masks`).
+pub(crate) fn row_pairs(
+    hits: &[TblastxHsp],
+    queries: &[FastaRecord],
+    subjects: &super::seqalign::SeqalignSubjects<'_>,
+) -> crate::seqid::relation::RowPairs {
+    crate::seqid::relation::RowPairs::of(
+        hits.iter().map(|hsp| (hsp.hit.q_idx, hsp.hit.s_idx)),
+        |q_idx| queries[q_idx as usize].seq_id(),
+        |s_idx| subjects.seq_id(s_idx as usize),
+    )
+}
+
+/// The subject's row of an HSP whose Seq-ids match (`query_row_masks`): its letters, its first and
+/// last nucleotide (0-based, in the record) and its strand.
+#[derive(Clone, Copy)]
+struct SubjectRow<'a> {
+    letters: &'a [u8],
+    low: i32,
+    high: i32,
+    plus: bool,
+}
+
 /// The shown SEG masks of one frame of a query (`shown_query_masks`), arranged for the scans of
 /// the rows (`query_anchored::MaskSeek`, which holds each mask's place in the frame's shown list).
 struct FrameMasks {
@@ -971,6 +1014,9 @@ pub(crate) struct PairwiseRows<'a> {
     db_code: &'a GeneticCode,
     query_placements: &'a Placements,
     subject_placements: &'a Placements,
+    /// The pairs whose rows' Seq-ids match (`query_row_masks`; none asked when no query shows a
+    /// mask).
+    pairs: crate::seqid::relation::RowPairs,
 }
 
 impl<'a> PairwiseRows<'a> {
@@ -984,6 +1030,7 @@ impl<'a> PairwiseRows<'a> {
         db_code: &'a GeneticCode,
         query_placements: &'a Placements,
         subject_placements: &'a Placements,
+        pairs: impl FnOnce() -> crate::seqid::relation::RowPairs,
     ) -> Self {
         let query_masks: Vec<Vec<FrameMasks>> = query_stats
             .iter()
@@ -1000,6 +1047,11 @@ impl<'a> PairwiseRows<'a> {
                 .collect()
             })
             .collect();
+        let pairs = if query_masks.iter().all(Vec::is_empty) {
+            Default::default()
+        } else {
+            pairs()
+        };
         Self {
             queries,
             subjects,
@@ -1009,6 +1061,7 @@ impl<'a> PairwiseRows<'a> {
             db_code,
             query_placements,
             subject_placements,
+            pairs,
         }
     }
 
@@ -1059,12 +1112,22 @@ impl<'a> PairwiseRows<'a> {
             record_frame(hsp.subject_frame > 0, hit.s_start - 1, subject_length) as i8;
         // The row holds its masks in lower case; the lists are left to the next row
         // (`query_anchored::output_seq`).
+        let subject = self
+            .pairs
+            .matches(q_idx as u32, s_idx as u32)
+            .then(|| SubjectRow {
+                letters: &subject_row,
+                low: hit.s_start.min(hit.s_end) as i32 - 1,
+                high: hit.s_start.max(hit.s_end) as i32 - 1,
+                plus: hsp.subject_frame > 0,
+            });
         query_row_masks(
             &mut query_row,
             query_frame,
             low,
             high,
             &self.query_masks[q_idx],
+            subject,
             row_masks,
         );
         hit.num_ident = identities;

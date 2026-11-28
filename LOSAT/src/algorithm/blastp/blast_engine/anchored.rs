@@ -118,6 +118,21 @@ impl ReportSequences for AnchoredSequences<'_> {
         }
     }
 
+    fn query_seq_id(&self, q_idx: usize) -> crate::report::seqid::SeqId<'_> {
+        self.queries.records[q_idx].seq_id()
+    }
+
+    fn subject_seq_id(&self, s_idx: u32) -> crate::report::seqid::SeqId<'_> {
+        let s_idx = s_idx as usize;
+        match self.listed_ordinals {
+            Some((ordinals, oids)) => crate::report::query_anchored::database_seq_id(
+                self.parsed.get(s_idx).and_then(Option::as_deref),
+                oids.oid(ordinals[s_idx]),
+            ),
+            None => self.subject_records[s_idx].seq_id(),
+        }
+    }
+
     fn query_masks(&self, q_idx: usize, out: &mut Vec<Mask>) {
         if let Some(masks) = self.query_masks.and_then(|masks| masks.get(q_idx)) {
             push_masks(masks, out);

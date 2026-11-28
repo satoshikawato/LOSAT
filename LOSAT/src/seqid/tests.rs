@@ -1161,7 +1161,7 @@ fn taxid_map_keys_drop_the_general_database_and_the_version() {
 /// DBID N2c, `blastdb-ids-20261021/R/weak/p1.out`, cases q1 to q6).
 #[test]
 fn weak_keys_find_the_ids_that_ncbis_scope_matches_weakly() {
-    use super::id_scope::{kind_keys, weak_keys};
+    use super::relation::{kind_keys, weak_keys};
     let text = |accession: Option<&str>, name: Option<&str>, version: Option<i32>| TextseqId {
         name: name.map(|name| name.as_bytes().to_vec()),
         accession: accession.map(|accession| accession.as_bytes().to_vec()),
@@ -1206,7 +1206,7 @@ fn weak_keys_find_the_ids_that_ncbis_scope_matches_weakly() {
 /// R1 of PR 1683, finding 1).
 #[test]
 fn scope_index_finds_the_id_itself_before_its_weak_matches() {
-    use super::id_scope::{scope_finds, ScopeIndex};
+    use super::relation::{scope_finds, ScopeIndex};
     let text = |accession: &str, version: Option<i32>| TextseqId {
         name: None,
         accession: Some(accession.as_bytes().to_vec()),

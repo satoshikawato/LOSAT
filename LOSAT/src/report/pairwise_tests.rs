@@ -1553,11 +1553,14 @@ fn html_rows_put_each_mask_of_the_rows_list_in_a_span() {
     masks.set_row(
         0,
         0,
-        query.as_bytes(),
-        |_| true,
-        (0, 259),
-        true,
-        1,
+        crate::report::query_anchored::LocRow {
+            letters: query.as_bytes(),
+            residue: |_: usize| true,
+            seq_range: (0, 259),
+            plus: true,
+            width: 1,
+        },
+        crate::report::query_anchored::NO_ROW,
         [(0, 69, 0), (70, 79, 0)],
     );
     let rows = |masks: Option<&crate::report::query_anchored::HspMasks>| {

@@ -611,6 +611,11 @@ pub(crate) trait Sequences {
     /// Appends the masks of `seq`: the query's `TMaskedQueryRegions`, a subject's of
     /// `GetSubjectMasks` (inclusive, 0-based, in the records), each with its frame (`Mask`).
     fn masks(&self, seq: SeqKey, out: &mut Vec<Mask>);
+
+    /// Whether the Seq-ids of `a`'s and `b`'s rows match (`CSeq_id::Match`,
+    /// `seqid::relation::row_matches`), as `x_FillLocList` compares a mask's id (its sequence's) with
+    /// a row's (`fill_loc_list`); true for one sequence.
+    fn rows_match(&self, a: SeqKey, b: SeqKey) -> bool;
 }
 
 /// A mask (`CSeqLocInfo`): its first and last position (inclusive, 0-based, in the record) and its
@@ -633,6 +638,15 @@ pub(crate) trait ReportSequences: Sync {
     fn subject_label(&self, s_idx: u32, out: &mut Vec<u8>);
     fn query_masks(&self, q_idx: usize, out: &mut Vec<Mask>);
     fn subject_masks(&self, q_idx: usize, s_idx: u32, out: &mut Vec<Mask>);
+
+    /// The Seq-id of query `q_idx` in the Seq-aligns (`FastaRecord::seq_id`), which its masks and
+    /// its rows have (`Sequences::rows_match`).
+    fn query_seq_id(&self, q_idx: usize) -> crate::report::seqid::SeqId<'_>;
+
+    /// The Seq-id of subject `s_idx` in the Seq-aligns: a `-subject` record's
+    /// (`FastaRecord::seq_id`), a database sequence's Seq-align id (`ParsedSubject::alignment_id`),
+    /// or `gnl|BL_ORD_ID|n` without parsed Seq-ids (`subject_seq_id`).
+    fn subject_seq_id(&self, s_idx: u32) -> crate::report::seqid::SeqId<'_>;
 
     /// The genetic code of the query's translated row 0 (`Sequences::genetic_code`).
     fn query_genetic_code(&self) -> Option<crate::algorithm::tblastx::report::DisplayCode> {
@@ -680,6 +694,27 @@ impl Sequences for OfQuery<'_> {
         } else {
             self.sequences.subject_genetic_code()
         }
+    }
+
+    fn rows_match(&self, a: SeqKey, b: SeqKey) -> bool {
+        let id = |seq: SeqKey| match seq {
+            SeqKey::Query => self.sequences.query_seq_id(self.q_idx),
+            SeqKey::Subject(s_idx) => self.sequences.subject_seq_id(s_idx),
+        };
+        a == b || crate::seqid::relation::row_matches(id(a), id(b))
+    }
+}
+
+/// The Seq-align id of a reported database sequence: its parsed Seq-align id (`parsed`,
+/// `ParsedSubject::alignment_id`), else `gnl|BL_ORD_ID|n` of its OID `oid`
+/// (`ReportSequences::subject_seq_id`, as `database_label` labels it).
+pub(crate) fn database_seq_id(
+    parsed: Option<&crate::report::db_subject::ParsedSubject>,
+    oid: crate::seqdb::Oid,
+) -> crate::report::seqid::SeqId<'_> {
+    match parsed {
+        Some(parsed) => crate::report::seqid::SeqId::Db(parsed.alignment_id()),
+        None => crate::report::seqid::SeqId::BlOrdId(oid),
     }
 }
 
@@ -919,8 +954,7 @@ pub(crate) fn write_section<W: Write + ?Sized>(
         // A row that `x_PrepareRowData` cannot translate (`aln_vec::UnknownGeneticCode`) throws
         // inside the `try` of the group, after its heading and before any line of it: NCBI
         // writes nothing more of the group.
-        let rows = match prepare_rows(&map, line_length, hsps.query_bioseq, query_frame, sequences)
-        {
+        let rows = match prepare_rows(&map, line_length, query_frame, sequences) {
             Err(error)
                 if aln_vec::UnknownGeneticCode::is(&error)
                     || aln_vec::TranslateNaToAa::is(&error) =>
@@ -1187,7 +1221,6 @@ struct RowData {
 fn prepare_rows(
     map: &AlnMap<'_>,
     line_length: usize,
-    query_bioseq: Option<u32>,
     query_frame: i8,
     sequences: &dyn Sequences,
 ) -> io::Result<RowData> {
@@ -1222,8 +1255,12 @@ fn prepare_rows(
         let index = *lists.entry(key).or_insert_with(|| {
             intervals.clear();
             sequences.masks(key, &mut intervals);
-            data.masks
-                .push(fill_loc_list(map, key, query_bioseq, &intervals));
+            data.masks.push(fill_loc_list(
+                map,
+                key,
+                |a, b| sequences.rows_match(a, b),
+                &intervals,
+            ));
             data.masks.len() - 1
         });
         let frame = if row == 0 {
@@ -1237,29 +1274,38 @@ fn prepare_rows(
 }
 
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:4291-4338
-/// A mask goes to the columns of the first row of its sequence whose letters it meets (on a
-/// minus-strand row its end is the first column), and `x_OutputSeq` puts those columns in lower
-/// case in every row of that sequence of frame 0: a subject's mask spreads to the same columns of
-/// its other HSPs' rows, also of the other strand (PD-LOSAT-NCBI-DEFECTS rule 2, DECISIONS
-/// T3-6). The rows of a subject that is the query's own Bioseq (`query_bioseq`) have the query's
-/// id, so the query's row, the first, takes its masks.
+/// A mask goes to the columns of the first row whose Seq-id matches the mask's (its sequence
+/// `key`'s: `rows_match`, `CSeq_id::Match`) and whose letters it meets (on a minus-strand row its
+/// end is the first column), and `x_OutputSeq` puts those columns in lower case in every row of
+/// that sequence of frame 0: a subject's mask spreads to the same columns of its other HSPs' rows,
+/// also of the other strand (PD-LOSAT-NCBI-DEFECTS rule 2, DECISIONS T3-6). A row of another
+/// sequence whose id matches takes the masks that it meets first: the query's row, the first, a
+/// subject's whose id matches the query's (the rows of a record read as the query and as a
+/// subject too), and a row of a subject whose id matches the query's takes the query's masks that
+/// miss the rows before it (line RG-KB item 12d).
 fn fill_loc_list(
     map: &AlnMap<'_>,
     key: SeqKey,
-    query_bioseq: Option<u32>,
+    rows_match: impl Fn(SeqKey, SeqKey) -> bool,
     masks: &[Mask],
 ) -> Vec<(i64, i64, i8)> {
-    let own = |row_key: SeqKey| match query_bioseq {
-        Some(subject) => {
-            let one = |key: SeqKey| key == SeqKey::Query || key == SeqKey::Subject(subject);
-            row_key == key || (one(row_key) && one(key))
-        }
-        None => row_key == key,
-    };
     let mut list = Vec::new();
+    if masks.is_empty() {
+        return list;
+    }
+    // Whether each row's id matches the mask's, asked once for each sequence of the rows.
+    let mut asked: std::collections::HashMap<SeqKey, bool> = std::collections::HashMap::new();
+    let own: Vec<bool> = (0..map.num_rows())
+        .map(|row| {
+            let row_key = map.seq_key(row);
+            *asked
+                .entry(row_key)
+                .or_insert_with(|| rows_match(key, row_key))
+        })
+        .collect();
     for &(from, to, frame) in masks {
         for row in 0..map.num_rows() {
-            if own(map.seq_key(row)) && map.seq_start(row) <= to && from <= map.seq_stop(row) {
+            if own[row] && map.seq_start(row) <= to && from <= map.seq_stop(row) {
                 let (first, last) = if map.is_positive_strand(row) {
                     (from, to)
                 } else {
@@ -1295,7 +1341,7 @@ pub(crate) struct HspMasks {
     // `set_row_met`, each with its place in its list, and the gap runs of the row that
     // `fill_row_loc_list` places masks on.
     met: Vec<(u32, Mask)>,
-    gaps: Vec<(u32, u32)>,
+    gaps: [Vec<(u32, u32)>; 2],
 }
 
 impl HspMasks {
@@ -1334,75 +1380,78 @@ impl HspMasks {
         self.met.clear();
     }
 
-    /// Sets row `row`'s list to the masks `masks` (`fill_row_loc_list` of the row `letters`) and
-    /// its frame to `frame`.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn set_row(
+    /// Sets row `row`'s list to the masks `masks` of its sequence, each at the columns of the first
+    /// row of the HSP that it meets among the row itself (`own`) and the other row (`other`, given
+    /// where the two rows' Seq-ids match: `seqid::relation::RowPairs`), in the rows' order
+    /// (`fill_row_loc_list`), and its frame to `frame`.
+    pub(crate) fn set_row<O: Fn(usize) -> bool, T: Fn(usize) -> bool>(
         &mut self,
         row: usize,
         frame: i8,
-        letters: &[u8],
-        residue: impl Fn(usize) -> bool,
-        seq_range: (u32, u32),
-        plus: bool,
-        width: u32,
+        own: LocRow<'_, O>,
+        other: Option<LocRow<'_, T>>,
         masks: impl IntoIterator<Item = Mask>,
     ) {
         let list = &mut self.lists[row];
         list.clear();
-        fill_row_loc_list(
-            letters,
-            residue,
-            seq_range,
-            plus,
-            width,
-            masks,
-            &mut self.gaps,
-            list,
-        );
+        if row == 0 {
+            fill_row_loc_list(Some(&own), other.as_ref(), masks, &mut self.gaps, list);
+        } else {
+            fill_row_loc_list(other.as_ref(), Some(&own), masks, &mut self.gaps, list);
+        }
         self.frames[row] = frame;
     }
 
-    /// Adds the masks of `seek` that meet `low..=high`, as `mask(from, to)`, to the masks of the
-    /// next `set_row_met`, after those added before, in the order of `seek`'s list.
+    /// Adds the masks of `seek` that meet `low..=high`, or the range `also` (the other row's,
+    /// `set_row`), as `mask(from, to)`, to the masks of the next `set_row_met`, after those added
+    /// before, in the order of `seek`'s list, each once.
     pub(crate) fn add_meeting<P: Copy + Ord>(
         &mut self,
         seek: &MaskSeek<P>,
         low: P,
         high: P,
+        also: Option<(P, P)>,
         mask: impl Fn(P, P) -> Mask,
     ) {
         let start = self.met.len();
         seek.for_each_meeting(low, high, |from, to, index| {
             self.met.push((index, mask(from, to)));
         });
+        let Some((low, high)) = also else {
+            self.met[start..].sort_unstable_by_key(|&(index, _)| index);
+            return;
+        };
+        seek.for_each_meeting(low, high, |from, to, index| {
+            self.met.push((index, mask(from, to)));
+        });
         self.met[start..].sort_unstable_by_key(|&(index, _)| index);
+        // A mask that meets both ranges was added twice.
+        let mut kept = start;
+        for at in start..self.met.len() {
+            if at == start || self.met[at].0 != self.met[kept - 1].0 {
+                self.met[kept] = self.met[at];
+                kept += 1;
+            }
+        }
+        self.met.truncate(kept);
     }
 
     /// `set_row` of the masks added by `add_meeting` since the last `set_row_met`.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn set_row_met(
+    pub(crate) fn set_row_met<O: Fn(usize) -> bool, T: Fn(usize) -> bool>(
         &mut self,
         row: usize,
         frame: i8,
-        letters: &[u8],
-        residue: impl Fn(usize) -> bool,
-        seq_range: (u32, u32),
-        plus: bool,
-        width: u32,
+        own: LocRow<'_, O>,
+        other: Option<LocRow<'_, T>>,
     ) {
         let list = &mut self.lists[row];
         list.clear();
-        fill_row_loc_list(
-            letters,
-            residue,
-            seq_range,
-            plus,
-            width,
-            self.met.iter().map(|&(_, mask)| mask),
-            &mut self.gaps,
-            list,
-        );
+        let masks = self.met.iter().map(|&(_, mask)| mask);
+        if row == 0 {
+            fill_row_loc_list(Some(&own), other.as_ref(), masks, &mut self.gaps, list);
+        } else {
+            fill_row_loc_list(other.as_ref(), Some(&own), masks, &mut self.gaps, list);
+        }
         self.met.clear();
         self.frames[row] = frame;
     }
@@ -1474,47 +1523,50 @@ impl<P: Copy + Ord> MaskSeek<P> {
     }
 }
 
-/// `x_FillLocList` (`fill_loc_list`) of one row of an HSP's own alignment of two rows (outfmt 0,
-/// `HspAlnVec`), from the row's letters: `letters` are its columns, `residue(column)` says
-/// whether a column holds a residue (not a gap), `seq_range` is its first and last position
-/// (`GetSeqStart`, `GetSeqStop`: 0-based, in the masks' coordinates; nucleotides for a row of
-/// width 3, three a residue), `plus` its strand. A mask that meets the range goes to the
-/// columns of its two ends (`GetAlnPosFromSeqPos` with `eBackwards` and `try_reverse_dir`: the
-/// column of the residue that holds the position, or of the row's first or last residue for a
-/// position outside the row); masks that miss the row are left out. The same columns as
-/// `fill_loc_list` gives over the HSP's `CAlnMap` (unit test
-/// `tests_t4a1::row_loc_list_matches_fill_loc_list`), without making the map: a row of a pairwise
-/// alignment holds its positions without a break, so a position's residue is its count from the
-/// row's first position, and the residue's column that count plus the gap columns before it
-/// (`gap_runs`, in `gaps`).
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn fill_row_loc_list(
-    letters: &[u8],
-    residue: impl Fn(usize) -> bool,
-    seq_range: (u32, u32),
-    plus: bool,
-    width: u32,
-    masks: impl IntoIterator<Item = Mask>,
-    gaps: &mut Vec<(u32, u32)>,
-    out: &mut Vec<(i64, i64, i8)>,
-) {
-    let (lo, hi) = seq_range;
-    // The index of the row's last residue, found when the first mask meets the row.
-    let mut last_residue: Option<u32> = None;
-    for (from, to, frame) in masks {
-        if to < lo || from > hi {
-            continue;
-        }
-        let last = match last_residue {
-            Some(last) => last,
-            None => {
-                let Some(last) = gap_runs(letters.len(), &residue, gaps).checked_sub(1) else {
-                    return;
-                };
-                last_residue = Some(last);
-                last
-            }
-        };
+/// One row of an HSP's own alignment of two rows (outfmt 0, `HspAlnVec`) as `x_FillLocList` reads
+/// it (`fill_row_loc_list`): `letters` are its columns, `residue(column)` says whether a column
+/// holds a residue (not a gap), `seq_range` is its first and last position (`GetSeqStart`,
+/// `GetSeqStop`: 0-based, in its sequence's coordinates, which `x_FillLocList` compares with the
+/// masks' as they are; nucleotides for a row of width 3, three a residue), `plus` its strand and
+/// `width` its width.
+#[derive(Clone, Copy)]
+pub(crate) struct LocRow<'a, R> {
+    pub(crate) letters: &'a [u8],
+    pub(crate) residue: R,
+    pub(crate) seq_range: (u32, u32),
+    pub(crate) plus: bool,
+    pub(crate) width: u32,
+}
+
+/// The `other` row of `HspMasks::set_row` of a pair whose rows' Seq-ids do not match: none.
+pub(crate) const NO_ROW: Option<LocRow<'static, fn(usize) -> bool>> = None;
+
+impl<R: Fn(usize) -> bool> LocRow<'_, R> {
+    /// Whether the mask `from..=to` meets the row's range (`IntersectingWith`).
+    #[inline(always)]
+    fn meets(&self, from: u32, to: u32) -> bool {
+        !(to < self.seq_range.0 || from > self.seq_range.1)
+    }
+
+    /// The columns of the mask `from..=to`'s two ends on the row (`GetAlnPosFromSeqPos` with
+    /// `eBackwards` and `try_reverse_dir`: the column of the residue that holds the position, or
+    /// of the row's first or last residue for a position outside the row; on a minus-strand row
+    /// its end is the first column). `last` is the index of the row's last residue and `gaps`
+    /// its gap runs (`gap_runs`), found when the first mask lands on the row; `None` for a row
+    /// without residues.
+    fn columns(
+        &self,
+        from: u32,
+        to: u32,
+        last: &mut Option<Option<u32>>,
+        gaps: &mut Vec<(u32, u32)>,
+    ) -> Option<(i64, i64)> {
+        let last = *last.get_or_insert_with(|| {
+            gap_runs(self.letters.len(), &self.residue, gaps).checked_sub(1)
+        });
+        let last = last?;
+        let (lo, hi) = self.seq_range;
+        let (plus, width) = (self.plus, self.width);
         let column = |pos: u32| -> i64 {
             let index = if plus {
                 if pos < lo {
@@ -1535,7 +1587,43 @@ pub(crate) fn fill_row_loc_list(
             i64::from(index + gap_columns)
         };
         let (first, end) = if plus { (from, to) } else { (to, from) };
-        out.push((column(first), column(end), frame));
+        Some((column(first), column(end)))
+    }
+}
+
+/// `x_FillLocList` (`fill_loc_list`) of one row's list of an HSP's own alignment of two rows
+/// (outfmt 0, `HspAlnVec`), from the rows' letters: each mask of `masks` goes to the columns of
+/// the first row of `first` and `second` (the rows whose Seq-ids match the mask's, in the rows'
+/// order: the row itself, and the other row where the two rows' ids match) whose range it meets
+/// (`LocRow::columns`); masks that miss them are left out. The same columns as `fill_loc_list`
+/// gives over the HSP's `CAlnMap` (unit tests `tests_t4a1::row_loc_list_matches_fill_loc_list`
+/// and `pair_loc_list_matches_fill_loc_list`), without making the map: a row of a pairwise
+/// alignment holds its positions without a break, so a position's residue is its count from the
+/// row's first position, and the residue's column that count plus the gap columns before it
+/// (`gap_runs`, in `gaps`, one buffer for each of the two rows).
+pub(crate) fn fill_row_loc_list<A: Fn(usize) -> bool, B: Fn(usize) -> bool>(
+    first: Option<&LocRow<'_, A>>,
+    second: Option<&LocRow<'_, B>>,
+    masks: impl IntoIterator<Item = Mask>,
+    gaps: &mut [Vec<(u32, u32)>; 2],
+    out: &mut Vec<(i64, i64, i8)>,
+) {
+    let [first_gaps, second_gaps] = gaps;
+    // Each row's last residue, found when the first mask lands on it.
+    let (mut first_last, mut second_last) = (None, None);
+    for (from, to, frame) in masks {
+        let columns = match (first, second) {
+            (Some(row), _) if row.meets(from, to) => {
+                row.columns(from, to, &mut first_last, first_gaps)
+            }
+            (_, Some(row)) if row.meets(from, to) => {
+                row.columns(from, to, &mut second_last, second_gaps)
+            }
+            _ => continue,
+        };
+        if let Some((start, end)) = columns {
+            out.push((start, end, frame));
+        }
     }
 }
 

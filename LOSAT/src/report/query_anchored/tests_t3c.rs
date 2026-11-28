@@ -58,6 +58,10 @@ struct Probe {
 }
 
 impl Sequences for Probe {
+    fn rows_match(&self, a: SeqKey, b: SeqKey) -> bool {
+        super::tests::labels_match(self, a, b)
+    }
+
     fn letters(&self, seq: SeqKey, from: u32, to: u32, out: &mut Vec<u8>) {
         let letters = match seq {
             SeqKey::Query => self.query,

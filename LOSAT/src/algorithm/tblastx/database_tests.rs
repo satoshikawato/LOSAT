@@ -352,6 +352,7 @@ fn the_pairwise_reads_are_those_of_the_writers_rows() {
         &code,
         &placements,
         &placements,
+        Default::default,
         None,
     );
     let titles = DatabaseTitles::new();

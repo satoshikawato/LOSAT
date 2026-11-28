@@ -22,6 +22,8 @@
 //!   line of the subject Bioseq and of the shown id, and the joins of the formats that show
 //!   every definition line.
 //! - `id_scope`: the ids of the queries and subjects of one search under `-parse_deflines`.
+//! - `relation`: how two Seq-ids relate (`CSeq_id::Match`, an alignment row's id and a mask's, the
+//!   scope's finding by an id itself or weakly): the one owner of those questions.
 //!
 //! A format chooses and prints a database sequence's ids only through these functions; it
 //! keeps only its own joins and escaping. The search programs (psiblast too) take the ids of a
@@ -37,6 +39,7 @@ pub(crate) mod mask_handle;
 pub mod model;
 pub mod parse;
 pub mod rank;
+pub(crate) mod relation;
 
 #[cfg(test)]
 mod tests;

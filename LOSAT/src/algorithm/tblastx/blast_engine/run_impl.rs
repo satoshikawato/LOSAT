@@ -2699,6 +2699,7 @@ fn write_tblastx_outputs(
                                 &db_code,
                                 &run.ranges.input.placements,
                                 run.ranges.subject_placements,
+                                || report::row_pairs(&hits, run.queries, &seqalign_subjects(run)),
                             );
                             // The final list is in report order, queries in input order: each batch's
                             // lists come in query order (`HitCollector::finish`, `culled_hit_order`)
@@ -3134,6 +3135,7 @@ fn report_counts<S: TbxScore>(
                     db_code,
                     &run.ranges.input.placements,
                     run.ranges.subject_placements,
+                    || report::row_pairs(hits, run.queries, &seqalign_subjects(run)),
                 ),
                 pairwise_masks.as_mut(),
             ),
@@ -3148,6 +3150,7 @@ fn report_counts<S: TbxScore>(
                 db_code,
                 &run.ranges.input.placements,
                 run.ranges.subject_placements,
+                || report::row_pairs(hits, run.queries, &seqalign_subjects(run)),
                 pairwise_masks.as_mut(),
             ),
         });

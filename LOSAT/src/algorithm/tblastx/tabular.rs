@@ -468,7 +468,7 @@ pub(super) fn write_tblastx_tabular(
                     s_start: i64::try_from(hit.s_start)?,
                     s_end: i64::try_from(hit.s_end)?,
                     // The e-value of the default row: a linked set's sum e-value (`sum_e`).
-                    evalue: hit.e_value,
+                    evalue: crate::report::serial::seqalign::seqalign_evalue_read(hit.e_value),
                     bit_score: hit.bit_score,
                     score: hit.raw_score,
                     // An ungapped HSP: its residues, no gap.

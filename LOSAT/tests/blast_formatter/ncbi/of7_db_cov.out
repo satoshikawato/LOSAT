@@ -1,0 +1,16 @@
+# BLASTN 2.17.0+
+# Query: q1 query one
+# Database: in/db/s3
+# Fields: query id, subject id, evalue, bit score, % query coverage per subject, % query coverage per hsp, % query coverage per uniq subject
+# 2 hits found
+q1	s1	4.48e-61	217	100	100	100
+q1	s2	3.49e-57	204	99	99	99
+# BLASTN 2.17.0+
+# Query: q2 query two
+# Database: in/db/s3
+# Fields: query id, subject id, evalue, bit score, % query coverage per subject, % query coverage per hsp, % query coverage per uniq subject
+# 3 hits found
+q2	s3	1.03e-51	185	100	100	100
+q2	s1	1.03e-51	185	100	100	100
+q2	s2	2.24e-48	174	100	100	100
+# BLAST processed 2 queries

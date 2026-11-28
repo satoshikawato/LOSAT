@@ -464,7 +464,6 @@ impl SearchPath {
         &self.path
     }
 
-
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:330-374
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:232-262
     // `fSplit_Tokenize` is `fSplit_MergeDelimiters` and `fSplit_Truncate` together
@@ -526,10 +525,7 @@ impl SearchPath {
 
     /// [`Self::resolve_file`] of `filename`, with every path that it checks in its order, the one
     /// found last: `(checked, found)` (`taxdb::read_paths`).
-    pub(super) fn resolve_file_checking(
-        &self,
-        filename: &[u8],
-    ) -> (Vec<Vec<u8>>, Option<Vec<u8>>) {
+    pub(super) fn resolve_file_checking(&self, filename: &[u8]) -> (Vec<Vec<u8>>, Option<Vec<u8>>) {
         let mut checked = Vec::new();
         let found = self.find_recording(filename, None, Some(&mut checked));
         (checked, found)

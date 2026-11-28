@@ -1046,7 +1046,10 @@ fn read_paths_are_the_places_that_the_run_looks_at_up_to_the_one_found() {
     assert_eq!(read_paths(&search, search_use, true), nowhere);
     assert_eq!(read_paths(&search, DbUse::TOOL, true), {
         let mut with_tree = nowhere.clone();
-        with_tree.extend([at(&cwd, "taxonomy4blast.sqlite3"), at(&dir, "taxonomy4blast.sqlite3")]);
+        with_tree.extend([
+            at(&cwd, "taxonomy4blast.sqlite3"),
+            at(&dir, "taxonomy4blast.sqlite3"),
+        ]);
         with_tree
     });
     assert!(read_paths(&search, search_use, false).is_empty());

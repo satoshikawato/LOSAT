@@ -98,10 +98,7 @@ fn outfmt_looks_up_every_taxid(program: &str, value: &OsStr) -> bool {
         "rpstblastn" => RequestKind::Rpstblastn,
         _ => return false,
     };
-    crate::algorithm::common::database::outfmts_need_subject_taxdb(
-        [value.as_encoded_bytes()],
-        kind,
-    )
+    crate::algorithm::common::database::outfmts_need_subject_taxdb([value.as_encoded_bytes()], kind)
 }
 
 /// The names of the MegaBLAST index that NCBI's handler asks the loader for
@@ -489,7 +486,9 @@ pub(crate) fn masker_read_parts<S: AsRef<OsStr>>(
 /// ([`check_disk_logfile`]); in `for_out` too when `databases_for_out`, only the files whose
 /// presence the database's resolution checks (`DatabaseFiles::looked_up`): a missing component,
 /// GI-mask or alias LMDB file that `-out` makes is never read by the run's reading of the
-/// sequences (line WQA D26).
+/// sequences (line WQA D26). With a database, the taxonomy files that the run looks for along its
+/// search path (`seqdb::taxdb::lookup_files`) are in both: each place is checked for presence
+/// (line WQA D35).
 pub(crate) fn tool_read_files<S: AsRef<OsStr> + Clone>(
     program: &str,
     seqtype: SeqType,
@@ -529,6 +528,12 @@ pub(crate) fn tool_read_files<S: AsRef<OsStr> + Clone>(
                 for_log.push(path);
             }
             for_log.extend(files.found.into_iter().filter(|path| !path.is_empty()));
+        }
+        for path in crate::seqdb::taxdb::lookup_files(blastdb.as_deref(), use_of_run, true) {
+            if databases_for_out {
+                for_out.push(path.clone());
+            }
+            for_log.push(path);
         }
     }
     (for_log, for_out)
@@ -651,10 +656,7 @@ fn matches_any_input(
         }
     }
     let reads_database = !inputs.databases.is_empty();
-    if !reads_database
-        && inputs.mb_index.is_none()
-        && !inputs.db_use.reads_taxonomy_names(false)
-    {
+    if !reads_database && inputs.mb_index.is_none() && !inputs.db_use.reads_taxonomy_names(false) {
         return false;
     }
     let registry_blastdb = start.settings().ok().and_then(|s| s.blastdb);

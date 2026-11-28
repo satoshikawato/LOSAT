@@ -1201,8 +1201,16 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
             "taxdb.bti",
         ];
         let want = refusal("blastp", "taxdb.bti");
-        assert_eq!(validate(&words).unwrap_err(), want, "db outfmt {fmt}: validate");
-        assert_eq!(run_db_of(&words).0.unwrap_err(), want, "db outfmt {fmt}: run");
+        assert_eq!(
+            validate(&words).unwrap_err(),
+            want,
+            "db outfmt {fmt}: validate"
+        );
+        assert_eq!(
+            run_db_of(&words).0.unwrap_err(),
+            want,
+            "db outfmt {fmt}: run"
+        );
     }
     let subject_18 = [
         "blastp",
@@ -1218,7 +1226,11 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
         "taxdb.bti",
     ];
     let want = refusal("blastp", "taxdb.bti");
-    assert_eq!(validate(&subject_18).unwrap_err(), want, "subject 18: validate");
+    assert_eq!(
+        validate(&subject_18).unwrap_err(),
+        want,
+        "subject 18: validate"
+    );
     assert_eq!(run_of(&subject_18).0.unwrap_err(), want, "subject 18: run");
     let subject_with = |fmt: &'static str, log: &'static str| {
         vec![
@@ -1235,7 +1247,13 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
             log,
         ]
     };
-    for fmt in ["6", "0", "5", "6 qseqid sseqid staxids", "6 qseqid sseqid ssciname"] {
+    for fmt in [
+        "6",
+        "0",
+        "5",
+        "6 qseqid sseqid staxids",
+        "6 qseqid sseqid ssciname",
+    ] {
         let (ctrl, ctrl_streams) = run_of(&subject_with(fmt, "run.log"));
         ctrl.unwrap();
         let words = subject_with(fmt, "taxdb.bti");
@@ -1296,8 +1314,16 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
         "taxonomy4blast.sqlite3",
     ];
     let want = refusal("blastp", "taxonomy4blast.sqlite3");
-    assert_eq!(validate(&sqlite_absent).unwrap_err(), want, "sqlite absent: validate");
-    assert_eq!(run_db_of(&sqlite_absent).0.unwrap_err(), want, "sqlite absent: run");
+    assert_eq!(
+        validate(&sqlite_absent).unwrap_err(),
+        want,
+        "sqlite absent: validate"
+    );
+    assert_eq!(
+        run_db_of(&sqlite_absent).0.unwrap_err(),
+        want,
+        "sqlite absent: run"
+    );
     for (label, words) in [
         (
             "taxdb.btd without taxdb.bti",

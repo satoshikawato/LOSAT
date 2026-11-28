@@ -917,7 +917,16 @@ fn taxonomy_files_that_the_run_looks_for_are_refused() {
     };
     let db = ["-db", "protdb/tfp"];
     // A search of a database: every format looks for `taxdb.bti` in the working directory first.
-    for fmt in ["0", "6", "7", "6 qseqid evalue", "8", "11", "18", "6 std sscinames"] {
+    for fmt in [
+        "0",
+        "6",
+        "7",
+        "6 qseqid evalue",
+        "8",
+        "11",
+        "18",
+        "6 std sscinames",
+    ] {
         let args = search(&[&db[..], &["-outfmt", fmt]].concat(), "taxdb.bti");
         refused(&args, "taxdb.bti", &format!("-db outfmt {fmt}: taxdb.bti"));
     }
@@ -949,7 +958,10 @@ fn taxonomy_files_that_the_run_looks_for_are_refused() {
         "-no_taxid_expansion: taxonomy4blast.sqlite3",
     );
     runs(
-        &search(&[&db[..], &["-outfmt", "6"]].concat(), "taxonomy4blast.sqlite3"),
+        &search(
+            &[&db[..], &["-outfmt", "6"]].concat(),
+            "taxonomy4blast.sqlite3",
+        ),
         "taxonomy4blast.sqlite3",
         "no taxonomy filter: taxonomy4blast.sqlite3",
     );
@@ -958,7 +970,11 @@ fn taxonomy_files_that_the_run_looks_for_are_refused() {
     let subject = ["-subject", "q.faa"];
     for fmt in ["18", "6 std sscinames"] {
         let args = search(&[&subject[..], &["-outfmt", fmt]].concat(), "taxdb.bti");
-        refused(&args, "taxdb.bti", &format!("-subject outfmt {fmt}: taxdb.bti"));
+        refused(
+            &args,
+            "taxdb.bti",
+            &format!("-subject outfmt {fmt}: taxdb.bti"),
+        );
     }
     for fmt in ["6", "0", "6 std ssciname staxids"] {
         let format = [&subject[..], &["-outfmt", fmt]].concat();

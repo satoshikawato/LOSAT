@@ -618,8 +618,8 @@ the run opens or checks for reading even when that file is missing (a `-db` sear
 candidates (alias `.nal`/`.pal`, index `.nin`/`.pin`, `index.alx`, `DBLIST` targets and local-copy/search-path
 candidates), alias lists and the files of each volume that the run can open (its index, header, sequence and LMDB files, a search's string-index files too; the id-lookup files only with an id list or taxonomy option, the column, GI-index and GI-mask files only with `-db_soft_mask` or `-db_hard_mask`) — the taxonomy files that the run looks for along its search path, which the command line refuses
 too (line WQA D35): `taxdb.bti` in each directory up to the first that holds one and the `taxdb.btd`
-beside it, for every search of a database and for a `-subject` search whose `-outfmt` looks every taxid
-up (plural names, 18), and `taxonomy4blast.sqlite3` likewise for a widened taxonomy filter
+beside it, for every search of a database, a tool's `-infmt blastdb` database and a `-subject` search
+whose `-outfmt` looks every taxid up (plural names, 18), and `taxonomy4blast.sqlite3` likewise for a widened taxonomy filter
 (`-taxids` or `-taxidlist` without `-no_taxid_expansion`), or `windowmasker`'s `-in`, `-fa_list true` listed entries, `-ustat`,
 `-ids` or `-exclude_ids`, without making missing parent folders present), and a `windowmasker` `-out`
 that names an existing file or a missing input the command line reads after opening `-out` (`-in` of

@@ -22,15 +22,15 @@
   of LOSAT's own refusal. With an `-outfmt` value that NCBI cannot read (`99`), `psiblast`, `rpsblast` and
   `rpstblastn` create the `-export_search_strategy` file before NCBI's error, as NCBI does (line RG, series F, D-36
   review 2).
-- Every search program's refusal of a search strategy on a report stream (`-export_search_strategy -`, or the file of
-  `-out` or of the standard output) now comes where NCBI BLAST+ 2.17.0 writes its first request: after its prolog and
-  the first batch of queries is read, before the search. LOSAT holds the report's bytes from NCBI's formatter until
-  then and, at that point, refuses and writes none of them. A run that NCBI ends before that point now ends as
-  NCBI's, with NCBI's prolog, error and exit status: an empty or white-space query gives `Query is Empty!` with exit
-  status 0, a missing database NCBI's database error, an option error NCBI's error, and so do `BATCH_SIZE=abc`, a
-  `-query_loc` past the end, a first query record NCBI cannot read, and a PSSM run (`psiblast -in_pssm`,
-  PSI-TBLASTN) with `-subject` (before: LOSAT's refusal, exit status 1). Runs without a search strategy on a report
-  stream hold nothing (line RG, series F, D-36 reviews 2b and 2c).
+- In LOSAT Web, every search program's refusal of a search strategy on a report stream (`-export_search_strategy -`,
+  or the file of `-out` or of the standard output, which the command line writes as NCBI BLAST+ does) now comes where
+  NCBI BLAST+ 2.17.0 writes its first request: after its prolog and the first batch of queries is read, before the
+  search. LOSAT holds the report's bytes from NCBI's formatter until then and, at that point, refuses and writes none
+  of them. A run that NCBI ends before that point now ends as NCBI's, with NCBI's prolog, error and exit status: an
+  empty or white-space query gives `Query is Empty!` with exit status 0, a missing database NCBI's database error, an
+  option error NCBI's error, and so do `BATCH_SIZE=abc`, a `-query_loc` past the end, a first query record NCBI cannot
+  read, and a PSSM run (`psiblast -in_pssm`, PSI-TBLASTN) with `-subject` (before: LOSAT's refusal, exit status 1).
+  Runs without a search strategy on a report stream hold nothing (line RG, series F, D-36 reviews 2b and 2c).
 - With a strategy file and an `-outfmt` value that NCBI cannot read (`99`, `abc`, `"6 delimx"`, `" -1"`), every
   program now raises that error where NCBI's formatting handler does, after the errors of `-subject`, `-subject_loc`,
   `-query`, `-out` and `-query_loc` (NCBI skips its early `-outfmt` read then): NCBI's message, exit status and files

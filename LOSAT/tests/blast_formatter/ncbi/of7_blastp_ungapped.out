@@ -1,0 +1,11 @@
+# BLASTP 2.17.0+
+# Query: ps251_290 residues 251-290 of YP_009220601.1 TK-TMK
+# Database: ../db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+ps251_290	BDT63556.1	20.000	30	24	0	5	34	883	912	0.86	20.1
+ps251_290	BDT63529.1	40.000	20	12	0	14	33	291	310	2.3	18.7
+ps251_290	BDT63579.1	45.455	11	6	0	18	28	1147	1157	4.3	17.8
+ps251_290	BDT63515.1	35.714	14	9	0	3	16	680	693	6.0	17.3
+ps251_290	BDT63552.1	45.455	11	6	0	16	26	314	324	8.3	16.8
+# BLAST processed 1 queries

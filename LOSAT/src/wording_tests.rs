@@ -442,6 +442,14 @@ fn empty_message_exception_keeps_code_text() {
         ),
         expected_empty_line
     );
+    // A module without a function (`Module:: - `: `CBlastQuerySourceOM::GetLength` in BLAST+ 2.17.0,
+    // probe C of agent E3c, 2026-11-28).
+    assert_eq!(
+        losat_text(
+            "BLAST engine error: NCBI C++ Exception:\n    T0 \"f.cpp\", line 337: Error: (CBlastException::eInvalid) BLAST:: - Could not find length\n\n"
+        ),
+        "LOSAT engine error: Could not find length\n\n"
+    );
     assert_eq!(
         losat_text(
             "Error: prefixNCBI C++ Exception:\n    T0 \"f.cpp\", line 10: Error: (GenCountsException::empty genome) \n"

@@ -65,6 +65,8 @@ import type {
 import { createToolCredit, ToolCreditPage } from './tool-credit.js';
 import { ToolOutputRouter } from './tool-output.js';
 
+const ww4j = (...parts: unknown[]): void => console.info('[ww4j]', (performance.timeOrigin + performance.now()).toFixed(1), ...parts);
+
 /**
  * How a runtime ended (retire): at once (its threaded instance was not in use, or its worker had
  * ended), or once the keeper grew the shared memory.
@@ -230,6 +232,7 @@ export class WasmEngine implements EngineGateway, ToolEngine {
   validateTool(argv: readonly string[], options: ToolValidateOptions = {}): Promise<ToolValidation> {
     return new Promise<ToolValidation>((resolve, reject) => {
       const id = `validate:${crypto.randomUUID()}`;
+      ww4j('gw-asked', id.slice(9, 17), argv[0]);
       this.validations.set(id, { id, argv, files: options.directory, resolve, reject, generation: undefined, ends: 0 });
       this.postValidations();
     });
@@ -318,7 +321,9 @@ export class WasmEngine implements EngineGateway, ToolEngine {
   }
 
   private async launchTool(active: ActiveRun, argv: readonly string[], files: ToolRunOptions['directory']): Promise<void> {
+    ww4j('gw-run-asked', argv[0]);
     const modules = await this.compiled();
+    ww4j('gw-run-compiled', argv[0]);
     if (active.settled) return;
     if (this.current?.renew !== undefined) this.retire();
     const generation = this.current ?? this.startGeneration(modules);
@@ -352,6 +357,7 @@ export class WasmEngine implements EngineGateway, ToolEngine {
         }
         for (const validation of waiting) {
           validation.generation = generation.id;
+          ww4j('gw-posted', validation.id.slice(9, 17), generation.id);
           const command: WorkerToolValidate = {
             type: 'tool-validate',
             generation: generation.id,
@@ -388,6 +394,7 @@ export class WasmEngine implements EngineGateway, ToolEngine {
    */
   private validated(generation: Generation, event: Extract<EngineEvent, { type: 'tool-validated' | 'tool-validate-failed' }>): void {
     const validation = this.validations.get(event.id);
+    ww4j('gw-answered', event.id.slice(9, 17), event.type, generation.id);
     if (validation === undefined || validation.generation !== generation.id) return;
     this.validations.delete(event.id);
     if (event.type === 'tool-validated') {
@@ -446,7 +453,7 @@ export class WasmEngine implements EngineGateway, ToolEngine {
     if (this.modules === undefined) {
       const modules =
         this.options.loadModules?.() ??
-        Promise.all([loadReactor(this.options.assets.serial), loadReactor(this.options.assets.threads)]).then(([serial, threads]) => ({
+        ((sf: boolean) => { ww4j('gw-modules-start', sf ? 'serial-first' : 'parallel'); const s = loadReactor(this.options.assets.serial).then((m) => (ww4j('gw-serial-compiled'), m)); const t = (sf ? s.then(() => loadReactor(this.options.assets.threads)) : loadReactor(this.options.assets.threads)).then((m) => (ww4j('gw-threads-compiled'), m)); return Promise.all([s, t]); })((globalThis as { __ww4jSerialFirst?: boolean }).__ww4jSerialFirst === true).then(([serial, threads]) => ({
           serial,
           threads,
         }));
@@ -461,6 +468,7 @@ export class WasmEngine implements EngineGateway, ToolEngine {
 
   private startGeneration(modules: { readonly serial: ModuleSource; readonly threads: ModuleSource }): Generation {
     const id = ++this.generations;
+    ww4j('gw-worker-create', id);
     const worker =
       this.options.createWorker?.() ??
       new Worker(new URL('./engine-worker.js', import.meta.url), { type: 'module', name: 'losat-engine' });
@@ -517,6 +525,7 @@ export class WasmEngine implements EngineGateway, ToolEngine {
 
   private receive(generation: Generation, event: EngineEvent): void {
     if (!('generation' in event) || event.generation !== generation.id) return;
+    if (event.type === 'life' || event.type === 'started') ww4j('gw-worker-' + event.type, generation.id);
     if (event.type === 'life') {
       // The worker holds its lock now, and no preparation or search of it has started: the page may wait for the lock,
       // also when the generation is already ending (a search cancelled before this message came).

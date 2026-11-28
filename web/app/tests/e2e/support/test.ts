@@ -11,10 +11,33 @@
 // Every test also fails if it leaves a file whose name CI's artifact upload refuses
 // (support/artifact-names.ts): one such name made a failed job upload nothing. The fixture renames
 // such files first (renamed-names.json keeps the names), so the upload keeps every test's evidence.
+import { appendFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { test as base } from '@playwright/test';
 import { RENAMED_NAMES_FILE, renameUnuploadable } from './artifact-names';
 
-export const test = base.extend<{ uploadableOutputs: void }>({
+export const test = base.extend<{ uploadableOutputs: void; ww4jLog: void }>({
+  ww4jLog: [
+    async ({ page }, use, testInfo) => {
+      const dir = process.env['WW4J_LOG_DIR'];
+      if (!dir) { await use(); return; }
+      mkdirSync(dir, { recursive: true });
+      const file = join(dir, `${testInfo.project.name}-${testInfo.titlePath.slice(1).join(' ').replace(/[^A-Za-z0-9]+/g, '_').slice(0, 60)}-r${testInfo.repeatEachIndex}-w${testInfo.workerIndex}.log`);
+      const seen = new Set<string>();
+      const take = (where: string) => (message: { text(): string }) => {
+        const text = message.text();
+        if (!text.startsWith('[ww4j]') || seen.has(text)) return;
+        seen.add(text);
+        appendFileSync(file, `${text} (${where})\n`);
+      };
+      page.on('console', take('page'));
+      page.on('worker', (worker) => worker.on('console', take('worker')));
+      appendFileSync(file, `[ww4j] ${Date.now()} test-begin\n`);
+      await use();
+      appendFileSync(file, `[ww4j] ${Date.now()} test-end ${testInfo.status} ${testInfo.error?.message?.split('\n')[0] ?? ''}\n`);
+    },
+    { auto: true },
+  ],
   context: async ({ context, browserName }, use) => {
     if (browserName === 'webkit') await context.addInitScript(standInWakeLock);
     await use(context);

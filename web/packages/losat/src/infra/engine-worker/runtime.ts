@@ -63,6 +63,8 @@ import type {
 import { ThreadHost } from './thread-host.js';
 import { warmUp } from './warm-up.js';
 
+const ww4j = (...parts: unknown[]): void => console.info('[ww4j]', (performance.timeOrigin + performance.now()).toFixed(1), ...parts);
+
 export interface RuntimeOptions {
   readonly serial: () => Promise<WebAssembly.Module>;
   readonly threads: () => Promise<{ readonly module: WebAssembly.Module; readonly artifact: ReactorArtifact }>;
@@ -268,7 +270,9 @@ export class EngineRuntime {
   async validateTool(request: WorkerToolValidate): Promise<ToolValidation> {
     const held = this.loaded;
     const none = held === undefined || held.instance.abi.stoppedBy !== undefined;
+    if (none) ww4j('wk-load-serial-begin');
     const loaded = none ? await this.load('serial') : held;
+    if (none) ww4j('wk-load-serial-end');
     // The check made this instance: a preparation for a threaded search may replace it (`prepare`).
     if (none) loaded.checkOnly = true;
     const abi = loaded.instance.abi;

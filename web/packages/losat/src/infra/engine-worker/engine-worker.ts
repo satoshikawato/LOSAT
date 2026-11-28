@@ -26,6 +26,8 @@ import {
 import { EngineRuntime } from './runtime.js';
 import { toolPosts } from './tool-posts.js';
 
+const ww4j = (...parts: unknown[]): void => console.info('[ww4j]', (performance.timeOrigin + performance.now()).toFixed(1), ...parts);
+
 const scope = self as unknown as {
   onmessage: ((event: MessageEvent<EngineCommand>) => void) | null;
   postMessage(message: EngineEvent, transfer?: Transferable[]): void;
@@ -200,9 +202,11 @@ async function tool(command: WorkerTool): Promise<void> {
  */
 async function validateTool(command: WorkerToolValidate): Promise<void> {
   const { id } = command;
+  ww4j('wk-validate-turn', id.slice(9, 17));
   try {
     if (runtime === undefined) throw new Error('the Engine worker was not initialized');
     const verdict = await runtime.validateTool(command);
+    ww4j('wk-validate-end', id.slice(9, 17));
     scope.postMessage({ type: 'tool-validated', generation, id, verdict });
   } catch (error) {
     scope.postMessage({ type: 'tool-validate-failed', generation, id, error: toWorkerError(error) });
@@ -241,7 +245,10 @@ scope.onmessage = (event) => {
   } else if (command.type === 'tool') {
     pending = undefined;
     inTurn(() => tool(command));
-  } else if (command.type === 'tool-validate') inTurn(() => validateTool(command));
+  } else if (command.type === 'tool-validate') {
+    ww4j('wk-validate-received', command.id.slice(9, 17));
+    inTurn(() => validateTool(command));
+  }
   else if (command.type === 'prepare') queuePrepare(command);
   else if (__LOSAT_TEST_HOOKS__) test(command);
 };

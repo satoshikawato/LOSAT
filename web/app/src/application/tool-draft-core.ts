@@ -22,6 +22,8 @@ import type { SubmitResult, Validation } from './draft';
 import type { SessionFiles } from './session-files';
 import { Store } from './store';
 
+const ww4j = (...parts: unknown[]): void => console.info('[ww4j]', (performance.timeOrigin + performance.now()).toFixed(1), ...parts);
+
 /** One file added to the run directory ("Run directory": `-conffile`, BLAST database files, `-ids`, …). */
 export interface ToolExtraFile {
   readonly key: string;
@@ -294,10 +296,11 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
   /** Runs `validateTool` now (one at a time, so an older answer is dropped). */
   runValidationNow(): Promise<void> {
     const generation = ++this.validationGeneration;
+    ww4j('run-called', this.tool, generation);
     const stale = () => generation !== this.validationGeneration;
     const run = async () => {
       const state = this.state.get();
-      if (stale()) return;
+      if (stale()) { ww4j('stale-at-start', this.tool, generation); return; }
       let check: Check | undefined;
       try {
         check = this.check(state);
@@ -311,18 +314,22 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
         return;
       }
       this.patch({ validation: { state: 'checking' } });
+      ww4j('sent', this.tool, generation, check.argv.join(' '));
       let verdict: ToolValidation;
       try {
         verdict = await this.core.engine.validateTool(check.argv, { directory: check.directory });
       } catch (error) {
-        if (stale()) return;
+        ww4j('answered-error', this.tool, generation, errorMessage(error));
+        if (stale()) { ww4j('dropped-stale', this.tool, generation); return; }
         const message = errorMessage(error);
         this.patch({
           validation: isUnavailable(error) ? { state: 'unavailable', message } : { state: 'invalid', message },
         });
         return;
       }
-      if (stale()) return;
+      ww4j('answered', this.tool, generation, verdict.ok);
+      if (stale()) { ww4j('dropped-stale', this.tool, generation); return; }
+      ww4j('set', this.tool, generation, verdict.ok ? 'ok' : 'invalid');
       this.validatedKey = checkKey(check);
       this.patch({
         validation: verdict.ok ? { state: 'ok' } : { state: 'invalid', message: verdict.message },
@@ -342,7 +349,9 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
     this.patch({ submitting: true, message: undefined });
     try {
       const busy = this.core.isBusy?.() === true;
+      ww4j('submit', this.tool, busy);
       if (!busy) await this.settleValidation();
+      ww4j('submit-checked', this.tool);
       // Re-read the draft state after awaiting the check (same order as SearchDraft.prepareAndEnqueue),
       // so changes that arrived during the await (an inflate finishing, an option changing) are used.
       const state = this.state.get();
@@ -438,9 +447,11 @@ export abstract class ToolDraftCore<S extends ToolFormState> implements ToolForm
 
   protected scheduleValidation(): void {
     if (this.validationTimer !== undefined) clearTimeout(this.validationTimer);
+    ww4j('asked', this.tool);
     const delay = this.core.debounceMs ?? 150;
     this.validationTimer = setTimeout(() => {
       this.validationTimer = undefined;
+      ww4j('debounced', this.tool);
       void this.runValidationNow();
     }, delay);
   }

@@ -3,6 +3,7 @@
 // Protocol, and the in-memory build of the contract harness (tests/e2e/harness).
 import { expect, type BrowserContext, type CDPSession, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
+import { appendFileSync as ww4jAppend, mkdirSync as ww4jMkdir } from 'node:fs';
 import { build } from 'vite';
 import { siteHeaders } from '../../../build/headers';
 import { findReactors, losatEngine, type Reactors } from '../../../build/reactors';
@@ -175,6 +176,9 @@ export const HARNESS_BUILD_TIMEOUT = 180_000;
 export async function buildHarness(reactors: Reactors | undefined = REACTORS): Promise<HarnessFiles> {
   const limit = test.info().timeout;
   test.setTimeout(limit === 0 ? 0 : Math.max(limit, HARNESS_BUILD_TIMEOUT));
+  const ww4jStart = Date.now();
+  const ww4jDir = process.env['WW4J_LOG_DIR'];
+  const ww4jDone = () => { if (ww4jDir) { ww4jMkdir(ww4jDir, { recursive: true }); ww4jAppend(`${ww4jDir}/harness-build.log`, `[ww4j-harness] ${ww4jStart} build ${Date.now() - ww4jStart} ms pid ${process.pid}\n`); } };
   const result = await build({
     root: fileURLToPath(new URL('../harness/', import.meta.url)),
     base: '/__harness/',
@@ -197,6 +201,7 @@ export async function buildHarness(reactors: Reactors | undefined = REACTORS): P
       });
     }
   }
+  ww4jDone();
   return files;
 }
 

@@ -968,7 +968,7 @@ fn padded_final_hsp(
     s_end: usize,
 ) -> BlastpHsp {
     // Only a sequence whose letters end before the edit script's is copied.
-    let padded = |letters: &[u8], end: usize| -> std::borrow::Cow<'_, [u8]> {
+    fn padded(letters: &[u8], end: usize) -> std::borrow::Cow<'_, [u8]> {
         if end <= letters.len() {
             return std::borrow::Cow::Borrowed(letters);
         }
@@ -976,7 +976,7 @@ fn padded_final_hsp(
         padded.extend_from_slice(letters);
         padded.resize(end, crate::utils::matrix::ncbistdaa::GAP);
         std::borrow::Cow::Owned(padded)
-    };
+    }
     crate::algorithm::pssm_search::traceback0::final_hsp(
         preliminary,
         edit_script,

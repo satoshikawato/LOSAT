@@ -338,8 +338,11 @@ fn a_negative_window_searches_on_one_thread() {
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1015-1017
 // Line RG item X-evalue-nan: the preliminary reap's e-value is `-evalue`, 5 times it only with the
 // Gumbel block and a composition-based statistics above 1 in a search whose statistics are the
-// database's: `-subject` (the statistics of each subject, a composition of 0), `-searchsp` (no
-// Gumbel block) and modes 0 and 1 keep `-evalue` (LOSAT stretched the first two too).
+// database's. A `-subject` set is such a search (NCBI scans it as a database whose length is the
+// sum of its records, blast_app_util.cpp:206-210, seqsrc_multiseq.cpp:175-180: 5 times). A
+// database whose length is 0 (the statistics of each subject, a composition of 0; row
+// db.cnt.l0.bx), `-searchsp` (no Gumbel block) and modes 0 and 1 keep `-evalue`; of these only the
+// database of length 0 changed (LOSAT stretched it too).
 #[test]
 fn the_preliminary_reap_stretches_evalue_as_ncbi() {
     use crate::algorithm::blastx::statistics::prelim_evalue;

@@ -1528,7 +1528,7 @@ pub(crate) fn redo_fetches(evalue: f64, heaps: &[RedoHeap]) -> bool {
     !heaps.iter().all(|heap| {
         heap.ends_early
             && heap.inserted_before >= heap.heap_threshold
-            && evalue > EVALUE_STRETCH * heap.ecutoff
+            && crate::common::evalue_not_at_most(evalue, EVALUE_STRETCH * heap.ecutoff)
     })
 }
 

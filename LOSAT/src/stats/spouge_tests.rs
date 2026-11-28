@@ -717,7 +717,10 @@ fn ncbi_s_cutoff_searches_of_the_rnd_pssm_widened() {
 // NaN, which NCBI's option check (`<= 0`) lets pass, and +inf start at 2 (the cast of NaN, or of
 // the logarithm of 0 over Lambda, is `INT_MIN`), no e-value is above them, and the cutoff is 0 (LOSAT
 // raised the e-value to the smallest normal double first and computed the cutoff of 2.2e-308). A
-// subnormal e-value takes NCBI's steps from 2 (the quotient is +inf), as `unbounded_etos` does.
+// subnormal e-value takes NCBI's steps from 2 (the quotient is +inf). Both are checked against
+// the cutoff by its definition rather than by a copy of the search: NCBI's search returns the
+// largest score whose e-value (`BLAST_SpougeStoE`, which falls with the score) is above `evalue`,
+// or 0 (`a`, blast_stat.c:5241,5268), which a scan of the scores from 0 finds too.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5269
 #[test]
 fn a_nan_or_infinite_evalue_gives_ncbi_s_cutoff_of_0() {
@@ -728,6 +731,12 @@ fn a_nan_or_infinite_evalue_gives_ncbi_s_cutoff_of_0() {
         h: 0.14,
         alpha: 1.9,
         beta: -30.0,
+    };
+    let scanned = |evalue: f64, m: i32, n: i32| {
+        (0..1_000_000)
+            .take_while(|&score| spouge_stoe_at(f64::from(score), &kbp, &gbp, m, n) > evalue)
+            .last()
+            .unwrap_or(0)
     };
     for evalue in [
         f64::NAN,
@@ -742,13 +751,24 @@ fn a_nan_or_infinite_evalue_gives_ncbi_s_cutoff_of_0() {
                 0,
                 "{evalue} {m} {n}"
             );
-            assert_eq!(unbounded_etos(evalue, &kbp, &gbp, m, n), Some(0));
+            assert_eq!(scanned(evalue, m, n), 0, "{evalue} {m} {n}");
         }
     }
-    for evalue in [f64::MIN_POSITIVE / 4.0, 5e-324, f64::MIN_POSITIVE, 1e-300] {
-        let expected = unbounded_etos(evalue, &kbp, &gbp, 100, 200).expect("a cutoff");
+    // Subnormal values, which NCBI accepts (`blastp -evalue 1e-310` runs), and their neighbours:
+    // before line RG item X-evalue-nan LOSAT raised them to the smallest normal double.
+    for evalue in [
+        f64::MIN_POSITIVE / 4.0,
+        5e-324,
+        1e-310,
+        f64::MIN_POSITIVE,
+        1e-300,
+    ] {
         let cutoff = blast_spouge_etos(evalue, &kbp, &gbp, 100, 200);
-        assert_eq!(i128::from(cutoff), expected, "{evalue:e}");
+        assert_eq!(cutoff, scanned(evalue, 100, 200), "{evalue:e}");
         assert!(cutoff > 2000, "{evalue:e}: {cutoff}");
     }
+    assert!(
+        blast_spouge_etos(1e-310, &kbp, &gbp, 100, 200)
+            > blast_spouge_etos(f64::MIN_POSITIVE, &kbp, &gbp, 100, 200)
+    );
 }

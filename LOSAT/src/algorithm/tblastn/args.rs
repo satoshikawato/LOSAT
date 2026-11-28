@@ -797,8 +797,9 @@ pub(super) fn check_search_limits(args: &ResolvedTblastnArgs) -> Result<()> {
         )?;
     }
     let (compo_adjust_mode, _) = composition(args);
-    // An infinite -evalue, or DBL_MAX with the composition-based redo (decision D12;
-    // `protein_options_check::check_evalue_limit`). A smaller -evalue such as 1e308 runs.
+    // An infinite -evalue or DBL_MAX, with the composition-based redo only (decision D12;
+    // `protein_options_check::check_evalue_limit`). A smaller -evalue such as 1e308 runs, and
+    // without the redo every value does.
     crate::blastinput::protein_options_check::check_evalue_limit(
         args.evalue,
         compo_adjust_mode.is_enabled(),

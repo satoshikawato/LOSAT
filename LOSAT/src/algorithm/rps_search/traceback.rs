@@ -456,13 +456,9 @@ impl RpsTraceback<'_> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1976-2003
         // NCBI drops an HSP whose e-value is above `-evalue`: a NaN e-value stays, and an
         // `-evalue` of NaN (NCBI's option check lets it pass) keeps every HSP.
-        #[expect(
-            clippy::neg_cmp_op_on_partial_ord,
-            reason = "NCBI removes an HSP only when evalue > cutoff (blast_hits.c:1996); `<=` would drop NaN values and keep none under a NaN cutoff"
-        )]
         hsp_list
             .hsps
-            .retain(|hsp| !(hsp.e_value > self.expect_value));
+            .retain(|hsp| crate::common::evalue_not_above(hsp.e_value, self.expect_value));
         for hsp in &mut hsp_list.hsps {
             hsp.raw_score = ((f64::from(hsp.raw_score) + 0.5 * self.scale) / self.scale) as i32;
         }

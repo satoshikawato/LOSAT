@@ -656,7 +656,7 @@ mod par {
                     let batch = &queue.batches[front.batch_idx];
                     let best_evalue = local_match_of(lists, front.q_idx, position).best_evalue;
                     let may_end = end_above[front.batch_idx].is_some_and(|above| {
-                        best_evalue > above
+                        crate::common::evalue_not_at_most(best_evalue, above)
                             && batch.clone().all(|q| heaps[q].may_fill(in_window_by_q[q]))
                     });
                     let ended = may_end

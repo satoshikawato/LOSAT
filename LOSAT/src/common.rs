@@ -116,6 +116,57 @@ fn evalue_comp(evalue1: f64, evalue2: f64) -> Ordering {
     }
 }
 
+/// NCBI's `MIN(evalue, best)` (`(a)>(b)?(b):(a)`): `best` only when `evalue` is above it, so a
+/// NaN e-value becomes the best and the next e-value replaces a NaN best; for numbers, the
+/// smaller.
+///
+/// NCBI reference (598d8ae6): c++/include/algo/blast/core/ncbi_std.h:112
+#[inline]
+pub(crate) fn ncbi_min_evalue(best: f64, evalue: f64) -> f64 {
+    if evalue > best {
+        best
+    } else {
+        evalue
+    }
+}
+
+/// NCBI's reaps by e-value, which remove an HSP only when `evalue > cutoff`: whether an HSP with
+/// `evalue` stays. A NaN on either side stays (a PSSM whose statistics are NaN, an `-evalue` of
+/// NaN, which NCBI's option check lets pass).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1996
+#[inline]
+#[expect(
+    clippy::neg_cmp_op_on_partial_ord,
+    reason = "NCBI's test is `evalue > cutoff`; `<=` would drop a NaN value and keep none under a NaN cutoff"
+)]
+pub(crate) fn evalue_not_above(evalue: f64, cutoff: f64) -> bool {
+    !(evalue > cutoff)
+}
+
+/// `BlastCompo_EarlyTermination`'s test of a match against one filled heap, which goes on (does
+/// not end the match) only when `evalue <= limit`: true (the match may end) for a NaN.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1567
+#[inline]
+#[expect(
+    clippy::neg_cmp_op_on_partial_ord,
+    reason = "NCBI's test is `evalue <= limit`; `>` would keep a match with a NaN best e-value that NCBI ends"
+)]
+pub(crate) fn evalue_not_at_most(evalue: f64, limit: f64) -> bool {
+    !(evalue <= limit)
+}
+
+/// `s_BlastGetBestEvalue`: `ncbi_min_evalue` over the e-values of a list, from `INT4_MAX`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1739-1749
+#[inline]
+pub(crate) fn best_evalue(evalues: impl IntoIterator<Item = f64>) -> f64 {
+    evalues
+        .into_iter()
+        .fold(f64::from(i32::MAX), ncbi_min_evalue)
+}
+
 /// NCBI ScoreCompareHSPs - compare two HSPs by score and coordinates.
 /// Used to sort HSPs within a subject (BlastHSPList).
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1335-1355 ScoreCompareHSPs()
@@ -200,3 +251,7 @@ pub(crate) fn evalue_compare_hsps(a: &Hit, b: &Hit) -> Ordering {
         ord => ord,
     }
 }
+
+#[cfg(test)]
+#[path = "common_tests.rs"]
+mod tests;

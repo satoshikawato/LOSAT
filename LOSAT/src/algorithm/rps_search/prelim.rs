@@ -213,8 +213,7 @@ impl RpsPrelim<'_> {
             // NCBI drops an HSP whose e-value is above `prelim_evalue`: a NaN e-value stays, and a
             // `prelim_evalue` of NaN (an `-evalue` of NaN, which NCBI's option check lets pass)
             // keeps every HSP.
-            let above = e_value > self.prelim_evalue;
-            if !above {
+            if crate::common::evalue_not_above(e_value, self.prelim_evalue) {
                 evalued.push(XPrelimHsp { hsp: *hsp, e_value });
             }
         }

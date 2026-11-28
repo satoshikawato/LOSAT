@@ -516,10 +516,10 @@ pub trait Encoder {
 }
 
 /// A frame of NCBI's object stack that `GetStackTraceASN` reads.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 enum Frame {
-    /// A member or a choice variant: `.name`.
-    Named(String),
+    /// A member or a choice variant: `.name`, its name `ObjectStack::names[from..to]`.
+    Named { from: usize, to: usize },
     /// A container: nothing.
     List,
     /// A container element: `.E`, unless `shown` is false (an element of a named type in
@@ -531,6 +531,115 @@ enum Frame {
     Type(&'static str),
 }
 
+/// NCBI's object stack of a document (`CObjectStack`): the root's type and the frames open, the
+/// names of the members and variants in one buffer. `Traced` keeps it for the documents that it
+/// follows; NCBI's JSON stream (`json::JsonEncoder`) for its throw at a NaN or an infinity
+/// (`json::JsonThrow`), which any real of any document can meet.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ObjectStack {
+    root: String,
+    frames: Vec<Frame>,
+    names: String,
+}
+
+impl ObjectStack {
+    /// The document's type, the root of the stack.
+    pub(crate) fn set_root(&mut self, type_name: &str) {
+        self.root.clear();
+        self.root.push_str(type_name);
+    }
+
+    /// A member or a choice variant entered.
+    pub(crate) fn push_named(&mut self, name: &str) {
+        let from = self.names.len();
+        self.names.push_str(name);
+        self.frames.push(Frame::Named {
+            from,
+            to: self.names.len(),
+        });
+    }
+
+    /// A container entered.
+    pub(crate) fn push_list(&mut self) {
+        self.frames.push(Frame::List);
+    }
+
+    /// A named type that is neither a SEQUENCE nor a CHOICE entered (`Frame::Type`).
+    fn push_type(&mut self, type_name: &'static str) {
+        self.frames.push(Frame::Type(type_name));
+    }
+
+    /// The next element of the container: the open element's frame left, the element's pushed.
+    pub(crate) fn element(&mut self) {
+        self.end_element();
+        self.frames.push(Frame::Element { shown: true });
+    }
+
+    /// `EndContainerElement` of the open element, if any.
+    pub(crate) fn end_element(&mut self) {
+        if matches!(self.frames.last(), Some(Frame::Element { .. })) {
+            self.frames.pop();
+        }
+    }
+
+    /// The innermost frame left.
+    pub(crate) fn pop(&mut self) {
+        if let Some(Frame::Named { from, .. }) = self.frames.pop() {
+            self.names.truncate(from);
+        }
+    }
+
+    /// The open element has no frame in NCBI's XML stream (`Traced::name_element`).
+    fn hide_element(&mut self) {
+        if let Some(Frame::Element { shown }) = self.frames.last_mut() {
+            *shown = false;
+        }
+    }
+
+    /// Whether the innermost frame is an element's that the trace shows.
+    fn shows_element(&self) -> bool {
+        matches!(self.frames.last(), Some(Frame::Element { shown: true }))
+    }
+
+    /// `CObjectStack::GetStackTraceASN` of the frames (`object_stack_trace`).
+    pub(crate) fn stack_trace(&self) -> String {
+        object_stack_trace(
+            &self.root,
+            self.frames.iter().filter_map(|frame| match *frame {
+                Frame::Named { from, to } => Some(StackStep::Member(&self.names[from..to])),
+                Frame::Element { shown: true } => Some(StackStep::Element),
+                Frame::Element { shown: false } | Frame::List | Frame::Type(_) => None,
+            }),
+        )
+    }
+
+    // NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:1211-1227
+    // NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:1366-1376
+    /// `GetFrameName()` of the root's frame and of each frame open, outermost first. NCBI's XML
+    /// stream (`xml`) pushes no frame for a container of LOSAT's types (an anonymous SET OF or
+    /// SEQUENCE OF: its named lists are the types of `begin_named`) nor for an element of a named
+    /// type, and a frame for each named type of `begin_named`; the ASN.1 text and binary streams
+    /// and the JSON stream the reverse.
+    pub(crate) fn frame_names(&self, xml: bool) -> Vec<String> {
+        use super::object_frame::{frame_name, FrameKind};
+        std::iter::once(frame_name(FrameKind::Named, Some(&self.root), None))
+            .chain(self.frames.iter().filter_map(|frame| match *frame {
+                Frame::Named { from, to } => Some(frame_name(
+                    FrameKind::ClassMember,
+                    None,
+                    Some(&self.names[from..to]),
+                )),
+                Frame::List => (!xml).then(|| frame_name(FrameKind::Array, None, None)),
+                Frame::Element { shown } => {
+                    (!xml || shown).then(|| frame_name(FrameKind::ArrayElement, None, None))
+                }
+                Frame::Type(name) => xml.then(|| frame_name(FrameKind::Named, Some(name), None)),
+            }))
+            .map(str::to_string)
+            .collect()
+    }
+}
+
 /// The encoder `E` (ASN.1 text, ASN.1 binary, or XML in the archive's object mode, whose
 /// `variant_string_list` is the trait's sequence of calls; not the standard-XML mode of outfmt
 /// 14 / 16, which writes it otherwise) with NCBI's object stack, for the posts of the bytes that
@@ -539,8 +648,10 @@ enum Frame {
 /// before they write, `report::archive`; the mask writers, the Seq-annots of outfmt 8 and 9
 /// (`seqalign::write_query_to`) and psiblast's PSSM file (`pssm::asn_text_posting`) write a
 /// document again when the first writing reported `SerialError::NonVisibleChar`); it writes the
-/// strings with `visible_str_replacing`. The encoders by themselves keep no stack and replace nothing, so that
-/// the documents without such a byte are written as before.
+/// strings with `visible_str_replacing`. The encoders by themselves replace nothing, and keep no
+/// stack but the JSON stream's (`ObjectStack`, for its throw at a NaN or an infinity, which no
+/// check before a document can foresee: a report's hits are written once), so that the documents
+/// without such a byte are written as before.
 ///
 /// The positions count from the document's start: `flush_to` counts the bytes that it hands on
 /// (the bytes for the binary stream, the ends of line for the text and XML streams), and `base`
@@ -566,8 +677,7 @@ pub struct Traced<E, P = fn(&ReplacedChar) -> std::io::Result<()>> {
     /// The bytes and the ends of line of the encoder's buffer that `flush_to` handed on.
     flushed_bytes: u64,
     flushed_lines: u64,
-    root: String,
-    frames: Vec<Frame>,
+    stack: ObjectStack,
     /// NCBI's output buffer of the document (`E::STREAM`).
     buffer: Option<OutBuffer>,
     /// The bytes of the document handed on.
@@ -618,8 +728,7 @@ impl<E: Encoder> Traced<E> {
             xml: false,
             flushed_bytes: 0,
             flushed_lines: 0,
-            root: String::new(),
-            frames: Vec::new(),
+            stack: ObjectStack::default(),
             buffer: E::STREAM.map(OutBuffer::new),
             handed: 0,
             posted: Vec::new(),
@@ -649,8 +758,7 @@ impl<E: Encoder> Traced<E> {
             xml: self.xml,
             flushed_bytes: self.flushed_bytes,
             flushed_lines: self.flushed_lines,
-            root: self.root,
-            frames: self.frames,
+            stack: self.stack,
             buffer: self.buffer,
             handed: self.handed,
             foreign: self.foreign,
@@ -695,16 +803,9 @@ pub(crate) fn object_stack_trace<'a>(
 }
 
 impl<E: Encoder, P> Traced<E, P> {
-    /// `CObjectStack::GetStackTraceASN` of the frames (`object_stack_trace`).
+    /// `CObjectStack::GetStackTraceASN` of the frames (`ObjectStack::stack_trace`).
     pub fn stack_trace(&self) -> String {
-        object_stack_trace(
-            &self.root,
-            self.frames.iter().filter_map(|frame| match frame {
-                Frame::Named(name) => Some(StackStep::Member(name)),
-                Frame::Element { shown: true } => Some(StackStep::Element),
-                Frame::Element { shown: false } | Frame::List | Frame::Type(_) => None,
-            }),
-        )
+        self.stack.stack_trace()
     }
 
     /// The writes of NCBI's buffer of the document to its output so far (`OutBuffer::pieces`):
@@ -737,27 +838,10 @@ impl<E: Encoder, P> Traced<E, P> {
         self.thrown.take()
     }
 
-    // NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:1211-1227
-    // NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:1366-1376
     /// `GetFrameName()` of the root's frame and of each frame open, outermost first
-    /// (`NullElement::frames`). NCBI's XML stream pushes no frame for a container of LOSAT's types
-    /// (an anonymous SET OF or SEQUENCE OF: its named lists are the types of `begin_named`) nor
-    /// for an element of a named type, and a frame for each named type of `begin_named`; the
-    /// ASN.1 text and binary streams the reverse.
+    /// (`NullElement::frames`; `ObjectStack::frame_names` of NCBI's XML stream or of the others).
     fn frame_names(&self) -> Vec<String> {
-        use super::object_frame::{frame_name, FrameKind};
-        let xml = self.xml;
-        std::iter::once(frame_name(FrameKind::Named, Some(&self.root), None))
-            .chain(self.frames.iter().filter_map(|frame| match frame {
-                Frame::Named(name) => Some(frame_name(FrameKind::ClassMember, None, Some(name))),
-                Frame::List => (!xml).then(|| frame_name(FrameKind::Array, None, None)),
-                Frame::Element { shown } => {
-                    (!xml || *shown).then(|| frame_name(FrameKind::ArrayElement, None, None))
-                }
-                Frame::Type(name) => xml.then(|| frame_name(FrameKind::Named, Some(name), None)),
-            }))
-            .map(str::to_string)
-            .collect()
+        self.stack.frame_names(self.xml)
     }
 
     /// The bytes replaced so far (`ReplacedChar`) and not posted, which it forgets.
@@ -773,13 +857,6 @@ impl<E: Encoder, P> Traced<E, P> {
         std::mem::take(&mut self.posted)
     }
 
-    /// `EndContainerElement` of the open element, if any.
-    fn end_element(&mut self) {
-        if matches!(self.frames.last(), Some(Frame::Element { .. })) {
-            self.frames.pop();
-        }
-    }
-
     /// The value of the element just opened starts with the named type `type_name`: NCBI's
     /// XML stream has no element frame for it.
     ///
@@ -789,9 +866,7 @@ impl<E: Encoder, P> Traced<E, P> {
     /// `xml::anonymous_type`) has no name, so its element keeps its frame.
     fn name_element(&mut self, type_name: &str) {
         if self.xml && !type_name.is_empty() && !super::xml::anonymous_type(type_name) {
-            if let Some(Frame::Element { shown }) = self.frames.last_mut() {
-                *shown = false;
-            }
+            self.stack.hide_element();
         }
     }
 }
@@ -934,7 +1009,7 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Encoder for Tra
         self.inner.data_format()
     }
     fn begin_document(&mut self, type_name: &str) {
-        self.root = type_name.to_string();
+        self.stack.set_root(type_name);
         self.call(Piece::Header, |inner| inner.begin_document(type_name));
     }
     fn end_document(&mut self) {
@@ -949,44 +1024,43 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Encoder for Tra
     }
     fn begin_named(&mut self, type_name: &'static str) {
         self.name_element(type_name);
-        self.frames.push(Frame::Type(type_name));
+        self.stack.push_type(type_name);
         self.call(Piece::Markup, |inner| inner.begin_named(type_name));
     }
     fn end_named(&mut self) {
         self.call(Piece::Markup, |inner| inner.end_named());
-        self.frames.pop();
+        self.stack.pop();
     }
     fn member(&mut self, name: &str, tag: u8) {
         self.member_written = self.buffer.as_ref().map_or(0, OutBuffer::written);
-        self.frames.push(Frame::Named(name.to_string()));
+        self.stack.push_named(name);
         self.call(Piece::Markup, |inner| inner.member(name, tag));
     }
     fn end_member(&mut self) {
         self.call(Piece::Markup, |inner| inner.end_member());
-        self.frames.pop();
+        self.stack.pop();
     }
     fn begin_list(&mut self, set: bool) {
-        self.frames.push(Frame::List);
+        self.stack.push_list();
         self.call(Piece::Markup, |inner| inner.begin_list(set));
     }
     fn element(&mut self) {
-        self.end_element();
-        self.frames.push(Frame::Element { shown: true });
+        self.stack.element();
         self.call(Piece::Markup, |inner| inner.element());
     }
     fn end_list(&mut self) {
-        self.end_element();
-        self.frames.pop();
+        self.stack.end_element();
+        self.stack.pop();
         self.call(Piece::Markup, |inner| inner.end_list());
     }
     fn variant(&mut self, type_name: &str, name: &str, tag: u8) {
         self.name_element(type_name);
-        self.frames.push(Frame::Named(name.to_string()));
+        self.stack.push_named(name);
         self.call(Piece::Markup, |inner| inner.variant(type_name, name, tag));
     }
     fn end_variant(&mut self) {
         self.call(Piece::Markup, |inner| inner.end_variant());
-        self.frames.pop();
+        self.stack.pop();
     }
     fn int(&mut self, value: i32) {
         self.call(Piece::Number, |inner| inner.int(value));
@@ -1037,10 +1111,9 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Encoder for Tra
         if self.thrown.is_some() {
             return;
         }
-        self.end_element();
-        self.frames.push(Frame::Element { shown: true });
+        self.stack.element();
         self.name_element(element_type);
-        let element_frame = matches!(self.frames.last(), Some(Frame::Element { shown: true }));
+        let element_frame = self.stack.shows_element();
         let position = self.inner.position();
         self.inner.null_element(element_type);
         let (Some(stream), Some(position)) =

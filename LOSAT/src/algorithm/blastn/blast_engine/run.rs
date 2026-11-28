@@ -3541,13 +3541,8 @@ impl HitListEntry for PrelimHspList {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1740-1748
     fn update_best_evalue(&mut self) {
-        let mut best = i32::MAX as f64;
-        for hsp in &self.hsps {
-            if hsp.prelim_evalue < best {
-                best = hsp.prelim_evalue;
-            }
-        }
-        self.best_evalue = best;
+        self.best_evalue =
+            crate::common::best_evalue(self.hsps.iter().map(|hsp| hsp.prelim_evalue));
     }
 
     fn first_score(&self) -> Option<i32> {

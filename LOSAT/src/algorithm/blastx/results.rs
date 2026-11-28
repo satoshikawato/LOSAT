@@ -119,10 +119,7 @@ pub struct HspList {
 impl HspList {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1737-1749
     pub(crate) fn refresh(&mut self) {
-        self.best_evalue = self
-            .hsps
-            .iter()
-            .fold(i32::MAX as f64, |best, h| h.evalue.min(best));
+        self.best_evalue = crate::common::best_evalue(self.hsps.iter().map(|h| h.evalue));
     }
     pub(crate) fn sort_evalue(&mut self) {
         self.hsps.sort_by(compare_hsp);
@@ -836,9 +833,11 @@ impl CompoHeap {
     /// it), and no insert takes one away. `x_early_ahead` counts so; `results_boundary_tests.rs`
     /// checks the equivalence over random inserts.
     pub fn early(e: f64, heaps: &[Self]) -> bool {
-        heaps
-            .iter()
-            .all(|h| h.entries.len() >= h.threshold && h.worst <= h.cutoff && e > 5.0 * h.cutoff)
+        heaps.iter().all(|h| {
+            h.entries.len() >= h.threshold
+                && h.worst <= h.cutoff
+                && crate::common::evalue_not_at_most(e, 5.0 * h.cutoff)
+        })
     }
 
     /// No NCBI counterpart: scheduling only. The guess of the composition redo that offers matches
@@ -854,7 +853,7 @@ impl CompoHeap {
             let needed = h.threshold.saturating_sub(ahead[q]);
             // A heap whose worst entry is at or below the cutoff has all its entries there; one
             // above it holds `threshold` entries at most, so the count reads that many.
-            e > 5.0 * h.cutoff
+            crate::common::evalue_not_at_most(e, 5.0 * h.cutoff)
                 && h.entries.len() >= needed
                 && (h.worst <= h.cutoff
                     || h.entries

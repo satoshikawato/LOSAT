@@ -433,7 +433,7 @@ impl RedoMatch<'_> {
         let mut best_evalue = i32::MAX as f64;
         for hsp in &mut redone {
             hsp.e_value = self.stats.e_value(hsp.align.score, &run.karlin, m, n);
-            best_evalue = best_evalue.min(hsp.e_value);
+            best_evalue = crate::common::ncbi_min_evalue(best_evalue, hsp.e_value);
         }
         let (best_score, kept) = self.reap_by_expect(&mut redone, best_evalue)?;
         let template = &hsps[0];

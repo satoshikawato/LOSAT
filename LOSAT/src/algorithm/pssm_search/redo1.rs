@@ -766,15 +766,12 @@ impl RedoMatch<'_> {
     fn reap_by_expect(&self, redone: &mut Vec<Redone>, best_evalue: f64) -> Option<(i32, Kept)> {
         // NCBI drops an HSP whose e-value is above `-evalue`: a NaN e-value stays, and an
         // `-evalue` of NaN (NCBI's option check lets it pass) keeps every HSP.
-        #[expect(
-            clippy::neg_cmp_op_on_partial_ord,
-            reason = "NCBI removes an HSP only when evalue > cutoff (blast_hits.c:1996); `<=` would drop NaN values and keep none under a NaN cutoff"
-        )]
-        redone.retain(|hsp| !(hsp.e_value > self.expect_value));
+        redone.retain(|hsp| crate::common::evalue_not_above(hsp.e_value, self.expect_value));
         let first = redone.first()?;
         // The list is significant when its best E-value is at most `-evalue` (NCBI's test): NaN
-        // E-values (a PSSM whose gapped block gives them) pass the reaping above but leave it at
-        // `INT4_MAX`, and under an `-evalue` of NaN no list is. A database search drops a list
+        // E-values (a PSSM whose gapped block gives them) pass the reaping above, and NCBI's MIN
+        // makes a NaN the best (`crate::common::ncbi_min_evalue`), which no `-evalue` passes;
+        // under an `-evalue` of NaN no list is. A database search drops a list
         // that is not; RPS-BLAST's traceback, which gives the redo no sequence source, gets it
         // back as the redo made it (`Kept::Raw`).
         let significant = best_evalue <= self.expect_value;
@@ -831,7 +828,7 @@ impl RedoMatch<'_> {
                         (query_length, subject_length)
                     };
                     hsp.e_value = self.stats.e_value(hsp.align.score, &run.karlin, m, n);
-                    best_evalue = best_evalue.min(hsp.e_value);
+                    best_evalue = crate::common::ncbi_min_evalue(best_evalue, hsp.e_value);
                 }
                 best_evalue
             }
@@ -1074,7 +1071,7 @@ impl RedoMatch<'_> {
                         (query_length, subject_length)
                     };
                     hsp.e_value = self.stats.e_value(hsp.align.score, &run.karlin, m, n);
-                    best_evalue = best_evalue.min(hsp.e_value);
+                    best_evalue = crate::common::ncbi_min_evalue(best_evalue, hsp.e_value);
                 }
                 best_evalue
             }
@@ -1121,15 +1118,16 @@ impl RedoMatch<'_> {
                 kind.frame_letters(subject, align.frame),
                 self.matrix,
             );
-            if C::SUBJECT_IS_TRANSLATED {
-                // The Seq-align's counts (see `translation_buffer_counts`), none for a raw list.
-                (hsp.num_ident, hsp.num_positives) = match kept {
-                    Kept::Normalized => {
-                        translation_buffer_counts::<C>(&hsp, run.query_nomask, subject, self.matrix)
-                    }
-                    Kept::Raw => (0, 0),
-                };
-            }
+            // The engine's counts, which the Seq-aligns show (see `translation_buffer_counts`):
+            // none for a raw list, whose reports count the letters
+            // (`blastp::blast_engine::recount_shown_identities`).
+            (hsp.num_ident, hsp.num_positives) = match kept {
+                Kept::Normalized if C::SUBJECT_IS_TRANSLATED => {
+                    translation_buffer_counts::<C>(&hsp, run.query_nomask, subject, self.matrix)
+                }
+                Kept::Normalized => (hsp.num_ident, hsp.num_positives),
+                Kept::Raw => (0, 0),
+            };
             hsp.e_value = e_value;
             hsp.num = num;
             hsp.bit_score = kept.bit_score(score, run.karlin.lambda, run.log_k);
@@ -1623,14 +1621,15 @@ fn blast_nint(x: f64) -> i32 {
 }
 
 /// `BlastCompo_EarlyTermination`: every query's heap holds its hit list size and its worst
-/// e-value is at most its cutoff, and `evalue` is above five times every cutoff.
+/// e-value is at most its cutoff, and `evalue` is not at most five times any cutoff (NCBI's
+/// `evalue <= EVALUE_STRETCH * ecutoff` goes on: a NaN best e-value ends the match).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1561-1579
 fn early_termination(evalue: f64, heaps: &[BlastCompoHeap]) -> bool {
     heaps.iter().all(|heap| {
         heap.n >= heap.heap_threshold
             && heap.worst_evalue <= heap.ecutoff
-            && evalue > COMPO_HEAP_EVALUE_STRETCH * heap.ecutoff
+            && crate::common::evalue_not_at_most(evalue, COMPO_HEAP_EVALUE_STRETCH * heap.ecutoff)
     })
 }
 

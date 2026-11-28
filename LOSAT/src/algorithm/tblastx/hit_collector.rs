@@ -67,13 +67,7 @@ impl HitListEntry for TblastxHspList {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1739-1749
     fn update_best_evalue(&mut self) {
-        let mut best = i32::MAX as f64;
-        for hsp in &self.hsps {
-            if hsp.hit.e_value < best {
-                best = hsp.hit.e_value;
-            }
-        }
-        self.best_evalue = best;
+        self.best_evalue = crate::common::best_evalue(self.hsps.iter().map(|hsp| hsp.hit.e_value));
     }
 
     fn first_score(&self) -> Option<i32> {

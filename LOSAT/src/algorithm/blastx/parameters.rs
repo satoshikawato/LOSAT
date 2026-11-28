@@ -396,7 +396,7 @@ pub fn subject_parameters(
         gumbel.as_ref(),
         n,
         average,
-        options.composition > 1,
+        super::statistics::prelim_evalue(options, false),
     )?;
     Ok(if options.gapped {
         gapped_x_drops(options, &gapped_karlin(options)).0
@@ -481,7 +481,7 @@ pub(crate) fn subject_update(
         gumbel.as_ref(),
         length,
         length,
-        false,
+        super::statistics::prelim_evalue(options, true),
     )?;
     Ok(parameters)
 }
@@ -601,11 +601,12 @@ pub(crate) fn subject_word_cutoff_min(
 
 /// The cutoffs of each valid context (`BlastHitSavingParametersNew`/`Update`,
 /// `BlastInitialWordParametersNew`/`Update`, cited above `SubjectNumbers`) after its effective
-/// lengths: the hit-saving cutoff from `evalue` (stretched 5 times for the Gumbel block with
-/// `stretch`, a composition-based statistics above 1) at the subject length `n` (Spouge's, and the
-/// sum statistics' search space), and the word cutoff, which an ungapped search computes at the
-/// subject length `average`. The setup passes the shortest or average subject length, the
-/// statistics of each subject the subject's own length and no stretch (`subject_update`).
+/// lengths: the hit-saving cutoff at the subject length `n`, Spouge's from NCBI's preliminary
+/// e-value `prelim_evalue` (`statistics::prelim_evalue`, the one owner of its stretch) with the
+/// Gumbel block, else from `-evalue` (and the sum statistics' search space), and the word cutoff,
+/// which an ungapped search computes at the subject length `average`. The setup passes the
+/// shortest or average subject length, the statistics of each subject the subject's own length
+/// (`subject_update`).
 fn context_cutoffs(
     batch: &PreparedQueryBatch,
     parameters: &mut [ContextParameters],
@@ -613,7 +614,7 @@ fn context_cutoffs(
     gumbel: Option<&BlastGumbelBlk>,
     n: i32,
     average: i32,
-    stretch: bool,
+    prelim_evalue: f64,
 ) -> Result<()> {
     let gapped = gapped_karlin(options);
     let decay = gap_decay_rate(options);
@@ -636,17 +637,7 @@ fn context_cutoffs(
         }
         let ka = if options.gapped { gapped } else { p.ungapped };
         p.hit_cutoff_max = if let Some(gbp) = gumbel {
-            blast_spouge_etos(
-                if stretch {
-                    5.0 * options.evalue
-                } else {
-                    options.evalue
-                },
-                &ka,
-                gbp,
-                c.length as i32,
-                n,
-            )
+            blast_spouge_etos(prelim_evalue, &ka, gbp, c.length as i32, n)
         } else {
             cutoff_score(
                 options.evalue,

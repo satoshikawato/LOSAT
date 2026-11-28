@@ -87,8 +87,7 @@ pub fn evaluate_gapped(
     let best_evalue = if hsps.is_empty() {
         0.0
     } else {
-        hsps.iter()
-            .fold(i32::MAX as f64, |best, h| h.evalue.min(best))
+        crate::common::best_evalue(hsps.iter().map(|h| h.evalue))
     };
     Ok(LinkedHspList { hsps, best_evalue })
 }
@@ -98,9 +97,10 @@ pub fn evaluate_gapped(
 /// NCBI's `params->prelim_evalue`, the e-value of the preliminary reap (`reap_preliminary`):
 /// `-evalue`, stretched 5 times with the Gumbel block (`ResolvedOptions::has_gumbel_block`) and a
 /// composition-based statistics above 1, except where NCBI computes the statistics of each subject
-/// (`per_subject`: `-subject`, a database length of 0), whose update of the hit-saving parameters
-/// passes a composition of 0 before the subject's search (line RG item X-evalue-nan; LOSAT
-/// stretched it there too).
+/// (`per_subject`: a database whose length is 0; a `-subject` set is scanned as a database whose
+/// length is the sum of its records, and stretched), whose update of the hit-saving parameters
+/// passes a composition of 0 before the subject's search (line RG item X-evalue-nan: LOSAT
+/// stretched it for a database of length 0 too, row db.cnt.l0.bx; no output difference found).
 pub fn prelim_evalue(options: &ResolvedOptions, per_subject: bool) -> f64 {
     if options.composition > 1 && options.has_gumbel_block() && !per_subject {
         5.0 * options.evalue
@@ -259,8 +259,7 @@ pub(crate) fn evaluate_ungapped(
     let best_evalue = if hsps.is_empty() {
         0.0
     } else {
-        hsps.iter()
-            .fold(i32::MAX as f64, |best, h| h.evalue.min(best))
+        crate::common::best_evalue(hsps.iter().map(|h| h.evalue))
     };
     Ok(LinkedHspList { hsps, best_evalue })
 }

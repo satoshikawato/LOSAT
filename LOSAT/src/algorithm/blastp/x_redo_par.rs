@@ -562,7 +562,8 @@ fn x_sw_continued(
             // The replay ends the search here (or the early termination test ends the match).
             Err(_) => break,
         };
-        let may_end = end_above[q_idx].is_some_and(|above| local_match.best_evalue > above);
+        let may_end = end_above[q_idx]
+            .is_some_and(|above| crate::common::evalue_not_at_most(local_match.best_evalue, above));
         if exact && !may_end {
             let heap = ahead.get_or_insert_with(|| heaps[q_idx].keys());
             match (computed.deferred, &computed.result) {
@@ -746,7 +747,8 @@ fn x_window<const SW: bool>(
     // at its replay, the window holding `before` of the query's matches before it.
     let may_be_ended = |q_idx: usize, batch_open: bool, best_evalue: f64, before: usize| {
         batch_open
-            && end_above[q_idx].is_some_and(|above| best_evalue > above)
+            && end_above[q_idx]
+                .is_some_and(|above| crate::common::evalue_not_at_most(best_evalue, above))
             && heaps[q_idx].may_fill(before)
     };
     // With `SW`: the carried matches, in jobs of `X_JOB_MATCHES`, which count toward the second

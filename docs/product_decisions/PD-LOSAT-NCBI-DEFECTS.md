@@ -1047,7 +1047,9 @@
   reaps and the redo's test of the best e-value take NCBI's comparisons, and the explicit
   rejection of an infinite `-evalue` (decision D12) is limited to the composition-based redo of a
   search with a sequence source, as DBL_MAX's is (RPSBLAST and RPSTBLASTN run both, and their redo
-  hands lists back raw as NCBI's does), while BLASTX refuses DBL_MAX with the redo too; no new
+  hands lists back raw as NCBI's does), and BLASTX, which ran DBL_MAX with the redo, refuses it:
+  decision D12 applied to BLASTX, because NCBI's blastx ends with rc 139 there on some inputs
+  (LOSAT refuses where NCBI crashes), an extension of D12's scope reported to the Owner; no new
   exception, rules 3 and 4; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
@@ -1244,8 +1246,9 @@ Explicit rejections (rule 3):
   and BLASTN run these values and match NCBI, and so do RPSBLAST and RPSTBLASTN with the redo since
   version 1.127: RPS-BLAST's traceback gives the redo no sequence source, gets every list back and
   drops a list without HSPs before the hit list (`blast_traceback.c:1238-1275`), so NCBI does not
-  crash there (they were refused before). BLASTX ran DBL_MAX with the redo until version 1.127;
-  NCBI BLAST+ 2.17.0's blastx crashes there too (rc 139 with DBL_MAX and `+inf`, `-sum_stats false`,
+  crash there (they were refused before). Since version 1.127 the decision applies to BLASTX too,
+  which ran DBL_MAX with the redo until then, because NCBI BLAST+ 2.17.0's blastx crashes there
+  (rc 139 with DBL_MAX and `+inf`, `-sum_stats false`,
   whose redo keeps an alignment of any positive score: the second protein of
   `tests/fasta/outfmt0/e2e_protein_query.faa` back-translated, against the 300 subjects of
   `e2e_many_subject.faa`, as `-subject` or a database; `1.7976931348623156e308` runs).

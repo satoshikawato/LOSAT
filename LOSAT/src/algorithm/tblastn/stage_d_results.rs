@@ -391,10 +391,7 @@ impl KappaResultHitList {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1734-1750:
 fn refresh_best_evalue(list: &mut LinkedHspList) {
-    list.best_evalue = list
-        .hsps
-        .iter()
-        .fold(i32::MAX as f64, |best, hsp| best.min(hsp.evalue));
+    list.best_evalue = crate::common::best_evalue(list.hsps.iter().map(|hsp| hsp.evalue));
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1385-1455:

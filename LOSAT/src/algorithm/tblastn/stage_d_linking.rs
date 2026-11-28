@@ -602,11 +602,8 @@ pub(super) fn compare_preliminary_lists_for_kappa(
 // limit of NaN (an `-evalue` of NaN, which NCBI's option check lets pass) every HSP stays. The
 // preliminary stage of each subject reaps with it (`stage_d_pipeline`).
 pub(super) fn reap_by_evalue(list: &mut LinkedHspList, prelim_evalue: f64) {
-    #[expect(
-        clippy::neg_cmp_op_on_partial_ord,
-        reason = "NCBI removes an HSP only when evalue > cutoff (blast_hits.c:1996); `<=` would drop NaN values and keep none under a NaN cutoff"
-    )]
-    list.hsps.retain(|hsp| !(hsp.evalue > prelim_evalue));
+    list.hsps
+        .retain(|hsp| crate::common::evalue_not_above(hsp.evalue, prelim_evalue));
 }
 
 #[cfg(test)]

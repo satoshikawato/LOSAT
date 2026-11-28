@@ -727,13 +727,7 @@ pub fn sort_hsplist_by_evalue(list: &mut BlastnHspList) {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1739-1748
 pub fn update_best_evalue(list: &mut BlastnHspList) {
-    let mut best = i32::MAX as f64;
-    for hsp in &list.hsps {
-        if hsp.e_value < best {
-            best = hsp.e_value;
-        }
-    }
-    list.best_evalue = best;
+    list.best_evalue = crate::common::best_evalue(list.hsps.iter().map(|hsp| hsp.e_value));
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2049-2067

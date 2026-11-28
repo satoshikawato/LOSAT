@@ -1814,9 +1814,6 @@ pub(super) fn report_values(
                 .db_mask_resolved
                 .as_ref()
                 .is_some_and(|mask| mask.kind == crate::blastinput::db_mask::MaskKind::Hard),
-        // rpsblast's composition-based redo keeps no list significant under an `-evalue` of NaN
-        // (`redo1::Kept::Raw`).
-        args.rps_search.is_some() && args.comp_based_stats.is_enabled() && args.evalue.is_nan(),
         &mut engine_counts,
     );
     Ok(ReportValues {

@@ -7897,19 +7897,20 @@ fn left_of_query_refusal(
         keeps_one(&finished, offset)
     })?;
     let id = records.get(q_idx).map_or(&[][..], FastaRecord::shown_id);
-    Some(hsp_left_of_query(id))
+    Some(hsp_left_of_query(id, args.app().name()))
 }
 
 /// LOSAT's refusal of the query `query_id` in a `-subject` search whose final hit list keeps an
 /// HSP with a Seq-align query start below 0 (`left_of_query_refusal`): NCBI stops with an
 /// exception when mapping the alignment to the subject (`s_RemapToSubjectLoc`, exit status 255),
 /// after what it wrote before (`fail_batch!` in `run_in_pool`). Database searches (`-db`) do not
-/// remap subjects and handle class N HSPs in each report formatter (`left_of_query.rs`).
+/// remap subjects and handle class N HSPs in each report formatter (`left_of_query.rs`). `app` is
+/// the running application (`Program::name`: BLASTN, or TBLASTX where it runs a BLASTN strategy).
 #[cold]
 #[inline(never)]
-fn hsp_left_of_query(query_id: &[u8]) -> anyhow::Error {
+fn hsp_left_of_query(query_id: &[u8], app: &str) -> anyhow::Error {
     anyhow::anyhow!(
-        "BLASTN: query {}: an HSP that NCBI BLAST+ keeps outside its query context (from an ungapped extension past an end of the context, such as with -xdrop_ungap 1e10) starts before the query's first letter, where NCBI BLAST+ stops with an exception when it maps the alignment to the subject (exit status 255); LOSAT refuses it after what NCBI BLAST+ writes before",
+        "{app}: query {}: an HSP that NCBI BLAST+ keeps outside its query context (from an ungapped extension past an end of the context, such as with -xdrop_ungap 1e10) starts before the query's first letter, where NCBI BLAST+ stops with an exception when it maps the alignment to the subject (exit status 255); LOSAT refuses it after what NCBI BLAST+ writes before",
         String::from_utf8_lossy(query_id)
     )
 }

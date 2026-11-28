@@ -1614,11 +1614,13 @@ fn scan_chunk_one_hit<S: TbxScore, const WIDE: bool, const AROUND: bool>(
                     None => None,
                 };
                 let Some(hit) = again else {
-                    // A word past the letters, which the scan does not give.
+                    // A word past the letters, which the scan does not give (named by the
+                    // running application, `XReadFailure::program`).
                     x_read_failure.fail(
                         s_idx,
                         anyhow::anyhow!(
-                            "TBLASTX -window_size 0: the word at query offset {} and subject offset {} is past the letters (internal error)",
+                            "{} -window_size 0: the word at query offset {} and subject offset {} is past the letters (internal error)",
+                            x_read_failure.program(),
                             query_offset,
                             subject_offset
                         ),

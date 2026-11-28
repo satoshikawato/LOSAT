@@ -366,7 +366,10 @@ fn init<'a>(
                 warnings.push(warning)
             });
         for warning in warnings {
-            let _ = post_seq_id_warning(&mut stdout, diag, &warning);
+            // A post that met a closed pipe ends the run there (exit status 0, `ncbi_app::run`).
+            if post_seq_id_warning(&mut stdout, diag, &warning).is_err() {
+                return Err(0);
+            }
         }
         match read {
             Ok(_) => {}
@@ -420,7 +423,9 @@ fn init<'a>(
 /// Runs `post` on `diag`, modelling `cerr`'s tie to `cout` (`cerr.tie()`): when diagnostics go to
 /// `cerr` (`diag.is_cerr()`), `stdout` (`cout`) is flushed first so standard output and standard
 /// error interleave in NCBI's order, and a closed pipe stops the run before the diagnostic line is
-/// written (`RunError::ClosedPipe`). Flushing an empty `cout` buffer writes nothing.
+/// written (`RunError::ClosedPipe`). Flushing an empty `cout` buffer writes nothing. A post to the
+/// file of `-logfile` that meets a closed pipe (`Diag::closed`) stops the run there too, as
+/// SIGPIPE ends NCBI's process at that write (line RG item T8d).
 // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6492,7570-7610
 fn post_diag(
     stdout: &mut Cout<'_>,
@@ -434,6 +439,9 @@ fn post_diag(
         }
     }
     post(diag);
+    if diag.closed() {
+        return Err(RunError::closed_pipe());
+    }
     Ok(())
 }
 

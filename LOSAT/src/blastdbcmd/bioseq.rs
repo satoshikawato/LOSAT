@@ -261,7 +261,8 @@ impl AsnTextDocument for BioseqDocument<'_> {
 
 // NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:413-444
 // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:843-908 (the object stream's buffer
-// writes to the output when it is full and at `Close`, which does not flush the output)
+// writes to the output when it is full and at `Close`; the object stream's `Close` flushes the
+// output first, `Output::asn_text`)
 /// The ASN.1 text of `document` as NCBI's stream writes it to the output: the writes of its
 /// buffer (`Traced::pieces`, each one insertion; a document that fits the buffer is one), or,
 /// where a VisibleString holds a byte that NCBI's stream replaces by `#` (a name of the taxonomy

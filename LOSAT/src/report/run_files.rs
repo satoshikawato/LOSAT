@@ -454,6 +454,29 @@ impl OpenFiles {
         closed
     }
 
+    /// Ends the tools' output streams of a run that ended at a write that met a closed pipe
+    /// (`ncbi_app::Diag::closed`): in the command line's process NCBI's process, ended there by
+    /// SIGPIPE, writes nothing more, so each stream makes NCBI's writes so far and drops what
+    /// NCBI's buffer holds (`ReportStream::end_at_closed_pipe`; an `-out` file of blastdbcmd keeps
+    /// only the blocks its buffer wrote before a post to a closed `-logfile`, line RG item T8d); a
+    /// library run is no process that the signal ends, and its streams end as `finish_streams`
+    /// ends them.
+    pub(crate) fn end_streams_at_closed_pipe(&self) {
+        if !self.command_line {
+            self.finish_streams();
+            return;
+        }
+        let streams = std::mem::take(
+            &mut *self
+                .streams
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        for stream in streams {
+            stream.end_at_closed_pipe();
+        }
+    }
+
     /// The target of the `-logfile` value `name` (`RunFiles::log_target`), whose file, for a
     /// `Receiver`, is an opening of the run's file of that path that appends to it
     /// (`DiagTarget::Stream`), or `ToolLog::Stdout` for `/dev/stdout`. `Err` with LOSAT's refusal

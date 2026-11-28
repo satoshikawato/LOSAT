@@ -55,6 +55,7 @@ static TOOL: Tool = Tool {
     help_full: None,
     short_description: None,
     dry_run: None,
+    closed_log_ends_run: true,
 };
 
 /// Runs `blastdbcmd` with `words` (the command line after `losat blastdbcmd`), after its
@@ -100,7 +101,7 @@ fn run_body(
             .any(|mode| args.given(mode));
     let arg_error = |diag: &mut Diag, error: crate::ncbi_app::args::ArgException| {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
-        diag.post_bytes(&[b"Command line argument error: ".as_slice(), error.message()].concat());
+        diag.post_arg_error(error.message());
         1
     };
     if metadata_mode {

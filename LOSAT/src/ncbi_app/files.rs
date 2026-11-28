@@ -346,12 +346,16 @@ pub(crate) enum OutputFile<'a> {
 /// `CallerFailure` from that write and every later one, which ends the run with "BLAST failed to
 /// write output", exit status 6 (`CATCH_ALL`'s; the caller's writer is tied by nothing, so no
 /// `std::terminate`); LOSAT's own flushes hold, as on NCBI's report stream (`Write::flush`).
+///
+/// `sigpipe`: a closed pipe ends the run (`closed`); unset where NCBI's process ignores SIGPIPE
+/// (blast_formatter, `OutputFile::ignore_sigpipe`), where it fails as any write fails.
 pub(crate) struct CallerOutput<'a> {
     out: &'a mut dyn Write,
     bad: bool,
     closed: bool,
     cut_aware: bool,
     throws: bool,
+    sigpipe: bool,
 }
 
 impl CallerOutput<'_> {
@@ -362,7 +366,7 @@ impl CallerOutput<'_> {
             if self.throws {
                 return Err(caller_failure());
             }
-            if ends_like_sigpipe(&error) {
+            if self.sigpipe && ends_like_sigpipe(&error) {
                 self.closed = true;
                 return Err(error);
             }
@@ -532,6 +536,16 @@ impl OutputFile<'_> {
             OutputFile::Refused(_) => false,
         }
     }
+
+    /// NCBI's process ignores SIGPIPE from here on (`ReportStream::ignore_sigpipe`): a later write
+    /// that meets a closed pipe fails as any write fails, and the run goes on.
+    pub(crate) fn ignore_sigpipe(&mut self) {
+        match self {
+            OutputFile::Stream(stream) => stream.ignore_sigpipe(),
+            OutputFile::Caller(caller) => caller.sigpipe = false,
+            OutputFile::Refused(_) => {}
+        }
+    }
 }
 
 impl Write for OutputFile<'_> {
@@ -654,6 +668,7 @@ pub(crate) fn standard_output_file<'a>(
             closed: false,
             cut_aware: files.tool_log_stdout(),
             throws: false,
+            sigpipe: true,
         })
     }
 }
@@ -673,6 +688,7 @@ pub(crate) fn formatter_standard_output<'a>(
         closed: false,
         cut_aware: files.tool_log_stdout(),
         throws: true,
+        sigpipe: false,
     })
 }
 

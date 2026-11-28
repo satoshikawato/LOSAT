@@ -32,6 +32,7 @@ static TOOL: Tool = Tool {
     help_full: None,
     short_description: None,
     dry_run: None,
+    closed_log_ends_run: true,
 };
 
 /// Runs `makembindex` with `words` (the command line after `losat makembindex`), after its

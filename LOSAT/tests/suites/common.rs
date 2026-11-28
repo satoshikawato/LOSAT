@@ -195,6 +195,8 @@ mod tax_report_streams;
 mod taxdb_tool_texts;
 #[path = "../taxonomy_read_order.rs"]
 mod taxonomy_read_order;
+#[path = "../tool_logfile_closed_pipe.rs"]
+mod tool_logfile_closed_pipe;
 #[path = "../web_v1_search_space.rs"]
 mod web_v1_search_space;
 #[path = "../windows_local_time.rs"]

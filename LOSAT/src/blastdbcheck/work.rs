@@ -121,9 +121,7 @@ pub(super) fn run(
         let file = match args.output_file("logfile", out) {
             Ok(file) => file,
             Err(error) => {
-                diag.post_bytes(
-                    &[b"Command line argument error: ".as_slice(), error.message()].concat(),
-                );
+                diag.post_arg_error(error.message());
                 return 1;
             }
         };

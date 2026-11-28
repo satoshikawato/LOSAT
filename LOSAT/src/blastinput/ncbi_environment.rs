@@ -2456,18 +2456,32 @@ impl ApplicationStart {
         target: &mut DiagTarget,
         stderr: &mut dyn Write,
     ) -> Result<Option<i32>, String> {
+        self.config_load(&mut |text, to_cerr| {
+            if to_cerr {
+                DiagTarget::Stderr.write_text(text, stderr);
+            } else {
+                target.write_text(text, stderr);
+            }
+        })
+    }
+
+    /// `write_config_load` with each of the messages passed to `write`, with whether it goes to
+    /// `cerr` whatever the target (the replay of the programs of `replays_to_stderr`): the tools'
+    /// command line posts them as its other diagnostics (`ncbi_app::Diag::write_text`), where the
+    /// first that meets a closed pipe ends NCBI's process.
+    pub fn config_load(&self, write: &mut dyn FnMut(&[u8], bool)) -> Result<Option<i32>, String> {
         match &self.config {
             Err(reason) => Err(reason.clone()),
             Ok(ConfigLoad::Loaded(posts)) => {
-                target.write_text(posts.as_bytes(), stderr);
+                write(posts.as_bytes(), false);
                 Ok(None)
             }
             Ok(ConfigLoad::NotFound(post)) => {
-                target.write_text(post, stderr);
+                write(post, false);
                 Ok(Some(255))
             }
             Ok(ConfigLoad::Failed(report)) => {
-                target.write_text(report, stderr);
+                write(report, false);
                 if !replays_collected(&self.program) {
                     return Ok(Some(2));
                 }
@@ -2478,11 +2492,7 @@ impl ApplicationStart {
                     .as_bytes()
                     .to_vec();
                 replay.extend_from_slice(report);
-                if replays_to_stderr(&self.program) {
-                    DiagTarget::Stderr.write_text(&replay, stderr);
-                } else {
-                    target.write_text(&replay, stderr);
-                }
+                write(&replay, replays_to_stderr(&self.program));
                 Ok(Some(2))
             }
         }

@@ -81,7 +81,7 @@ pub(super) fn run(
             1
         }
         Err(Failure::Arg(text)) => {
-            diag.post_bytes(&[b"Command line argument error: ".as_slice(), &text].concat());
+            diag.post_arg_error(&text);
             1
         }
         Err(Failure::Exception(exception)) => {

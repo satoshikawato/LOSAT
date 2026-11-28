@@ -52,6 +52,12 @@ pub(crate) struct Tool {
     /// program's `Init` that LOSAT does in its `Run` (makeprofiledb's parameters and files), or
     /// nothing (`None`: exit status 0).
     pub(crate) dry_run: Option<Body>,
+    /// Whether a post to the file of `-logfile` that meets a pipe whose reader has closed it ends
+    /// the run there with exit status 0, where SIGPIPE ends NCBI's process
+    /// (`Diag::write_log_file`): the programs that PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception
+    /// 10 names. Otherwise the failed write is dropped and the run goes on (blastdb_aliastool,
+    /// blastdbcheck and blast_formatter, which it does not name).
+    pub(crate) closed_log_ends_run: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3829-3834
@@ -106,9 +112,16 @@ pub(crate) struct Diag<'a> {
     /// Whether a write to the standard error failed (NCBI's bad `cerr`,
     /// which takes no later text and whose tie no longer writes standard output first).
     failed: bool,
-    /// A write of the run's output met a closed pipe where NCBI's process ended before a text
-    /// (`closed`): no later text is written.
+    /// A write of the run's output met a closed pipe where NCBI's process ended before a text, or
+    /// a text to the file of `-logfile` met one (`write_log_file`): no later text is written.
     closed: bool,
+    /// A text to the file of `-logfile` that meets a closed pipe ends the run (`write_log_file`):
+    /// in the programs of exception 10 (`Tool::closed_log_ends_run`) until NCBI's process ignores
+    /// SIGPIPE (`ignore_sigpipe`).
+    log_sigpipe: bool,
+    /// The run reported an argument error (`report_arg_exception`, `post_arg_error`), whose exit
+    /// status 1 stays where its text met a closed pipe (`argument_error`).
+    argument_error: bool,
 }
 
 impl<'a> Diag<'a> {
@@ -129,6 +142,8 @@ impl<'a> Diag<'a> {
             record: None,
             failed: false,
             closed: false,
+            log_sigpipe: tool.closed_log_ends_run,
+            argument_error: false,
         }
     }
 }
@@ -203,8 +218,9 @@ impl Diag<'_> {
         self.failed
     }
 
-    /// Whether a write of the run's output met a closed pipe before a text (`before_text`): the
-    /// run ends at once, exit status 0, no text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
+    /// Whether a write of the run's output met a closed pipe before a text (`before_text`), or a
+    /// text to the file of `-logfile` did (`write_log_file`): the run ends at once, exit status 0,
+    /// no text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
     pub(crate) fn closed(&self) -> bool {
         self.closed
     }
@@ -250,11 +266,77 @@ impl Diag<'_> {
             write(text);
             return;
         }
+        if place == TextPlace::LogFile {
+            self.write_log_file(text);
+            return;
+        }
         let mut stderr = Noted {
             stream: &mut *self.stderr,
             failed: &mut self.failed,
         };
         self.target.write_text(text, &mut stderr);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6683-6697 (the file's handler
+    // writes each post at once and ignores what the write returns)
+    // NCBI reference (598d8ae6): c++/src/connect/ncbi_socket.c:866-873 (cited at
+    // `report::ostream::ends_like_sigpipe`: NCBI keeps SIGPIPE's default action)
+    /// Writes `text` to the file of `-logfile`: a failed write is dropped, as NCBI's file handler
+    /// drops it, except one that meets a pipe whose reader has closed it, which ends NCBI's process
+    /// by SIGPIPE at that post. In the programs of exception 10 (`Tool::closed_log_ends_run`;
+    /// `log_sigpipe` until `ignore_sigpipe`) the run ends there (`closed`: exit status 0, no later
+    /// text; the program stops where it looks at `closed` after a post), and the command line's
+    /// output streams lose what their buffers hold
+    /// (`report::run_files::OpenFiles::end_streams_at_closed_pipe`): NCBI BLAST+ 2.17.0 with
+    /// `-logfile /dev/stdout` or `/dev/stderr` on a pipe closed before the start, line RG item T8d
+    /// (rpsbproc's own diagnostics, `rpsbproc::Diagnostics`, end so since item T8b).
+    fn write_log_file(&mut self, text: &[u8]) {
+        if let Err(error) = self.target.try_write_to_file(text) {
+            self.closed |= self.log_sigpipe && files::ends_like_sigpipe(&error);
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/connect/ncbi_socket.c:866-873
+    /// NCBI's process ignores SIGPIPE from here on (the connection library started: windowmasker's
+    /// GenBank loader, `windowmasker::work::start_genbank_loader`): a later text to the file of
+    /// `-logfile` that meets a closed pipe is dropped as any failed write, and the run goes on.
+    pub(crate) fn ignore_sigpipe(&mut self) {
+        self.log_sigpipe = false;
+    }
+
+    /// Whether the run reported an argument error: a closed pipe that its text met keeps the run's
+    /// exit status 1, as the argument errors of the reader keep it (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+    /// version 1.19; for `-logfile` on the closed pipe, line RG item T8d), where NCBI's process
+    /// ended by SIGPIPE.
+    pub(crate) fn argument_error(&self) -> bool {
+        self.argument_error
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
+    /// `CATCH_ALL`'s report of a `CArgException` that `Run` threw: `Command line argument error:
+    /// <message>`, an argument error (`argument_error`).
+    pub(crate) fn post_arg_error(&mut self, message: &[u8]) {
+        self.argument_error = true;
+        self.post_bytes(&[b"Command line argument error: ".as_slice(), message].concat());
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:868-871 (cited at
+    // `ApplicationStart::write_log_setup`)
+    /// The messages that NCBI collected before it opened the file of `-logfile` (the usage
+    /// report's, `start`), which it writes into that file as it opens it
+    /// (`ApplicationStart::write_log_setup`): a file's write is `write_log_file`'s, which a closed
+    /// pipe ends (`closed`; NCBI BLAST+ 2.17.0 blastdbcmd with a malformed `.ncbirc` and
+    /// `-logfile /dev/stdout` on a closed pipe, line RG item T8d).
+    pub(crate) fn write_log_setup(&mut self, start: &ApplicationStart) {
+        let Ok(text) = start.usage_report() else {
+            return;
+        };
+        if self.target.place() == TextPlace::LogFile {
+            self.write_log_file(text.as_bytes());
+        } else {
+            self.target
+                .write_collected(text.as_bytes(), &mut *self.stderr);
+        }
     }
 
     /// Starts keeping a copy of the texts that `write_text` writes (the posts of a read that
@@ -363,6 +445,7 @@ impl Diag<'_> {
     /// threw it): the usage, the line of `=` and the posts; exit status 1. Its callers are the
     /// reader's entry, `read`, and `run_arg_exception`.
     fn report_arg_exception(&mut self, error: &ArgException, backlog: Option<&str>) -> i32 {
+        self.argument_error = true;
         if error.code != "eNoValue" {
             // One write of the usage and the line of `=`: a caller's writer that fails keeps the
             // whole text (`api::tools`'s record of the diagnostics), as `write!`'s pieces would not.
@@ -743,8 +826,6 @@ fn run_app(
     files: &RunFiles,
     command_line: bool,
 ) -> i32 {
-    // NCBI's application start (`ncbi_environment::ApplicationStart`): the file of `-logfile`
-    // gets the usage report's messages when NCBI opens it, before `-version`.
     // The files that the run opens by name, which end when the run ends (`OpenFiles`).
     let files = OpenFiles::new(files);
     let files = if command_line {
@@ -760,8 +841,7 @@ fn run_app(
                 tool.refusal_name,
             ))
         }
-        Ok(ToolLog::Target(mut target)) => {
-            start.write_log_setup(&mut target, err);
+        Ok(ToolLog::Target(target)) => {
             if command_line {
                 run_app_target(
                     tool,
@@ -829,12 +909,24 @@ fn run_app_target<'a>(
     body: Body,
     (start, xml_help): (&ApplicationStart, Option<fn(&str) -> Option<String>>),
     files: &OpenFiles,
-    (mut target, stdout, tie_stdout): (
+    (target, stdout, tie_stdout): (
         DiagTarget,
         Option<&'a dyn Fn(&[u8])>,
         Option<&'a dyn Fn() -> std::io::Result<()>>,
     ),
 ) -> i32 {
+    let mut diag = Diag::new(&target, err, tool);
+    diag.stdout = stdout;
+    diag.tie_stdout = tie_stdout;
+    // NCBI's application start (`ncbi_environment::ApplicationStart`): the file of `-logfile`
+    // gets the usage report's messages when NCBI opens it, before `-version` (the shared standard
+    // output of `ToolLog::Stdout` got them in `run_app`).
+    if stdout.is_none() {
+        diag.write_log_setup(start);
+        if diag.closed() {
+            return 0;
+        }
+    }
     let (words, dryrun) = match preparse(words) {
         // `-version` and the full versions (`ncbi_version::print`, line RG item E3), before the
         // arguments are read, whatever their bytes.
@@ -848,7 +940,11 @@ fn run_app_target<'a>(
         Preparsed::Words { words, dryrun, .. } => (words, dryrun),
     };
     // The configuration (the file of `-conffile` in place of `<program>.ini`,
-    // `ApplicationStart::of_process`).
+    // `ApplicationStart::of_process`). Its messages are posts of the run (`Diag::write_text`):
+    // the first that meets a closed pipe at the file of `-logfile` ends NCBI's process there
+    // (`Diag::closed`; NCBI BLAST+ 2.17.0 dustmasker, segmasker, windowmasker and
+    // convert2blastmask with a malformed or missing `-conffile`, line RG item T8d). The replay
+    // goes to `cerr` only in the search programs (`replays_to_stderr`), which do not run here.
     let loaded = match stdout {
         Some(write) => {
             let mut buf = Vec::new();
@@ -858,11 +954,11 @@ fn run_app_target<'a>(
             }
             outcome
         }
-        None => start.write_config_load(&mut target, err),
+        None => start.config_load(&mut |text, _| diag.write_text(text)),
     };
-    let mut diag = Diag::new(&target, err, tool);
-    diag.stdout = stdout;
-    diag.tie_stdout = tie_stdout;
+    if diag.closed() {
+        return 0;
+    }
     match loaded {
         Ok(None) => {}
         Ok(Some(status)) => return status,
@@ -907,12 +1003,18 @@ fn run_app_target<'a>(
     // NCBI's arguments close the program's output streams after `Run` and its texts (the `-out`
     // file's buffer is written then, standard output's at the exit). Where a write of them met a
     // closed pipe, NCBI's process ended there by SIGPIPE: exit status 0, no message
-    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
-    let mut closed = files.finish_streams() || diag.closed();
+    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10). Where a text met it (`Diag::closed`),
+    // NCBI's process ended before its streams' end: their buffers' bytes are lost.
+    let mut closed = if diag.closed() {
+        files.end_streams_at_closed_pipe();
+        true
+    } else {
+        files.finish_streams()
+    };
     if let Err(error) = out.flush() {
         closed |= files::ends_like_sigpipe(&error);
     }
-    if closed {
+    if closed && !diag.argument_error() {
         return 0;
     }
     status

@@ -41,6 +41,7 @@ static TOOL: Tool = Tool {
     help_full: None,
     short_description: None,
     dry_run: None,
+    closed_log_ends_run: false,
 };
 
 /// Runs `blastdbcheck` with `words` (the command line after `losat blastdbcheck`), after its

@@ -36,6 +36,7 @@ static TOOL: Tool = Tool {
     help_full: None,
     short_description: None,
     dry_run: None,
+    closed_log_ends_run: true,
 };
 
 // NCBI reference (598d8ae6): c++/src/app/dustmasker/main.cpp:39-42

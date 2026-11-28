@@ -15,7 +15,8 @@ use crate::utils::winmask::{MaskerParams, PctSettings};
 use super::counts;
 use super::ids::{fill_id_list, IdLists, IdSet, SeqIdSet, TextMatchIds};
 use super::work::{
-    self, config_exception, report, unsupported, Failure, Options, CONFIG, INCONSISTENT,
+    self, closed_post, config_exception, report, unsupported, Failure, Options, CONFIG,
+    INCONSISTENT,
 };
 
 /// `CWinMaskApplication::Run` on `args`; the exit status.
@@ -227,33 +228,35 @@ fn id_lists(
     exclusive_id_lists(args)?;
     let ids = args.os_value("ids").unwrap_or_default();
     let exclude_ids = args.os_value("exclude_ids").unwrap_or_default();
-    let mut list = |name: &std::ffi::OsStr, line: u32| -> Result<Option<IdSet>, Failure> {
-        if name.is_empty() {
-            return Ok(None);
-        }
-        if text_match {
-            let mut set = TextMatchIds::default();
-            fill_id_list(name, |id| {
-                if let Err(empty) = set.insert(id) {
-                    diag.err_post_bytes(&empty.post());
-                }
-            });
-            return Ok(Some(IdSet::Text(set)));
-        }
-        if infmt != "blastdb" {
-            return Err(Failure::Ncbi(config_exception(
-                line,
-                INCONSISTENT,
-                CONFIG,
-                "-text_match false can be used only with infmt blastdb",
-            )));
-        }
-        let mut set = SeqIdSet::default();
-        fill_id_list(name, |id| set.insert(id, diag));
-        Ok(Some(IdSet::SeqId(set)))
-    };
-    Ok(IdLists {
-        ids: list(ids, 424)?,
-        exclude_ids: list(exclude_ids, 439)?,
-    })
+    let list =
+        |name: &std::ffi::OsStr, line: u32, diag: &mut Diag| -> Result<Option<IdSet>, Failure> {
+            if name.is_empty() {
+                return Ok(None);
+            }
+            if text_match {
+                let mut set = TextMatchIds::default();
+                fill_id_list(name, |id| {
+                    if let Err(empty) = set.insert(id) {
+                        diag.err_post_bytes(&empty.post());
+                    }
+                });
+                return Ok(Some(IdSet::Text(set)));
+            }
+            if infmt != "blastdb" {
+                return Err(Failure::Ncbi(config_exception(
+                    line,
+                    INCONSISTENT,
+                    CONFIG,
+                    "-text_match false can be used only with infmt blastdb",
+                )));
+            }
+            let mut set = SeqIdSet::default();
+            fill_id_list(name, |id| set.insert(id, diag));
+            Ok(Some(IdSet::SeqId(set)))
+        };
+    let ids = list(ids, 424, diag)?;
+    closed_post(diag)?;
+    let exclude_ids = list(exclude_ids, 439, diag)?;
+    closed_post(diag)?;
+    Ok(IdLists { ids, exclude_ids })
 }

@@ -13,6 +13,7 @@ fn run_dustmasker_words(words: Vec<OsString>) -> (i32, Vec<u8>, Vec<u8>) {
         help_full: None,
         short_description: None,
         dry_run: None,
+        closed_log_ends_run: true,
     };
     fn body(
         args: &Args,
@@ -129,6 +130,7 @@ fn a_run_s_arg_exception_is_reported_after_the_usage_with_its_backlog() {
         help_full: None,
         short_description: None,
         dry_run: None,
+        closed_log_ends_run: true,
     };
     let mut stderr = Vec::new();
     let mut diag = Diag::new(&DiagTarget::Stderr, &mut stderr, &TOOL);

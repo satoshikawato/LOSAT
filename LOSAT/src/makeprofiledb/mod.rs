@@ -37,6 +37,7 @@ static TOOL: Tool = Tool {
     help_full: None,
     short_description: None,
     dry_run: Some(work::dry_run),
+    closed_log_ends_run: true,
 };
 
 /// Runs `makeprofiledb` with `words` (the command line after `losat makeprofiledb`), after its

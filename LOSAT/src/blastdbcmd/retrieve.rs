@@ -510,10 +510,14 @@ impl Output<'_, '_> {
         text.write_to(self.out).map_err(Stop::write)
     }
 
+    // NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:816-828
+    // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:317-355
+    // NCBI reference (598d8ae6): c++/include/serial/impl/objostr.inl:58-61
+    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:910-918
     /// The write of `object` to `m_Out` through `MSerial_AsnText`: the ASN.1 text document
     /// `document`, with NCBI's post of each byte its text stream replaces
-    /// (`bioseq::write_asn_text`). The object stream's `Close` writes its buffer and does not
-    /// flush `m_Out`.
+    /// (`bioseq::write_asn_text`), then the end of `WriteObject`'s object stream: its
+    /// `Close` (`DefaultFlush`, no `fFlagNoAutoFlush`) writes its buffer and flushes `m_Out`.
     pub fn asn_text<D: AsnTextDocument>(&mut self, document: &D) -> Result<(), Stop> {
         let diag = &mut *self.diag;
         write_asn_text(document, &mut *self.out, |replaced| {
@@ -522,7 +526,20 @@ impl Output<'_, '_> {
                 return Err(std::io::ErrorKind::BrokenPipe.into());
             }
             Ok(())
-        })
+        })?;
+        self.out.ncbi_flush().map_err(Stop::write)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:2722-2725
+    /// The end of the FASTA formatter (`CBlastDB_FastaFormatter`, whose `CFastaOstream` the
+    /// destructor flushes) at the end of `x_ProcessSearchRequest`'s `try`, before its catch posts
+    /// what stopped the retrieval; none where a post met the closed pipe of `-logfile`, which
+    /// ended NCBI's process there. A closed pipe of the output ends the run at the flush
+    /// (`OutputFile::closed`).
+    fn end_fasta(&mut self) {
+        if !self.diag.closed() {
+            let _ = self.out.ncbi_flush();
+        }
     }
 
     /// The line of `x_Print` whose one field is the ASN.1 text document `document`, which NCBI
@@ -737,34 +754,48 @@ fn request(
         stdin,
         output: Output { out, diag },
     };
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:819-847
+    let result = search_type(&mut run, args, &mut config, tax_ids);
+    if matches!(run.formatter, Formatter::Fasta(_)) {
+        run.output.end_fasta();
+    }
+    result
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:819-847
+/// `x_ProcessSearchType`: the retrieval that the arguments ask for.
+fn search_type(
+    run: &mut Run,
+    args: &Args,
+    config: &mut Config,
+    tax_ids: Option<&BTreeSet<i32>>,
+) -> Result<bool, Stop> {
     // A taxid list excludes `-entry` and `-entry_batch` but not `-ipg` and `-ipg_batch`
     // (its exclusion names `pig`, which is no argument): those then go first.
     let (entry, entry_batch) = (args.bytes("entry"), args.os_value("entry_batch"));
     match (entry.as_deref(), entry_batch) {
         (Some(b"all"), _) => {
-            run.dump_all(&config)?;
+            run.dump_all(config)?;
             Ok(false)
         }
         (_, Some(file)) => {
             if args.given("get_dups") {
-                run.batch_entry(file, &mut config)
+                run.batch_entry(file, config)
             } else {
-                run.batch_entry_no_dup(file, &mut config)
+                run.batch_entry_no_dup(file, config)
             }
         }
-        (Some(entry), None) => run.entry(entry, &config),
+        (Some(entry), None) => run.entry(entry, config),
         (None, None) => {
             if let Some(pig) = args.value("ipg") {
                 // The reader took a value of `int` (`AsInteger`).
                 let pig = args.integer("ipg").ok_or_else(|| {
                     Stop::refused(format!("-ipg {pig} is not a number of 32 bits"))
                 })?;
-                run.ipg(pig, &config)
+                run.ipg(pig, config)
             } else if let Some(file) = args.os_value("ipg_batch") {
-                run.batch_pig(file, &mut config)
+                run.batch_pig(file, config)
             } else if let Some(tax_ids) = tax_ids {
-                run.tax_id_list(tax_ids, &config)
+                run.tax_id_list(tax_ids, config)
             } else {
                 Err(Stop::Ncbi(
                     "Must specify query type: one of 'entry', 'entry_batch', or 'pig'".to_string(),

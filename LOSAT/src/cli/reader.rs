@@ -30,6 +30,7 @@ macro_rules! tool {
             help_full: None,
             short_description: None,
             dry_run: None,
+            closed_log_ends_run: false,
         }
     };
 }

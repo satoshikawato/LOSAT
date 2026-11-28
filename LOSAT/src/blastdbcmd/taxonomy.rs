@@ -59,7 +59,7 @@ pub(super) fn tax_id_list(
                     "File is not accessible",
                     &crate::utils::os_bytes::os_str_bytes(file),
                 );
-                diag.post_bytes(&[b"Command line argument error: ".as_slice(), &message].concat());
+                diag.post_arg_error(&message);
                 return Err(Ended(1));
             };
             input_lines(&bytes, LineEnds::HOST)

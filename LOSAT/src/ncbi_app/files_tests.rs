@@ -182,6 +182,7 @@ fn caller(out: &mut dyn Write) -> OutputFile<'_> {
         closed: false,
         cut_aware: false,
         throws: false,
+        sigpipe: true,
     })
 }
 

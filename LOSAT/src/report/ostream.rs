@@ -1398,6 +1398,14 @@ impl ReportStream {
         core.immediate = true;
     }
 
+    // NCBI reference (598d8ae6): c++/src/connect/ncbi_socket.c:866-873
+    /// NCBI's process ignores SIGPIPE from here on (the connection library started: windowmasker's
+    /// GenBank loader, `windowmasker::work::start_genbank_loader`): a write that meets a pipe
+    /// whose reader closed it fails as any write fails (`badbit`), and the run goes on.
+    pub(crate) fn ignore_sigpipe(&self) {
+        lock(&self.0).sigpipe = false;
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:335
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
     /// blast_formatter's `-out` stream (`blast_formatter::archive`): the `-out` file `file`
@@ -1506,6 +1514,18 @@ impl ReportStream {
         }
         core.flush_buffer(false);
         core.sync()
+    }
+
+    /// The end of a tool's stream where the run ended at a write elsewhere that met a closed pipe
+    /// (a post to the file of `-logfile`, `ncbi_app::Diag::closed`), which ends NCBI's process by
+    /// SIGPIPE: NCBI's writes so far are made, and what NCBI's buffer holds is dropped, as the
+    /// ended process loses it (the stream's drop writes nothing more).
+    pub(crate) fn end_at_closed_pipe(&self) {
+        let mut core = lock(&self.0);
+        let _ = core.sync();
+        core.held.clear();
+        core.out = 0;
+        core.pending.clear();
     }
 
     /// The handle by which a formatter that writes into the stream declares NCBI's regions and

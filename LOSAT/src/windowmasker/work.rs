@@ -382,6 +382,7 @@ pub(super) fn run(
     let mut writer = writer;
     let (result, status) = match source {
         None => {
+            start_genbank_loader(out, diag);
             diag.err_post("windowmasker with seqids input not implemented yet");
             (Ok(()), 1)
         }
@@ -392,6 +393,19 @@ pub(super) fn run(
     };
     finish(writer, out, diag, result, options.outfmt, super::PROGRAM)?;
     Ok(status)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/winmasker/win_mask_app.cpp:144-147
+// NCBI reference (598d8ae6): c++/src/connect/ncbi_socket.c:866-873
+/// `-infmt seqids`: NCBI registers its GenBank loader, whose connection library ignores SIGPIPE
+/// from there on (`OutputFile::ignore_sigpipe`, `Diag::ignore_sigpipe`): a later write to a
+/// pipe whose reader closed it fails as any write fails and the run goes on, to exit status 1
+/// (NCBI BLAST+ 2.17.0 with standard output or standard error a closed pipe, line RG item T8d:
+/// the post to `-logfile /dev/stdout`, a `maskinfo_asn1_text` object on standard output, which
+/// NCBI's serial stream reports as `seqmasks_io::run::serial_write_failure` says).
+fn start_genbank_loader(out: &mut OutputFile<'_>, diag: &mut Diag) {
+    out.ignore_sigpipe();
+    diag.ignore_sigpipe();
 }
 
 /// The masker of the run: `CSeqMasker`'s counts (`CSeqMaskerIstatFactory::create`, with the
@@ -424,13 +438,25 @@ pub(super) fn open_counts(
             for warning in error.warnings() {
                 diag.warning_post(warning);
             }
+            closed_post(diag)?;
             return Err(winmask_failure(file, error));
         }
     };
     for warning in counts.warnings() {
         diag.warning_post(warning);
     }
+    closed_post(diag)?;
     Ok(counts)
+}
+
+/// `Failure::ClosedPipe` where a post of the configuration or of the counts met the closed pipe
+/// of `-logfile` (`Diag::closed`): SIGPIPE ended NCBI's process at that post, before anything
+/// after it (NCBI BLAST+ 2.17.0, line RG item T8d).
+pub(super) fn closed_post(diag: &Diag) -> Result<(), Failure> {
+    if diag.closed() {
+        return Err(Failure::ClosedPipe);
+    }
+    Ok(())
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/seq_masker_uset_hash.cpp:94-100

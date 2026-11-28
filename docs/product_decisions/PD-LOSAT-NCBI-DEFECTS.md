@@ -1050,7 +1050,10 @@
   hands lists back raw as NCBI's does), and BLASTX, which ran DBL_MAX with the redo, refuses it:
   decision D12 applied to BLASTX, because NCBI's blastx ends with rc 139 there on some inputs
   (LOSAT refuses where NCBI crashes), an extension of D12's scope reported to the Owner; no new
-  exception, rules 3 and 4; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
+  exception, rules 3 and 4; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07;
+  and the maintainer's answer A of 2026-11-28 to question Q-ETOS8, line RG item X-etos-owner:
+  exception 8 extended to TBLASTN, BLASTX, BLASTP, PSI-BLAST, RPS-BLAST and RPSTBLASTN, BLASTX
+  `-ungapped`'s 17 against 16 rows included, and BLASTN's x86-64 conversion of rule 2 kept)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1459,7 +1462,9 @@ do not build it in the tabular formats, and NCBI and LOSAT agree there, as excep
 
 ## Approved exception (TBLASTX, a cutoff quotient past the range of a double, version 1.12)
 
-Accepted by the maintainer on 2026-11-12 (line PS `DECISIONS.md` 36).
+Accepted by the maintainer on 2026-11-12 (line PS `DECISIONS.md` 36) for TBLASTX; extended to
+TBLASTN, BLASTX, BLASTP, PSI-BLAST, RPS-BLAST and RPSTBLASTN by the maintainer's answer A of
+2026-11-28 to question Q-ETOS8 (line RG item X-etos-owner, version 1.127).
 
 8. **A cutoff whose quotient `K * searchsp / E` is past the range of a double.** NCBI computes a
    cutoff score as `(Int4) (ceil( log((double)(K * searchsp / E)) / Lambda ))`
@@ -1484,6 +1489,16 @@ Accepted by the maintainer on 2026-11-12 (line PS `DECISIONS.md` 36).
    genome pair above LOSAT writes 88,562 rows in 2 minutes, and on the small input 262 rows. The
    maintainer's rule of 2026-10-10 (no reproduction of NCBI's undefined behaviour or integer
    overflow) applies, also on these ordinary inputs.
+
+   Since version 1.127 the exception covers TBLASTN, BLASTX, BLASTP, PSI-BLAST, RPS-BLAST and
+   RPSTBLASTN, with their PSSM searches (`stats::cutoffs::CutoffConversion::PROTEIN`), which took
+   the same finite value before under line PS `DECISIONS.md` 28 (the standing delegation). Told
+   that line RG's X-etos-owner (#1713) had merged with that rule, the maintainer kept it on
+   2026-11-28 (answer A to question Q-ETOS8, replacing the answer B of the same day), and option
+   A's text extends this exception to the six programs. That includes the one difference from
+   NCBI found on them: BLASTX `-ungapped -comp_based_stats 0` with `-searchsp 9223372036854775807
+   -evalue 1e-300` on one probe pair, where NCBI 2.17.0 writes 17 rows and LOSAT 16. BLASTN keeps
+   NCBI's x86-64 conversion (rule 2), which the same answer kept.
 
 ## Approved exception (`losat rpsbproc`, PSSM-IDs of 2^31 and more, version 1.13)
 
@@ -2886,9 +2901,9 @@ file would differ, and NCBI's programs still could not open the database).
   -evalue 1e-300`) NCBI writes an alignment that the finite value would not find (one row
   against none; with `-evalue 1e-200` the quotient is finite and NCBI writes none,
   `db.etos.bn.finite.ss.e200`). LOSAT reproduces it (`stats::cutoffs::CutoffConversion::BLASTN`),
-  as decision D4 reproduces the conversions of `-threshold` and the X-drops. Whether it stays so
-  is the maintainer's open question Q-ETOS8 (line RG item X-etos-owner), with the other programs'
-  conversion of the same quotient.
+  as decision D4 reproduces the conversions of `-threshold` and the X-drops. The maintainer kept
+  it on 2026-11-28 (answer A to question Q-ETOS8 of line RG item X-etos-owner, version 1.127),
+  with the other programs' finite value of the same quotient (exception 8).
 - `losat windowmasker -mk_counts`, `-convert` and `-checkdup` (version 1.72, 2026-11-22, line NP
   item M5b, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07): NCBI's defined
   but surprising results are written byte for byte (fixture rows of `LOSAT/tests/windowmasker`):

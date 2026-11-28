@@ -26,14 +26,16 @@ pub const K_SMALL_FLOAT: f64 = 1.0e-297;
 /// consts below; which program takes which rule is an Owner decision, not this module's.
 ///
 /// - `TBLASTX` takes the finite value: PD-LOSAT-NCBI-DEFECTS exception 8, the Owner's answer
-///   「Q1=A」 of 2026-11-12 (line PS DECISIONS 36), which names TBLASTX only.
+///   「Q1=A」 of 2026-11-12 (line PS DECISIONS 36), which named TBLASTX only.
 /// - `PROTEIN` (TBLASTN, BLASTX, BLASTP, PSI-BLAST, RPS-BLAST and RPSTBLASTN) takes the finite
-///   value under line PS DECISIONS 28, Owner-delegated, which applied the Owner's rule of
-///   2026-10-10 (LOSAT does not reproduce NCBI's undefined behaviour). Its known difference from
-///   NCBI (BLASTX `-ungapped`: NCBI 17 rows, LOSAT 16) is the open Owner question Q-ETOS8 (line
-///   RG item X-etos-owner).
+///   value: exception 8 by the Owner's answer A to Q-ETOS8 of 2026-11-28 (line RG item
+///   X-etos-owner), which kept today's rule and whose option text extends exception 8 to these
+///   six programs, BLASTX `-ungapped`'s known difference from NCBI (NCBI 17 rows, LOSAT 16)
+///   included. Before it, line PS DECISIONS 28 (Owner-delegated) applied the Owner's rule of
+///   2026-10-10 (LOSAT does not reproduce NCBI's undefined behaviour).
 /// - `BLASTN` takes NCBI's x86-64 `INT_MIN` (PD-LOSAT-NCBI-DEFECTS rule 2, as decision D4
-///   reproduces the conversions of `-threshold` and the X-drops), also pending Q-ETOS8.
+///   reproduces the conversions of `-threshold` and the X-drops), which the Owner kept on
+///   2026-11-28 (Q-ETOS8 = A).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CutoffConversion {
     /// The finite value: a quotient past the double takes the mathematically equal
@@ -47,12 +49,12 @@ pub enum CutoffConversion {
 }
 
 impl CutoffConversion {
-    /// BLASTN's rule: NCBI's `INT_MIN` (rule 2; Q-ETOS8 open).
+    /// BLASTN's rule: NCBI's `INT_MIN` (rule 2; kept by the Owner on 2026-11-28, Q-ETOS8 = A).
     pub const BLASTN: Self = Self::X86Int4;
     /// TBLASTX's rule: the finite value (exception 8, Owner 2026-11-12).
     pub const TBLASTX: Self = Self::FiniteQuotient;
     /// The rule of TBLASTN, BLASTX, BLASTP, PSI-BLAST, RPS-BLAST and RPSTBLASTN, with their PSSM
-    /// searches: the finite value (line PS DECISIONS 28, Owner-delegated; Q-ETOS8 open).
+    /// searches: the finite value (exception 8 by the Owner's answer A to Q-ETOS8, 2026-11-28).
     pub const PROTEIN: Self = Self::FiniteQuotient;
 }
 

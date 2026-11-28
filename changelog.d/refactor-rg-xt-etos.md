@@ -4,8 +4,8 @@
   TBLASTX call it in place of their own copies, and it owns the cutoff's start at 1. Each caller
   names its rule for a cutoff past the range of a double, as before: BLASTN NCBI's x86-64 value
   (NCBI-defect rule 2), TBLASTX the finite value of NCBI-defect exception 8, and the other programs
-  the same finite value under line PS DECISIONS 28 (a delegated decision; whether exception 8
-  covers them is an open maintainer question). The sum statistics' cutoffs carry their
+  the same finite value, which the maintainer's answer of 2026-11-28 (question Q-ETOS8) brings
+  under exception 8 and which kept BLASTN's rule. The sum statistics' cutoffs carry their
   e-value from one query context to the next as NCBI does, also across the parts of a BLASTX
   query batch of more than 10002 letters (`BATCH_SIZE`) that LOSAT searches apart (line RG,
   X-etos-owner).

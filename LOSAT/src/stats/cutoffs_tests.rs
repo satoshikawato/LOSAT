@@ -161,8 +161,8 @@ fn the_owner_gives_the_cutoffs_of_the_copies_it_replaced() {
     }
 }
 
-// blast_stat.c:4059-4061 (TBLASTX: PD-LOSAT-NCBI-DEFECTS exception 8; the other protein
-// programs: line PS DECISIONS 28): a quotient
+// blast_stat.c:4059-4061 (TBLASTX and, since the Owner's answer A to Q-ETOS8 of 2026-11-28, the
+// other protein programs: PD-LOSAT-NCBI-DEFECTS exception 8): a quotient
 // `K searchsp / E` past the double takes `ln K + ln searchsp - ln E` under `FiniteQuotient`;
 // under `X86Int4` NCBI's x86-64 `INT_MIN` keeps the cutoff of 1.
 #[test]

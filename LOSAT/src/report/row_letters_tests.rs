@@ -67,3 +67,38 @@ fn the_gap_residues_lie_at_their_sides_columns() {
     );
     assert!(stored_gap_columns(b"MKVLA", b'-', 0, &ops, RowSide::Query).is_empty());
 }
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:280-313 (cited at
+// `shown_subject_row`): probes P5.P and P5.M of line DBID holdrec (`R/hr/logs/ncbi_model.md` 3):
+// on the plus strand a short holder's letters end in gaps; on the minus strand a segment that
+// reaches past its end is all gaps, one inside it reads its letters.
+#[test]
+fn a_short_holder_clamps_on_plus_and_empties_reaching_segments_on_minus() {
+    let ops = [GapEditOp::Sub(2), GapEditOp::Ins(1), GapEditOp::Sub(2)];
+    // Positions 2 to 5 of a holder of 4 letters: two letters, then gaps.
+    assert_eq!(shown_subject_row(b"ACGT", 2, &ops, false, b'-'), b"GT--");
+    // Minus: the first segment (positions 2 and 3) lies inside the holder, the second (4 and 5,
+    // after the insertion) reaches past its end.
+    assert_eq!(shown_subject_row(b"ACGT", 2, &ops, true, b'-'), b"GT--");
+    // One segment of positions 2 to 5 on the minus strand: all gaps.
+    assert_eq!(
+        shown_subject_row(b"ACGT", 2, &[GapEditOp::Sub(4)], true, b'-'),
+        b"----"
+    );
+    // A holder as long as the range: its letters on either strand.
+    assert_eq!(
+        shown_subject_row(b"ACGTAC", 2, &[GapEditOp::Sub(4)], true, b'-'),
+        b"GTAC"
+    );
+    // Runs of one operation are one segment; a deletion reads the subject too.
+    assert_eq!(
+        shown_subject_row(
+            b"ACGT",
+            1,
+            &[GapEditOp::Sub(1), GapEditOp::Sub(1), GapEditOp::Del(2)],
+            true,
+            b'-'
+        ),
+        b"CG--"
+    );
+}

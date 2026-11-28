@@ -1937,29 +1937,6 @@ fn shown_lists(hit_list: &Option<BlastnHitList>) -> &[BlastnHspList] {
     })
 }
 
-/// The end (exclusive, 0-based) of the subject range of the HSPs of each rank of `hit_lists`
-/// (subjects named by rank, `ranks` of them), which the holder of a subject whose record the
-/// writers write must reach (`shared::ShownHolders::shown`); empty where `loads` (by ordinal id)
-/// write no such record.
-fn shown_subject_ends(
-    hit_lists: &[Option<BlastnHitList>],
-    ranks: usize,
-    loads: &HitLoads,
-) -> Vec<usize> {
-    if !loads.writes_any_shown() {
-        return Vec::new();
-    }
-    let mut ends = vec![0; ranks];
-    for hsp_list in hit_lists.iter().flat_map(shown_lists) {
-        if let Some(end) = ends.get_mut(hsp_list.oid as usize) {
-            for hsp in &hsp_list.hsps {
-                *end = (*end).max(hsp.s_start.max(hsp.s_end));
-            }
-        }
-    }
-    ends
-}
-
 /// The most identities of an HSP of `hsp_list` (the Seq-align's `num_ident`), which tells whether
 /// a row of `nident` alone reads its subject (`SubjectFetch::WithIdentities`).
 fn most_identities(hsp_list: &BlastnHspList) -> usize {
@@ -2451,10 +2428,9 @@ pub(super) fn reported_subjects(
     // Seq-ids that outfmt 0 shows.
     let taxdb_found = std::sync::OnceLock::new();
     let db = &database.db;
-    // The holders whose records the writers write for subjects (`shared::ShownHolders`), and the
-    // end of each rank's aligned subject range (`shown_subject_ends`).
+    // The holders whose records the writers write for subjects (`shared::ShownHolders`); the rows
+    // read a shorter holder's letters to its end (`pairwise::context_rows_into`).
     let holders = shared::ShownHolders::new(db, false, PROGRAM);
-    let subject_ends = shown_subject_ends(hit_lists, ordinals.len(), &loads);
     let record = |&ordinal: &u32| -> Result<Reported> {
         let header = titles
             .get(&ordinal)
@@ -2481,13 +2457,7 @@ pub(super) fn reported_subjects(
                     ordinal as usize,
                     (ordinal, subject),
                     |holder| titled_parsed(titles, holder as usize),
-                    (
-                        subject_ends
-                            .get(ordinals.binary_search(&ordinal).unwrap_or(usize::MAX))
-                            .copied()
-                            .unwrap_or(0),
-                        false,
-                    ),
+                    (0, false),
                     (shown.light_length, seen_all.contains(&ordinal)),
                 )? {
                     shared::check_reported_parsed(

@@ -1,0 +1,1 @@
+Error: a BLAST archive on which NCBI BLAST+ has no defined result (a FilterString number that NCBI's sscanf does not read, leaving its variable unset) is not supported by LOSAT's BLAST_FORMATTER

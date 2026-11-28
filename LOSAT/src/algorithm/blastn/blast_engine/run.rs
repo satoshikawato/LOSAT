@@ -6148,7 +6148,6 @@ fn write_custom_tabular(
         subjects,
         letters: report.subjects,
         unsearched,
-        prolog: report.queries_before == 0,
         epilog: report
             .epilog
             .then_some(report.queries_before + hit_lists.len()),
@@ -8611,7 +8610,8 @@ fn run_in_pool(
                     )
                 };
                 // In the first batch nothing was streamed: the call of the off path writes the
-                // prologs that come with the reports (outfmt 20's line of the field names).
+                // prologs that come with the reports (XML2's; outfmt 20's line of the field names
+                // came before the search, `write_pairwise_prologs`).
                 if stream.acting() && start > 0 {
                     stream.finish_sam(outputs)?;
                 } else {
@@ -9699,27 +9699,18 @@ fn x_debug_output(args: &BlastnArgs) -> bool {
 }
 
 /// Whether the prolog of `format` comes with its reports (or, for a run that stops before any
-/// report, from `write_pairwise_prologs`) and not before the search: the start of the XML2 and
-/// JSON documents of outfmt 16 and 15. NCBI writes that start before the search too
-/// (`PrintProlog`), but LOSAT's refusals of the reports (a title that NCBI crashes on,
-/// `names::Refusal`, DECISIONS 20 as K4h left it) come after the search and before the first
-/// byte, so the start is written with the first report, or by the path of an NCBI error that
-/// stops the run before one. The outfmt 0 to 4 prolog comes before the search for every sink
+/// report, from `write_pairwise_prologs`) and not before the search: the start of the XML2 and JSON
+/// documents of outfmt 16 and 15. NCBI writes that start before the search too (`PrintProlog`), but
+/// LOSAT's refusals of the reports (a title that NCBI crashes on, `names::Refusal`, DECISIONS 20 as
+/// K4h left it) come after the search and before the first byte, so the start is written with the
+/// first report, or by the path of an NCBI error that stops the run before one. The outfmt 0 to 4
+/// prolog and outfmt 20's line of the field names (after the taxonomy database's warning of its
+/// formatter, `tabular::write_tabular_prolog_warning`) come before the search for every sink
 /// (`write_pairwise_prologs`; a library `File` sink is kept for the run,
-/// `api::local_blast::KeptFile`).
-///
-/// Outfmt 20's line of the field names comes with the first report too (or from
-/// `write_pairwise_prologs` for a run that stops before one), after LOSAT's refusals of the
-/// custom tabular report; the taxonomy database's warning of its formatter, which a run that
-/// can refuse never writes, comes before the search (`tabular::write_tabular_prolog_warning`).
+/// `api::local_blast::KeptFile`): LOSAT's refusals of a query batch or of the custom tabular report
+/// come after them, after NCBI's bytes before that point.
 fn prolog_with_report(output_format: BlastnOutputFormat) -> bool {
-    match output_format {
-        BlastnOutputFormat::Xml2(_) => true,
-        BlastnOutputFormat::CustomTabular(spec) => {
-            spec.kind == crate::report::tabular::TabularKind::CsvWithHeader
-        }
-        _ => false,
-    }
+    matches!(output_format, BlastnOutputFormat::Xml2(_))
 }
 
 /// What the outfmt 0 report of the search introduces (`BlastnIntro`, with its NCBI reference):
@@ -9734,10 +9725,9 @@ fn blastn_intro(args: &BlastnArgs) -> BlastnIntro {
     }
 }
 
-/// Writes and flushes the outfmt 0 to 4 prolog of every sink before the search
-/// (`before_search`) or, for a run that stops before any report, the prologs that come with the
-/// first report (`prolog_with_report`: outfmt 15 and 16, and outfmt 20's line of the field
-/// names).
+/// Writes and flushes the outfmt 0 to 4 prolog and outfmt 20's line of the field names of every
+/// sink before the search (`before_search`) or, for a run that stops before any report, the
+/// prologs that come with the first report (`prolog_with_report`: outfmt 15 and 16).
 fn write_pairwise_prologs(
     outputs: &mut ReportOutputs<'_>,
     output_formats: &[BlastnOutputFormat],
@@ -9747,14 +9737,18 @@ fn write_pairwise_prologs(
 ) -> Result<()> {
     for (format, &output_format) in outputs.formats.iter_mut().zip(output_formats) {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:348-357
-        // Outfmt 20: the warning of its formatter before the search, the line of the field
-        // names with the first report or here before an NCBI error (`prolog_with_report`).
+        // Outfmt 20: the warning of its formatter, then the line of the field names, flushed.
         if let (Some(spec), true) = (output_format.tabular_spec(), before_search) {
             super::super::tabular::write_tabular_prolog_warning(
                 spec,
                 shown.tabular_taxdb_found,
                 shown.app,
                 &mut *outputs.diagnostics,
+            )?;
+            crate::report::tabular::write_field_names(
+                spec,
+                crate::blastinput::app::Program::Blastn,
+                &mut format.sink,
             )?;
         }
         let writes_prolog = match output_format {
@@ -9772,9 +9766,9 @@ fn write_pairwise_prologs(
     Ok(())
 }
 
-/// Writes and flushes the prolog of one sink, for the formats that have one (outfmt 0, 15, 16,
-/// 20); `diagnostics` takes the posts of a `-html` prolog's references
-/// (`query_warnings::html_posts_sink`).
+/// Writes and flushes the prolog of one sink, for the formats that have one here (outfmt 0, 15, 16;
+/// outfmt 20's is `write_pairwise_prologs`'); `diagnostics` takes the posts of a `-html` prolog's
+/// references (`query_warnings::html_posts_sink`).
 fn write_format_prolog(
     format: &mut FormatOutput<'_>,
     output_format: BlastnOutputFormat,
@@ -9803,13 +9797,6 @@ fn write_format_prolog(
         let mut writer = format.sink.open()?;
         writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
         writer.flush()?;
-    } else if let Some(spec) = output_format.tabular_spec() {
-        // Outfmt 20's line of the field names (nothing for the other tabular kinds).
-        if spec.kind == crate::report::tabular::TabularKind::CsvWithHeader {
-            let mut writer = format.sink.open()?;
-            super::super::tabular::write_tabular_prolog(spec, &mut writer)?;
-            writer.flush()?;
-        }
     }
     Ok(())
 }
@@ -10315,7 +10302,7 @@ fn write_reports_untimed(
 }
 
 /// The outputs that a query batch's search writes to: the prologs that come with the first
-/// report (outfmt 15, 16 and 20's, `prolog_with_report`) before an error of the first batch, and
+/// report (outfmt 15 and 16's, `prolog_with_report`) before an error of the first batch, and
 /// nothing otherwise.
 /// `run_in_pool` gives them to the batches it searches (a split batch to its query chunks).
 type BatchOutputs<'o, 'r> = Option<(&'o mut ReportOutputs<'r>, &'o [BlastnOutputFormat])>;

@@ -2,8 +2,8 @@
 //! default `std` fields with a tab) and outfmt 10 and 20: the adapter of the shared writer
 //! (`report::tabular`, NCBI's `CBlastTabularInfo`). For each query in order it writes the query's
 //! warnings, outfmt 7's comment lines and one row per HSP of the query's final hit list, in the
-//! list's order; outfmt 20's header line comes before the first query of the run and outfmt 7's
-//! count of queries after the last.
+//! list's order; outfmt 7's count of queries comes after the last (outfmt 20's header line is the
+//! run's, before the search, `report::tabular::write_field_names`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:811-834
 //! What `SetFields` reads of an HSP is its Seq-align (`algorithm::blastn::blast_xml` has the
@@ -58,8 +58,6 @@ pub(crate) struct BlastnTabular<'a> {
     pub letters: SubjectLetters<'a>,
     /// By query: whether NCBI did not search its batch (outfmt 7's lines without a count).
     pub unsearched: &'a [bool],
-    /// Whether outfmt 20's header line comes before the first query (the run's first report).
-    pub prolog: bool,
     /// The number of queries formatted (outfmt 7's last line), `None` without the epilog.
     pub epilog: Option<usize>,
     /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath`).
@@ -70,28 +68,11 @@ pub(crate) struct BlastnTabular<'a> {
     pub names: Option<&'a TabularNames>,
 }
 
-/// Writes outfmt 20's line of the field names (`PrintProlog`; nothing for the other kinds).
-/// The taxonomy database's warning of the formatter that NCBI makes for it is written before the
-/// search (`write_tabular_prolog_warning`).
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:348-357
-pub(crate) fn write_tabular_prolog(spec: &TabularSpec, writer: &mut dyn Write) -> Result<()> {
-    let version = format!("BLASTN {}", crate::wording::REPORT_VERSION);
-    TabularWriter::new(
-        spec,
-        crate::blastinput::app::Program::Blastn,
-        &version,
-        None,
-    )
-    .prolog(writer)?;
-    Ok(())
-}
-
 /// Writes the warning of the formatter that NCBI makes for outfmt 20's header line, which it
 /// writes before it reads the first query batch (`PrintProlog`, blastn_app.cpp:258): the
 /// taxonomy database's warning when the field list checks it and `taxdb.bti` is not found
-/// (`x_CheckTaxDB`, `TabularSpec::checks_taxdb`). A run that finds it writes nothing here, so
-/// the line itself can come with the first report, after LOSAT's refusals.
+/// (`x_CheckTaxDB`, `TabularSpec::checks_taxdb`). The line itself follows it
+/// (`report::tabular::write_field_names`, in `blast_engine::write_pairwise_prologs`).
 pub(crate) fn write_tabular_prolog_warning(
     spec: &TabularSpec,
     taxdb_found: bool,
@@ -109,9 +90,9 @@ pub(crate) fn write_tabular_prolog_warning(
 }
 
 /// Writes the report of every query of `hit_lists` (indexed by query) to `writer`, each query's
-/// warnings (and the taxonomy database's warning of its formatter) before its lines, outfmt 20's
-/// header line first when `tab.prolog` and outfmt 7's last line after the last query when
-/// `tab.epilog`. `probe` marks each row (the format observer).
+/// warnings (and the taxonomy database's warning of its formatter) before its lines, and outfmt
+/// 7's last line after the last query when `tab.epilog` (outfmt 20's header line came before the
+/// search, `report::tabular::write_field_names`). `probe` marks each row (the format observer).
 pub(crate) fn write_blastn_tabular(
     tab: &BlastnTabular<'_>,
     hit_lists: &[Option<BlastnHitList>],
@@ -153,9 +134,6 @@ pub(crate) fn write_blastn_tabular(
         }
         Ok(())
     };
-    if tab.prolog {
-        table.prolog(writer)?;
-    }
     let mut buf: Vec<u8> = Vec::new();
     let (mut query_row, mut subject_row): (Vec<u8>, Vec<u8>) = (Vec::new(), Vec::new());
     let mut query_ranges: Vec<(u64, u64)> = Vec::new();

@@ -451,7 +451,7 @@ pub(super) fn first_batch_setup<'a>(
     // batch's reader messages (`preliminary_search_error`; NCBI 2.17.0 blastp and psiblast
     // `-subject` of the letters `M`, ``, `` with `-searchsp` or `OLD_FSC`: exit 3). After a first
     // batch of invalid queries only, which NCBI does not search, the error follows the reports of
-    // the batches before the first searched one, in every format (`reports_then_engine_error`).
+    // the batches before the first searched one, in every format (`reports_then_batch_error`).
     if fails {
         return Err(setup_error(
             b"",

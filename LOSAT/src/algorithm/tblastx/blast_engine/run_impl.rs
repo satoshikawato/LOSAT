@@ -2159,16 +2159,27 @@ pub(crate) fn blastn_app_batch_sizes(total_length: i64) -> Result<LoopBatchSizes
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:173-178
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
-/// Writes and flushes the outfmt 0 prolog of every outfmt 0 sink before the search (a library
-/// `File` sink is kept for the run, `api::local_blast::KeptFile`), before NCBI reads the first
-/// query batch (a failed write stops the run there).
+/// Writes and flushes the outfmt 0 prolog of every outfmt 0 sink and outfmt 20's line of the field
+/// names with its formatter's warning (`tabular::write_tabular_prolog`) before the search (a
+/// library `File` sink is kept for the run, `api::local_blast::KeptFile`), before NCBI reads the
+/// first query batch (a failed write stops the run there).
 fn write_pairwise_prologs(
     outputs: &mut ReportOutputs<'_>,
     args: &TblastxArgs,
     subjects: &ShownSubjects<'_>,
 ) -> Result<()> {
     for format in outputs.formats.iter_mut() {
-        if report::output_format(format.outfmt).is_pairwise() {
+        if let report::TblastxOutputFormat::CustomTabular(spec) =
+            report::output_format(format.outfmt)
+        {
+            super::super::tabular::write_tabular_prolog(
+                spec,
+                args.tabular_taxdb.unwrap_or(false),
+                args.app().ncbi_name(),
+                &mut format.sink,
+                &mut *outputs.diagnostics,
+            )?;
+        } else if report::output_format(format.outfmt).is_pairwise() {
             let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
             match subjects {
                 ShownSubjects::Fasta { records, x_stored } => {
@@ -4921,7 +4932,7 @@ impl BatchReports<'_> {
 
     /// Writes what NCBI has written when a query batch fails, before its error: the reports
     /// of the batches before (`done`; without the epilog), or, for the first batch, the
-    /// prologs that come with the reports (outfmt 0's came before the search,
+    /// prologs that come with the reports (outfmt 0's and outfmt 20's came before the search,
     /// `write_pairwise_prologs`). Where the loop wrote the batches before
     /// when it took them (`report_stream`), nothing remains. (The failing batch's search strategy
     /// request, when NCBI made its query factory, was written before its search,
@@ -4943,28 +4954,14 @@ impl BatchReports<'_> {
         if self.queries_written.get() > 0 {
             Ok(())
         } else if done.searched.is_empty() || xml_matrix_failed {
-            // The XML2 and JSON documents start with their prolog too, and outfmt 20 with its line
-            // of the field names (and its formatter's warning, `tabular::write_tabular_prolog`).
+            // The XML2 and JSON documents start with their prolog too.
             for format in outputs.formats.iter_mut() {
-                match report::output_format(format.outfmt) {
-                    report::TblastxOutputFormat::Xml2(kind) => {
-                        let mut writer = format.sink.open()?;
-                        writer
-                            .write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
-                        writer.flush()?;
-                    }
-                    report::TblastxOutputFormat::CustomTabular(spec) => {
-                        let mut writer = format.sink.open()?;
-                        super::super::tabular::write_tabular_prolog(
-                            spec,
-                            self.args.tabular_taxdb.unwrap_or(false),
-                            self.args.app().ncbi_name(),
-                            &mut writer,
-                            &mut *outputs.diagnostics,
-                        )?;
-                        writer.flush()?;
-                    }
-                    _ => {}
+                if let report::TblastxOutputFormat::Xml2(kind) =
+                    report::output_format(format.outfmt)
+                {
+                    let mut writer = format.sink.open()?;
+                    writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
+                    writer.flush()?;
                 }
             }
             for posts in &warnings[..done.searched.len()] {

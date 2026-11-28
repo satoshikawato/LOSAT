@@ -1,9 +1,28 @@
 //! Integration tests for `-export_search_strategy` stream modeling, write-failure handling,
 //! shared/aliased non-`-` file sinks, and `2>&1` merged diagnostics (`ostream::StrategyStream`).
 //!
-//! - Cross-platform: shared `-out`/strategy files (`same` and `./F` aliases) across 1, 4, and 8
-//!   threads, and preservation of the `-export_search_strategy -` refusal.
-//! - Linux (`tests/fixtures/strategy/f1c1_cases.tsv` and `tests/fixtures/strategy/f1c1/`):
+//! - Cross-platform: shared `-out`/strategy files (`same` and `./F` aliases) and
+//!   `-export_search_strategy -` (NCBI's `cout`, line RG item F1c-2) across 1, 4, and 8 threads.
+//! - Linux, item F1c-2 (`tests/fixtures/strategy/f1c2_cases.tsv` and `tests/fixtures/strategy/f1c2/`,
+//!   frozen with the official NCBI BLAST+ 2.17.0 at one thread): `-export_search_strategy -` with the
+//!   report on the same `cout` (`dash`, every program and format), in `-out F` (`dasho`), in
+//!   `-out /dev/stdout` (`revp` on a pipe, `rev` on a file), with `2>&1` and the `803.7` posts before
+//!   and after the first piece (4,016 B: the 4,096 B `COStreamBuffer` less the 80 B it keeps back;
+//!   `dashm`, `dashom`), standard output on `/dev/full` (`dashfull`:
+//!   exit 6 for outfmt 0, SIGABRT for the formats whose request write throws), and `>>` (`dashapp`,
+//!   `PRE\n` kept); psiblast's `-in_pssm` and `-in_msa` with rounds (the prolog before the request,
+//!   also with `-html`, `-out_pssm`, `2>&1` and `/dev/stdout`; before the failure of a strategy
+//!   file on `/dev/full`; and with `2>&1` before the `803.7` post of a request whose database name
+//!   has the byte 0xE9: setup `e9`, the run's folder as the working folder with `tests` and `d\xe9`
+//!   linked in it); a strategy file with `-out /dev/full` (empty, as NCBI's prolog fails first); a
+//!   report that cannot be written (`outfull`: `-out /dev/full`; `outfsz`: `-out F` at its size
+//!   limit), whose run ends with the requests up to the batch whose report failed (`-`,
+//!   `/dev/stdout` and a file); NCBI's exceptions after a batch's request (`subst`: blastp
+//!   `-subject` whose mapped alignment starts at the subject's first letter, exit 255, also after
+//!   an earlier batch's report, with reader messages and `2>&1`; `cbs`: rpstblastn outfmt 5, 15
+//!   and 16 on a database without frequency ratios, `{rps:rps_mini-freq}`, exit 3); SAM's
+//!   `@PG CL:` tag (the program's path) is left out on both sides.
+//! - Linux, item F1c-1 (`tests/fixtures/strategy/f1c1_cases.tsv` and `tests/fixtures/strategy/f1c1/`):
 //!   byte-for-byte comparison against frozen official NCBI BLAST+ 2.17.0 outputs (mapped via
 //!   `losat::wording::losat_output_bytes`) at 1 and 4 threads across all 8 programs, covering:
 //!   - `2>&1` (`merged`) strategy write failures (`/dev/full` and `RLIMIT_FSIZE=3000`) for
@@ -17,8 +36,8 @@
 //!   - regular-file, `./F`, symlink (`L -> F`), `/dev/stdout` file, and `>>` append (`dsoapp` /
 //!     `bothapp`, where `/dev/stdout` opens `O_TRUNC` and erases pre-existing `PRE\n`, matching
 //!     NCBI's output starting with `Blast4-request ::= {`);
-//!   - `803.7` replaced-byte title interleaving on `2>&1` (both before and after the 4,096 B
-//!     `COStreamBuffer` piece boundary);
+//!   - `803.7` replaced-byte title interleaving on `2>&1` (both before and after the end of the
+//!     first `COStreamBuffer` piece, its 4,096 B buffer less the 80 B it keeps back);
 //!   - stdout redirected to `/dev/full` with `-export_search_strategy /dev/stdout` (`dsofull`:
 //!     exit 6 for outfmt 0, SIGABRT with Close failure chain + `std::__ios_failure` for tabular /
 //!     XML / archive / organism reports).
@@ -163,31 +182,37 @@ fn same_file_and_dot_alias_match_across_threads() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// `-export_search_strategy -` remains refused cleanly at NCBI's first request point.
+/// `-export_search_strategy -` writes the requests into the report's own standard output (NCBI's
+/// `cout`), with the same bytes at 1, 4, and 8 threads across platforms.
 #[test]
-fn dash_standard_output_remains_refused() {
-    let out = clean_command("blastp")
-        .args([
-            "-query",
-            "tests/fasta/outfmt11/arch_bp_q.faa",
-            "-subject",
-            "tests/fasta/outfmt11/arch_bp_s.faa",
-            "-outfmt",
-            "6",
-            "-export_search_strategy",
-            "-",
-            "-num_threads",
-            "1",
-        ])
-        .output()
-        .expect("run losat");
-    assert_eq!(out.status.code(), Some(1));
-    assert!(out.stdout.is_empty());
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("-export_search_strategy - (the search strategy on the standard output"),
-        "unexpected stderr: {stderr}"
-    );
+fn dash_standard_output_matches_across_threads() {
+    for (prog, q, s, bsz) in BATCHES {
+        let mut baseline: Option<Vec<u8>> = None;
+        for threads in ["1", "4", "8"] {
+            let out = clean_command(prog)
+                .env("BATCH_SIZE", bsz)
+                .args(["-query", q, "-subject", s, "-outfmt", "6"])
+                .args(["-num_threads", threads])
+                .args(["-export_search_strategy", "-"])
+                .output()
+                .expect("run losat");
+            assert_eq!(
+                out.status.code(),
+                Some(0),
+                "{prog} t={threads} stderr={}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert!(out.stderr.is_empty());
+            assert!(
+                out.stdout.starts_with(b"Blast4-request ::= {"),
+                "{prog} t={threads}: the first request comes first"
+            );
+            match &baseline {
+                None => baseline = Some(out.stdout),
+                Some(want) => assert_eq!(&out.stdout, want, "{prog} t={threads} differed from t=1"),
+            }
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -208,20 +233,24 @@ mod ncbi_frozen {
         rc: String,
     }
 
+    /// A table of frozen cases: `<table>_cases.tsv` and the gzipped bytes in `<table>/`.
+    #[derive(Clone, Copy)]
+    struct Table(&'static str);
+
     fn fixtures_dir() -> PathBuf {
         engine().join("tests/fixtures/strategy")
     }
 
-    fn parse_cases() -> Vec<Case> {
-        let text =
-            std::fs::read_to_string(fixtures_dir().join("f1c1_cases.tsv")).expect("f1c1_cases.tsv");
+    fn parse_cases(table: Table) -> Vec<Case> {
+        let file = format!("{}_cases.tsv", table.0);
+        let text = std::fs::read_to_string(fixtures_dir().join(&file)).expect(&file);
         let mut out = Vec::new();
         for line in text.lines() {
             if line.is_empty() || line.starts_with('#') || line.starts_with("name\t") {
                 continue;
             }
             let cells: Vec<&str> = line.split('\t').collect();
-            assert_eq!(cells.len(), 8, "bad f1c1_cases.tsv row: {line}");
+            assert_eq!(cells.len(), 8, "bad {file} row: {line}");
             let env = if cells[2] == "-" {
                 Vec::new()
             } else {
@@ -248,6 +277,12 @@ mod ncbi_frozen {
     }
 
     fn inflate_rps(spec: &str, dir: &Path) -> PathBuf {
+        // `NAMES-EXT`: the databases without their files of extension EXT (`rps_mini-freq`: no
+        // frequency ratios), as `export_search_strategy.rs` reads it.
+        let (spec, drop) = match spec.split_once('-') {
+            Some((names, extension)) => (names, Some(format!(".{extension}"))),
+            None => (spec, None),
+        };
         let target = dir.join("rpsdb");
         std::fs::create_dir_all(&target).unwrap();
         let src = engine().join("tests/db_search/rps");
@@ -259,6 +294,9 @@ mod ncbi_frozen {
             if !spec
                 .split('+')
                 .any(|name| stem.starts_with(&format!("{name}.")))
+                || drop
+                    .as_deref()
+                    .is_some_and(|extension| stem.ends_with(extension))
             {
                 continue;
             }
@@ -271,21 +309,57 @@ mod ncbi_frozen {
         target
     }
 
-    fn frozen(name: &str, ext: &str) -> Option<Vec<u8>> {
-        let path = fixtures_dir().join("f1c1").join(format!("{name}.{ext}.gz"));
+    fn frozen(table: Table, name: &str, ext: &str) -> Option<Vec<u8>> {
+        let path = fixtures_dir()
+            .join(table.0)
+            .join(format!("{name}.{ext}.gz"));
         let file = std::fs::File::open(path).ok()?;
         let mut bytes = Vec::new();
         flate2::read::GzDecoder::new(file)
             .read_to_end(&mut bytes)
-            .expect("inflate f1c1 fixture");
+            .expect("inflate frozen fixture");
         Some(bytes)
+    }
+
+    /// The bytes without SAM's `@PG` CL tag (the program's path and arguments): from the `\tCL:`
+    /// after `\n@PG\tID:0\tVN:` up to the line's `\tPN:` (`import_search_strategy.rs`'s rule).
+    fn without_sam_cl(document: &[u8]) -> Vec<u8> {
+        let find = |needle: &[u8], from: usize| {
+            document
+                .get(from..)?
+                .windows(needle.len())
+                .position(|window| window == needle)
+                .map(|at| at + from)
+        };
+        let Some(pg) = find(b"\n@PG\tID:0\tVN:", 0) else {
+            return document.to_vec();
+        };
+        let line_end = find(b"\n", pg + 1).unwrap_or(document.len());
+        let Some(cl) = find(b"\tCL:", pg + 1).filter(|&at| at < line_end) else {
+            return document.to_vec();
+        };
+        let Some(pn) = find(b"\tPN:", cl).filter(|&at| at < line_end) else {
+            return document.to_vec();
+        };
+        [&document[..cl], &document[pn..]].concat()
     }
 
     fn map_ncbi(bytes: Vec<u8>) -> Vec<u8> {
         crate::outfmt11_blastx::expected_losat_bytes(bytes)
     }
 
-    fn run_case(case: &Case, threads: &str, root: &Path, rps_shared: &Path) {
+    /// The folder name of setup `e9` (`d` and the byte 0xE9, not UTF-8), which `{e9}` in an
+    /// argument stands for.
+    const E9_FOLDER: &[u8] = b"d\xe9";
+
+    /// An argument of a row: `{e9}` becomes `E9_FOLDER`.
+    fn os_arg(text: &str) -> std::ffi::OsString {
+        use std::os::unix::ffi::OsStringExt;
+        let parts: Vec<&[u8]> = text.split("{e9}").map(str::as_bytes).collect();
+        std::ffi::OsString::from_vec(parts.join(E9_FOLDER))
+    }
+
+    fn run_case(table: Table, case: &Case, threads: &str, root: &Path, rps_shared: &Path) {
         let dir = root.join(format!("{}_t{threads}", case.name));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -297,22 +371,36 @@ mod ncbi_frozen {
             std::fs::write(&f_path, b"").unwrap();
             std::os::unix::fs::symlink("F", &lnk_path).unwrap();
         }
+        // Setup `e9`: the run's folder is the working folder, with the engine's `tests` and a
+        // link `d\xe9` to its `tests/db_search` in it, so that `-db {e9}/paja` names a database
+        // whose name NCBI posts (`803.7`) where it writes the request; the post shows the name
+        // as given, the same on every machine.
+        let e9 = case.setup == "e9";
+        if e9 {
+            use std::os::unix::ffi::OsStrExt;
+            std::os::unix::fs::symlink(engine().join("tests"), dir.join("tests")).unwrap();
+            std::os::unix::fs::symlink(
+                engine().join("tests/db_search"),
+                dir.join(std::ffi::OsStr::from_bytes(E9_FOLDER)),
+            )
+            .unwrap();
+        }
 
         let uses_f = case
             .args
             .iter()
             .any(|a| a.contains("{f}") || a.contains("{dot}") || a.contains("{lnk}"));
-        let mut argv: Vec<String> = Vec::with_capacity(case.args.len() + 3);
-        argv.push(case.program.clone());
+        let mut argv: Vec<std::ffi::OsString> = Vec::with_capacity(case.args.len() + 3);
+        argv.push(case.program.clone().into());
         for a in &case.args {
-            argv.push(
-                a.replace("{f}", f_path.to_str().unwrap())
+            argv.push(os_arg(
+                &a.replace("{f}", f_path.to_str().unwrap())
                     .replace("{dot}", &dot_path)
                     .replace("{lnk}", lnk_path.to_str().unwrap()),
-            );
+            ));
         }
-        argv.push("-num_threads".to_string());
-        argv.push(threads.to_string());
+        argv.push("-num_threads".into());
+        argv.push(threads.into());
 
         let mut cmd = match (case.stdout.as_str(), case.fsize.as_deref()) {
             ("merged", Some(limit)) => {
@@ -351,7 +439,8 @@ mod ncbi_frozen {
             }
             (other, Some(limit)) => panic!("unsupported stdout={other} with fsize={limit}"),
         };
-        cmd.current_dir(engine()).stdin(Stdio::null());
+        cmd.current_dir(if e9 { dir.clone() } else { engine() })
+            .stdin(Stdio::null());
         clean_env(&mut cmd);
         cmd.env("HOME", &dir);
         for (k, v) in &case.env {
@@ -420,7 +509,15 @@ mod ncbi_frozen {
             String::from_utf8_lossy(&got_err)
         );
 
-        let want_out = map_ncbi(frozen(&case.name, "out").unwrap_or_default());
+        let sam = case
+            .args
+            .windows(2)
+            .any(|pair| pair[0] == "-outfmt" && pair[1] == "17");
+        let sam_form = |bytes: Vec<u8>| if sam { without_sam_cl(&bytes) } else { bytes };
+        let got_out = sam_form(got_out);
+        let want_out = sam_form(map_ncbi(
+            frozen(table, &case.name, "out").unwrap_or_default(),
+        ));
         assert!(
             got_out == want_out,
             "{label}: stdout differs ({} B vs NCBI {} B): {}",
@@ -429,7 +526,7 @@ mod ncbi_frozen {
             crate::outfmt11_blastx::first_difference(&got_out, &want_out)
         );
 
-        let want_err = map_ncbi(frozen(&case.name, "err").unwrap_or_default());
+        let want_err = map_ncbi(frozen(table, &case.name, "err").unwrap_or_default());
         assert!(
             got_err == want_err,
             "{label}: stderr differs ({} B vs NCBI {} B): {}",
@@ -439,8 +536,10 @@ mod ncbi_frozen {
         );
 
         if uses_f {
-            let got_file = std::fs::read(&f_path).ok();
-            let want_file = frozen(&case.name, "file").map(map_ncbi);
+            let got_file = std::fs::read(&f_path).ok().map(sam_form);
+            let want_file = frozen(table, &case.name, "file")
+                .map(map_ncbi)
+                .map(sam_form);
             assert_eq!(
                 got_file.is_some(),
                 want_file.is_some(),
@@ -459,8 +558,14 @@ mod ncbi_frozen {
 
         // Explicitly confirm `dsoapp`/`bothapp` matches NCBI's `/dev/stdout` O_TRUNC behavior
         // (erasing pre-existing `PRE\n`; for `dsoapp`, `cout` appends after the strategy so output
-        // begins with `Blast4-request ::= {`, whereas `bothapp` also opens `-out /dev/stdout` at 0).
-        if case.stdout == "append" {
+        // begins with `Blast4-request ::= {`, whereas `bothapp` also opens `-out /dev/stdout` at 0);
+        // `dashapp` (`-`, `cout` alone) keeps `PRE\n` and appends.
+        if case.stdout == "append" && case.name.starts_with("dashapp.") {
+            assert!(
+                got_out.starts_with(b"PRE\nBlast4-request ::= {"),
+                "{label}: expected cout to append after PRE\\n"
+            );
+        } else if case.stdout == "append" {
             assert!(
                 !got_out.starts_with(b"PRE\n"),
                 "{label}: expected /dev/stdout O_TRUNC to erase PRE\\n"
@@ -476,15 +581,19 @@ mod ncbi_frozen {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn f1c1_frozen_cases_match_ncbi_at_1_and_4_threads() {
-        let cases = parse_cases();
-        assert!(cases.len() >= 250, "expected full F1c-1 frozen matrix");
-        let root = temp_run_dir("frozen_ncbi");
+    /// Every case of `table` at 1 and 4 threads (at least `min` cases).
+    fn frozen_cases_match_ncbi(table: Table, min: usize) {
+        let cases = parse_cases(table);
+        assert!(
+            cases.len() >= min,
+            "expected the full {} frozen matrix",
+            table.0
+        );
+        let root = temp_run_dir(&format!("frozen_ncbi_{}", table.0));
         assert_eq!(
             std::fs::metadata(&root).unwrap().blksize(),
             4096,
-            "F1c-1 file/append rows require a temporary directory with 4096-byte blocks"
+            "file/append rows require a temporary directory with 4096-byte blocks"
         );
         let rps_shared = inflate_rps("rps_mini", &root);
         let work: Vec<(&Case, &str)> = cases
@@ -500,10 +609,20 @@ mod ncbi_frozen {
                     let Some(&(case, threads)) = work.get(idx) else {
                         break;
                     };
-                    run_case(case, threads, &root, &rps_shared);
+                    run_case(table, case, threads, &root, &rps_shared);
                 });
             }
         });
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn f1c1_frozen_cases_match_ncbi_at_1_and_4_threads() {
+        frozen_cases_match_ncbi(Table("f1c1"), 250);
+    }
+
+    #[test]
+    fn f1c2_frozen_cases_match_ncbi_at_1_and_4_threads() {
+        frozen_cases_match_ncbi(Table("f1c2"), 250);
     }
 }

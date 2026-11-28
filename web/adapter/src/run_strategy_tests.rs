@@ -329,7 +329,8 @@ fn a_run_that_fails_after_the_file_is_made_keeps_the_command_lines_file() {
 /// against the run's files as `-logfile` is (line RG item F1w-r2), a name in a folder that they do
 /// not have (`out/s.asn`, `a/b/../s.asn`) or in a file of them, and a folder of them (the query's
 /// `outfmt11`; `src` of the run's directory, this test's working directory); `-` and the standard
-/// output are the command line's refusals at NCBI's first request, and the outputs hold nothing;
+/// output, which the run does not have (the command line writes the requests there; line RG
+/// decision F1c-3), are LOSAT Web's refusals at NCBI's first request, and the outputs hold nothing;
 /// the null device gives no file and the run goes on; the standard error, the file of another
 /// option of the run and another file of the run's directory (`Cargo.toml` of this test's) are
 /// LOSAT Web's refusals at the same point. A run with an empty query ends before that request:
@@ -479,9 +480,10 @@ fn a_run_that_ends_before_its_first_request_keeps_each_formats_bytes() {
     }
 }
 
-/// A run that LOSAT refuses at NCBI's first request (`-`) writes to its outfmt 0 output what the
-/// command line's report stream writes before that refusal (line RG T6a,
-/// `strategy::check_report_stream`): NCBI's prolog, which NCBI writes before its request, and so
+/// A run that LOSAT Web refuses at NCBI's first request (`-`, which the command line writes to its
+/// standard output; line RG decision F1c-3) writes to its outfmt 0 output what NCBI's report stream
+/// holds at that request (line RG T6a, `strategy::check_report_stream`): NCBI's prolog, which NCBI
+/// writes before its request, and so
 /// the start of the run without the option up to its first query's report (`prolog_of`); the
 /// refusal is the run's error, for each program.
 #[test]
@@ -524,8 +526,9 @@ fn a_refused_run_writes_outfmt_0s_prolog_before_the_refusal() {
 }
 
 /// The prolog of the outfmt 0 report `report`: its bytes before the two newlines that start the
-/// first query's report (`Query=`), which NCBI writes before its first request (the command line's
-/// run of the argv with `-export_search_strategy -` writes these bytes before the refusal).
+/// first query's report (`Query=`), which NCBI writes before its first request (`PrintProlog`; the
+/// command line's run of the argv with `-export_search_strategy -` writes that request after these
+/// bytes, where LOSAT Web refuses `-`, line RG decision F1c-3).
 fn prolog_of(report: &[u8]) -> &[u8] {
     let first_query = report
         .windows(b"\n\nQuery=".len())
@@ -588,16 +591,17 @@ fn an_outfmt_that_does_not_parse_fails_where_the_command_line_fails() {
 }
 
 /// A run of two searches (`-num_descriptions 3 -num_alignments 2`: outfmt 0's hit list of 3, the
-/// tabular formats' of 500; the argv's outfmt 0 is the second search) with a name that LOSAT
-/// refuses at NCBI's first request: each search has the export of the command line's run of its
-/// formats (decision F1w-5; the other search's receiver keeps nothing), so the other search, which
-/// runs first, stops at its own first request with its outputs holding nothing, and the run fails
-/// with the refusal of the argv's own search, its outfmt 0 output holding NCBI's prolog and the
-/// tabular outputs nothing, as the CLI's run of the argv writes NCBI's prolog before the refusal
-/// (line RG T6a; `ROWS[1]`, whose run with a file the first test checks; without the other
-/// search's export the outcome here is the same, and the next test tells them apart).
+/// tabular formats' of 500; the argv's outfmt 0 is the second search) with a name that LOSAT Web
+/// refuses at NCBI's first request (`-`, line RG decision F1c-3): each search has the export of the
+/// command line's run of its formats (decision F1w-5; the other search's receiver keeps nothing),
+/// so the other search, which runs first, stops at its own first request with its outputs holding
+/// nothing, and the run fails with the refusal of the argv's own search, its outfmt 0 output
+/// holding NCBI's prolog and the tabular outputs nothing, as NCBI's prolog comes before its first
+/// request (`PrintProlog`; line RG T6a; `ROWS[1]`, whose run with a file the first test checks;
+/// without the other search's export the outcome here is the same, and the next test tells them
+/// apart).
 #[test]
-fn a_two_search_run_refuses_a_name_as_the_command_line() {
+fn a_two_search_run_refuses_a_name_at_ncbis_first_request() {
     let (_, _, query, subject, _) = ROWS[1];
     let words = row_argv(&ROWS[1], "-");
     let groups = {
@@ -675,10 +679,10 @@ fn the_other_search_reads_names_against_the_runs_files() {
     }
 }
 
-/// LOSAT's refusal of `-export_search_strategy -` in BLASTP.
+/// LOSAT Web's refusal of `-export_search_strategy -` in BLASTP (line RG decision F1c-3).
 const BLASTP_STANDARD_OUTPUT: &str = "-export_search_strategy - (the search strategy on the standard output, between the parts of the report) is not supported by LOSAT's BLASTP; give a file name";
 
-/// The two-search run of `a_two_search_run_refuses_a_name_as_the_command_line` on 700 queries
+/// The two-search run of `a_two_search_run_refuses_a_name_at_ncbis_first_request` on 700 queries
 /// whose outfmt 7 report is longer than a chunk, which the adapter sends as the search writes it
 /// (`emit::CHUNK`): the run without the option sends that much of stream 7, and the run with `-`
 /// sends no byte of the other search's outputs and only NCBI's prolog of outfmt 0 (as the first

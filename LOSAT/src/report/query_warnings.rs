@@ -1342,7 +1342,15 @@ impl Write for TiedDiagnostics<'_> {
         self.sink.write_all(buf)
     }
 
+    /// A flush of `cerr` flushes its tie first too: the search strategy of
+    /// `-export_search_strategy -` (`ostream::CoutStrategy`), which NCBI inserts into the report's
+    /// `cout`, flushes here before its first insertion, so that what LOSAT's writer `report` holds
+    /// of the report before it reaches the report's stream first.
     fn flush(&mut self) -> io::Result<()> {
+        if !self.flushed {
+            self.report.flush()?;
+            self.flushed = true;
+        }
         self.sink.flush()
     }
 }

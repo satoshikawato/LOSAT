@@ -977,8 +977,9 @@ pub(super) fn render(
 
 /// Writes `CBlastFormat::PrintProlog` for every requested format when `-subject` remapping throws
 /// `CAnnotMapperException::eBadAlignment` (`nullb_report::has_mapped_empty`) before any query's
-/// report runs: outfmt 0–4's banner and database header, outfmt 15/16's XML2/JSON opening, and
-/// outfmt 20's CSV field header; nothing for the remaining formats (outfmt 11's error archive is
+/// report runs: outfmt 0–4's banner and database header and outfmt 15/16's XML2/JSON opening
+/// (outfmt 20's CSV field header came before the search, `tblastn_app::write_first_batch_prologs`);
+/// nothing for the remaining formats (outfmt 11's error archive is
 /// written by `tblastn_app::run` when the exception returns).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:348-442
@@ -1069,16 +1070,6 @@ fn write_mapped_empty_prologs(
             13..=16 => {
                 let kind = xml2_kind(outfmt).expect("a checked XML2 or JSON format");
                 writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
-            }
-            20 => {
-                if let Some(spec) = super::tabular::tabular_spec(outfmt) {
-                    super::tabular::write_tabular_prolog(
-                        &spec,
-                        tabular.taxdb_found,
-                        &mut writer,
-                        &mut *outputs.diagnostics,
-                    )?;
-                }
             }
             _ => {}
         }

@@ -1387,7 +1387,7 @@ fn where_the_switch_must_not_act_the_counters_name_why() {
 /// database, whose formatter warns for each query without `taxdb.bti`), with `-parse_deflines`,
 /// with `-db` (`stitle`, `sseq`, `staxids`, `sall*` and the names: the definition lines as the
 /// report decodes them, the taxonomy database's lookups and their texts), and on NCBI's errors in
-/// the first batch, where outfmt 20's line of the field names comes as without the switch. A
+/// the first batch, where outfmt 20's line of the field names comes before the search in both. A
 /// subject's tabular-id refusal in a later batch comes after the rows of the batches before in
 /// both paths; where a later batch's report is refused otherwise (a stored title, a header or
 /// taxonomy record of a database with parsed Seq-ids) the refusal comes after the rows of the
@@ -1516,7 +1516,14 @@ fn custom_tabular_reports_give_the_off_bytes() {
         args[5] = &title;
         let what = format!("-db {title} outfmt {outfmt}");
         let (off, on, _) = refused_late(&what, &args, threads, &[]);
-        assert!(off.report.is_empty(), "{what}: off, no row");
+        // No row without the switch; outfmt 20's line of the field names came before the search
+        // (NCBI's `PrintProlog`), as in the reference.
+        let names = if outfmt.starts_with("20 ") {
+            &reference.as_bytes()[..=reference.find('\n').expect("the field names")]
+        } else {
+            &b""[..]
+        };
+        assert_eq!(off.report.as_slice(), names, "{what}: off, no row");
         reports_before(
             &what,
             &off,

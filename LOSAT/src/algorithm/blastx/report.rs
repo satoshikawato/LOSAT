@@ -1438,9 +1438,15 @@ pub(crate) fn write_prolog(
             }),
         )?;
     }
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
     // Outfmt 20's line of the field names, after its formatter's warning
-    // (`tabular::write_prolog`).
-    if let Some(spec) = options.tabular {
+    // (`tabular::write_prolog`), flushed as the formatter's destructor flushes NCBI's stream: the
+    // line reaches its device before the first search strategy request, also one written to
+    // another stream object (`-export_search_strategy /dev/stdout`, or `-` with `-out`).
+    if let Some(spec) = options
+        .tabular
+        .filter(|spec| spec.kind == crate::report::tabular::TabularKind::CsvWithHeader)
+    {
         super::tabular::write_prolog(
             options.program(),
             spec,
@@ -1448,6 +1454,7 @@ pub(crate) fn write_prolog(
             &mut *writer,
             diagnostics,
         )?;
+        writer.ncbi_flush()?;
     }
     Ok(())
 }

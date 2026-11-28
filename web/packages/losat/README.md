@@ -143,11 +143,12 @@ are.
 The search strategy file holds the command line's bytes for the argv. Its name is read as the
 `-logfile` name is, as the command line opens it for writing: a name the command line cannot open
 (`""`, a directory, `/etc/s.asn`) is the command line's `File is not accessible` error at once;
-`/dev/null` and the devices whose writes are lost give no file; `-` and the standard output are the
-command line's refusals, and the standard error, the other devices and files of the system, and the
-file of `-query`, `-subject`, `-logfile` or `-window_masker_db` are LOSAT Web's, raised where the
-command line writes its first request. A run that fails after the file is made keeps it, empty or cut
-back as the command line leaves it.
+`/dev/null` and the devices whose writes are lost give no file; `-` and the standard output (where
+the command line writes the requests; a run's standard output is its report), the standard error,
+the other devices and files of the system, and the file of `-query`, `-subject`, `-logfile` or
+`-window_masker_db` are LOSAT Web's refusals, raised where the command line writes its first
+request. A run that fails after the file is made keeps it, empty or cut back as the command line
+leaves it.
 
 `RuntimeInfo.messages` says where the run's messages went (the warnings that the command line writes
 to its standard error without `-logfile`): `'diagnostics'` (stream 3), `'logfile'` (the file of

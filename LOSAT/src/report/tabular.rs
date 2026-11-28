@@ -2132,6 +2132,33 @@ pub fn run_end(
     crate::report::blast_xml::writer::run_ending_exception(exception)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:348-358
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
+/// Writes outfmt 20's line of the field names of `program`'s report `spec` on `sink`
+/// (`PrintProlog`), then flushes the stream as the destructor of the formatter that wrote it does
+/// (`ReportWrite::ncbi_flush`; LOSAT's own writers are flushed too); nothing for the other kinds.
+/// The one place of the line in BLASTN, BLASTP, PSIBLAST, RPSBLAST, TBLASTN and TBLASTX: the step
+/// that writes outfmt 0 to 4's prolog before the first query batch is read, so that the line
+/// reaches its device before the first search strategy request, also where the request goes to
+/// another stream object than the report (`-export_search_strategy -` with `-out`, or
+/// `-export_search_strategy /dev/stdout`), and before LOSAT's refusals at a query batch or its
+/// report, as NCBI's bytes before that point. BLASTX and RPSTBLASTN write it with their other
+/// prologs before the search (`blastx::report::write_prolog`).
+pub fn write_field_names(
+    spec: &TabularSpec,
+    program: crate::blastinput::app::Program,
+    sink: &mut crate::api::local_blast::OutputSink<'_>,
+) -> io::Result<()> {
+    use crate::report::ostream::ReportWrite;
+    if spec.kind != TabularKind::CsvWithHeader {
+        return Ok(());
+    }
+    let mut writer = crate::cli::NcbiOstream::sink(sink)?;
+    TabularWriter::new(spec, program, "", None).prolog(&mut writer)?;
+    writer.ncbi_flush()?;
+    writer.flush()
+}
+
 /// The writer of a tabular report (`TabularWriter::new`).
 pub struct TabularWriter<'a> {
     spec: &'a TabularSpec,
@@ -2173,7 +2200,8 @@ impl<'a> TabularWriter<'a> {
         }
     }
 
-    /// outfmt 20's line of the field names (`PrintProlog` → `PrintFieldSpecs`).
+    /// outfmt 20's line of the field names (`PrintProlog` → `PrintFieldSpecs`; the programs write
+    /// it before the search, `write_field_names`).
     pub fn prolog(&self, out: &mut dyn Write) -> io::Result<()> {
         if self.spec.kind != TabularKind::CsvWithHeader {
             return Ok(());

@@ -58,7 +58,7 @@ use super::options::OptionInputs;
 use super::writer::{encode_strategy_request, EncodedStrategyRequest, RequestInputs};
 use super::{ArchiveHandle, ArchiveRequest, HandleCarry, OptionsHandle, SearchedContext0};
 use crate::report::diag_log::{Posts, ERROR};
-use crate::report::ostream::{emit_strategy_posts, StrategyStream};
+use crate::report::ostream::{emit_strategy_posts, CoutStrategy, RequestPoint, StrategyStream};
 use crate::report::run_files::{FileReceiver, RunFileName, RunFiles, StrategyTarget as Target};
 use crate::report::serial::encoder::BufferPiece;
 
@@ -94,12 +94,17 @@ pub trait StrategySink: Send {
     fn hand_over(&mut self) -> std::io::Result<()> {
         Ok(())
     }
+
+    /// The run's report stream is made (`StrategyExport::attach_report`): the sink of `-`
+    /// (`CoutStrategy`) writes into it where it is standard output.
+    fn attach(&mut self, _report: &RequestPoint) {}
 }
 
-// No NCBI counterpart: sink for refused targets (`-`) and LOSAT Web's `/dev/null` that discards
-// request bytes while still emitting any `803.7` diagnostics.
-/// The sink of a strategy target with no output file (`-`, refused before any request; or LOSAT
-/// Web's `/dev/null`, which drops bytes while still posting any `803.7` diagnostics).
+// No NCBI counterpart: sink for refused targets (LOSAT Web's `-` and its other refusals) and
+// LOSAT Web's `/dev/null` that discards request bytes while still emitting any `803.7` diagnostics.
+/// The sink of a strategy target with no output file (one that LOSAT Web refuses before any
+/// request; or LOSAT Web's `/dev/null`, which drops bytes while still posting any `803.7`
+/// diagnostics).
 struct NoSink;
 
 impl StrategySink for NoSink {
@@ -124,6 +129,33 @@ impl StrategySink for NoSink {
     ) -> std::io::Result<()> {
         let _ = emit_strategy_posts(posts, None, diagnostics, archive)?;
         Ok(())
+    }
+}
+
+impl StrategySink for CoutStrategy {
+    fn write_request(
+        &mut self,
+        bytes: &[u8],
+        pieces: &[BufferPiece],
+        posts: &[(u64, Vec<u8>)],
+        diagnostics: &mut dyn Write,
+        archive: Option<&ArchiveHandle>,
+    ) -> std::io::Result<()> {
+        self.write_object(bytes, pieces, posts, diagnostics, archive)
+    }
+
+    fn write_partial(
+        &mut self,
+        bytes: &[u8],
+        posts: &[(u64, Vec<u8>)],
+        diagnostics: &mut dyn Write,
+        archive: Option<&ArchiveHandle>,
+    ) -> std::io::Result<()> {
+        CoutStrategy::write_partial(self, bytes, posts, diagnostics, archive)
+    }
+
+    fn attach(&mut self, report: &RequestPoint) {
+        CoutStrategy::attach(self, report);
     }
 }
 
@@ -266,7 +298,7 @@ struct Shared {
     refusal: Option<String>,
     /// The run's report stream (`report::ostream::ReportStream::of_cli`), whose writes of NCBI's
     /// before its first request `check_report_stream` makes: only for a file that LOSAT refuses.
-    report: Mutex<Option<crate::report::ostream::RequestPoint>>,
+    report: Mutex<Option<RequestPoint>>,
     state: Mutex<State>,
     /// The strategy sink and its encoded requests held until the run reaches each batch's start
     /// (`release_through`). Its own lock, taken after `state`'s where both are, so that the panic
@@ -360,10 +392,13 @@ pub struct StrategyFile {
 /// Where the requests of a `StrategyFile` go.
 #[derive(Debug)]
 enum StrategyTarget {
-    /// Nowhere: a file that LOSAT refuses before any request (`-`, NCBI's standard output; the
-    /// standard output of LOSAT Web's run, or a file there that is not one of the run's), or the
-    /// null device of LOSAT Web's run (`run_files::StrategyTarget::Nowhere`).
+    /// Nowhere: a file that LOSAT Web refuses before any request (`-` and the standard output of
+    /// its run, which has no process standard output, or a file there that is not one of the
+    /// run's), or the null device of LOSAT Web's run (`run_files::StrategyTarget::Nowhere`).
     None,
+    /// `-`: NCBI's `cout` (the command line), the report's stream where the report is standard
+    /// output (`ostream::CoutStrategy`).
+    StandardOutput,
     /// The file on the file system (the command line).
     Disk(std::fs::File),
     /// The file in memory that the caller's receiver gets (LOSAT Web).
@@ -379,13 +414,16 @@ enum StrategyTarget {
 ///
 /// Any non-`-` file or device path (including `/dev/stdout`, the same file as `-out`, symlinks,
 /// and failing devices such as `/dev/full`) is opened here on its own descriptor and written
-/// through `ostream::StrategyStream` at each batch's start. LOSAT still refuses `-` (standard
-/// output interleaved into NCBI's report stream, reserved for its own follow-up): the refusal is
-/// recorded here and raised where NCBI makes its first request (`check_report_stream`), so every
-/// stop before that point ends as NCBI's.
-pub fn create_strategy_file(path: &Path, label: &str) -> Result<StrategyFile> {
+/// through `ostream::StrategyStream` at each batch's start. `-` is NCBI's `cout`
+/// (ncbiargs.cpp:777-781), which NCBI does not open: its requests go into the report's own stream
+/// where the report is standard output, else into standard output apart from the report
+/// (`ostream::CoutStrategy`, bound where the run makes its report stream, `attach_report`).
+pub fn create_strategy_file(path: &Path) -> Result<StrategyFile> {
     if path.as_os_str() == "-" {
-        return Ok(standard_output_refusal(label));
+        return Ok(StrategyFile {
+            target: StrategyTarget::StandardOutput,
+            refusal: None,
+        });
     }
     let file = std::fs::File::create(path)
         .map_err(|_| crate::cli::inaccessible("export_search_strategy", path))?;
@@ -395,7 +433,9 @@ pub fn create_strategy_file(path: &Path, label: &str) -> Result<StrategyFile> {
     })
 }
 
-/// `-` (`create_strategy_file`): no file, and LOSAT's refusal.
+// No NCBI counterpart: LOSAT Web's run has no process standard output, so `-` has nothing of
+// NCBI's to be compared with there (line RG decision F1c-3).
+/// LOSAT Web's `-` (`create_strategy_file_in`): no file, and LOSAT's refusal.
 fn standard_output_refusal(label: &str) -> StrategyFile {
     StrategyFile {
         target: StrategyTarget::None,
@@ -427,17 +467,18 @@ fn not_in_the_browser(path: &Path, what: &str) -> String {
 /// and no `-out`), the file that the command line on Linux makes of the name in the run's
 /// directory (`RunFiles::strategy_target`, read against the run's files as `-logfile` and a tool's
 /// output are), in the run's file in memory (`ReceivedFile`) under the command line's file name
-/// (`s.asn` for `./s.asn` and `in/../s.asn`; line RG item F1w-r2), with the command line's error
-/// and refusals: NCBI's error at once for a name that the command line cannot open (a folder that
-/// the run's files do not have, a folder of them, a name in a directory of root's); `-` and the
-/// standard output (`/dev/stdout`) refused at NCBI's first request; no file for the null device
-/// (`/dev/null`, `/dev/stdin`). LOSAT Web refuses, at the same point, a name whose command line
-/// run writes where the run has no file: the standard error, a device whose writes fail or wait
-/// for a reader, a file of the system (procfs, a message queue), the file of another option of the
-/// run (`others`: `-query`, `-subject`, the PSSM files, `-logfile`, `-window_masker_db`, the files
-/// that the search reads from the run's folder, `web_adapter::open_strategy_file`), whose bytes
-/// the command line's strategy file replaces or mixes with its own, and any other file of the
-/// run's files or file that the search reads, which LOSAT Web does not write.
+/// (`s.asn` for `./s.asn` and `in/../s.asn`; line RG item F1w-r2), with the command line's error:
+/// NCBI's error at once for a name that the command line cannot open (a folder that the run's files
+/// do not have, a folder of them, a name in a directory of root's); LOSAT Web's refusal, at NCBI's
+/// first request, of `-` and the standard output (`/dev/stdout`), which the run does not have (its
+/// report is the caller's); no file for the null device (`/dev/null`, `/dev/stdin`). LOSAT Web
+/// refuses, at the same point, a name whose command line run writes where the run has no file: the
+/// standard error, a device whose writes fail or wait for a reader, a file of the system (procfs, a
+/// message queue), the file of another option of the run (`others`: `-query`, `-subject`, the PSSM
+/// files, `-logfile`, `-window_masker_db`, the files that the search reads from the run's folder,
+/// `web_adapter::open_strategy_file`), whose bytes the command line's strategy file replaces or
+/// mixes with its own, and any other file of the run's files or file that the search reads, which
+/// LOSAT Web does not write.
 pub fn create_strategy_file_in(
     files: &RunFiles,
     path: &Path,
@@ -445,7 +486,7 @@ pub fn create_strategy_file_in(
     others: &[RunFileName<'_>],
 ) -> Result<StrategyFile> {
     let RunFiles::Receiver(receiver) = files else {
-        return create_strategy_file(path, label);
+        return create_strategy_file(path);
     };
     if path.as_os_str() == "-" {
         return Ok(standard_output_refusal(label));
@@ -493,21 +534,20 @@ pub fn create_strategy_file_in(
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:250-262 (the same order in
 // blastn_app.cpp:255-282, blastx_app.cpp:251-264, tblastn_app.cpp:267-280, tblastx_app.cpp:170-181,
 // psiblast_app.cpp:503-517 and :340, rpsblast_app.cpp:188-199, rpstblastn_app.cpp:185-196)
-/// LOSAT's refusal of the run's strategy file (`create_strategy_file`: `-` on the command line;
-/// `create_strategy_file_in`: `-`, standard output, or non-run files in LOSAT Web), raised where
-/// NCBI writes its first request: after its formatter and its prolog, once the first batch is read
-/// and before it is searched (`SaveSearchStrategy`).
-/// Every stop of NCBI's before that point (an empty query, a database or option error, a query
-/// that cannot be read, a bad `BATCH_SIZE`, psiblast's `-in_pssm` with `-subject`, a device
-/// that fails at the prolog's flush) comes first with NCBI's own bytes, because the run's report
-/// stream is NCBI's until here. Here the stream makes NCBI's writes so far while the formatter
-/// lives (`RequestPoint::make_writes`): a write that fails ends the run as NCBI's failed write
-/// ends it (`BLAST failed to write output`, exit code 6, on `/dev/full`), before any request.
-/// Otherwise the run refuses; what the stream holds then is written before the refusal, as at
-/// LOSAT's other refusals (NCBI's prolog, which NCBI writes before its request too). The
-/// programs call it where they make the first batch's request (`StrategyExport::write_with`
-/// calls it too, so no request is ever written to such a file) and, where they write that
-/// request after searching, at NCBI's point (BLASTP's `search`).
+/// LOSAT Web's refusal of the run's strategy file (`create_strategy_file_in`: `-`, the standard
+/// output, or a file that is not the run's), raised where NCBI writes its first request: after its
+/// formatter and its prolog, once the first batch is read and before it is searched
+/// (`SaveSearchStrategy`). Every stop of NCBI's before that point (an empty query, a database or
+/// option error, a query that cannot be read, a bad `BATCH_SIZE`, psiblast's `-in_pssm` with
+/// `-subject`, a device that fails at the prolog's flush) comes first with NCBI's own bytes,
+/// because the run's report stream is NCBI's until here. Here the stream makes NCBI's writes so far
+/// while the formatter lives (`RequestPoint::make_writes`): a write that fails ends the run as
+/// NCBI's failed write ends it (`BLAST failed to write output`, exit code 6, on `/dev/full`),
+/// before any request. Otherwise the run refuses; what the stream holds then is written before the
+/// refusal, as at LOSAT's other refusals (NCBI's prolog, which NCBI writes before its request too).
+/// The programs call it where they make the first batch's request (`StrategyExport::write_with`
+/// calls it too, so no request is ever written to such a file) and, where they write that request
+/// after searching, at NCBI's point (BLASTP's `search`).
 pub fn check_report_stream(strategy: Option<&StrategyExport>) -> Result<()> {
     let Some(strategy) = strategy else {
         return Ok(());
@@ -537,9 +577,11 @@ impl StrategyExport {
         self.0.refusal.is_some()
     }
 
-    /// The run's report stream (`report::ostream::ReportStream::of_cli`), whose writes before
-    /// NCBI's first request `check_report_stream` makes where LOSAT refuses the file.
-    pub(crate) fn attach_report(&self, report: crate::report::ostream::RequestPoint) {
+    /// The run's report stream (`report::ostream::ReportStream::of_cli`): the stream that `-`
+    /// writes into where the report is standard output (`StrategySink::attach`), and whose writes
+    /// before NCBI's first request `check_report_stream` makes where LOSAT refuses the file.
+    pub(crate) fn attach_report(&self, report: RequestPoint) {
+        hook_lock(&self.0.held).sink.attach(&report);
         if self.0.refusal.is_some() {
             *self
                 .0
@@ -683,12 +725,15 @@ impl StrategyExport {
         if let Some(outfmt) = outfmt {
             inputs.hitlist_size = hitlist_size(outfmt, counts);
         }
-        // A refused file gets no request (`check_report_stream`, `write_with`); `-` has none.
+        // A refused file gets no request (`check_report_stream`, `write_with`).
         let sink: Box<dyn StrategySink> = match file.target {
             StrategyTarget::Disk(file) => Box::new(StrategyStream::new(
                 Box::new(file),
                 inputs.kind.application(),
             )),
+            StrategyTarget::StandardOutput => {
+                Box::new(CoutStrategy::new(inputs.kind.application()))
+            }
             StrategyTarget::Received(file) => Box::new(file),
             StrategyTarget::None => Box::new(NoSink),
         };
@@ -1023,8 +1068,10 @@ fn write_held_of(open: &[std::sync::Weak<Shared>]) {
 /// The end of a run of a program with `-export_search_strategy` (`strategy`; `None` without
 /// it). The requests encoded (`StrategyExport::write_with`) whose batches' starts the run did not
 /// reach: a run that ends with one of NCBI's errors (`cli::NativeError::caught`, including a
-/// `StrategyWriteFault`) ended before those starts, so those unreached requests are dropped; a
-/// run that ends with `Ok` (or a refusal of LOSAT's) flushes any remaining held requests. A run
+/// `StrategyWriteFault`) or with its report stream's failure (`ostream::ReportWriteFailure`,
+/// NCBI's exception where a write of the report failed) ended before those starts, so those
+/// unreached requests are dropped; a run that ends with `Ok` (or a refusal of LOSAT's) flushes any
+/// remaining held requests. A run
 /// that ends as NCBI's (`Ok` or NCBI's error) has written every `803.7` post of its requests at
 /// its batch's start (`StrategyExport::take_posts`), so a post still waiting is LOSAT's internal
 /// error instead of output that silently lacks it. LOSAT's refusals (any other error) keep their
@@ -1062,7 +1109,14 @@ fn end_export(strategy: &StrategyExport, result: Result<()>) -> Result<()> {
     // `NativeError`, a strategy write fault, or an exception of NCBI's that a report's writer
     // carries (the `-html` links' registry, which NCBI's prolog reads before its first request).
     let native = matches!(&result, Err(error) if crate::cli::NativeError::caught(error).is_some());
-    let ended = if native {
+    // The report stream's failure (`ostream::ends_at_report_failure`), which `ReportStream::finish`
+    // makes NCBI's end of after this: NCBI's exception ended the run where the report's write
+    // threw, after the requests of the batches whose starts the run reached. The requests made
+    // ahead of those starts (a blastp call's batches, `CallRequests`; the next batch's) were never
+    // NCBI's, nor are their posts, which `end_run` drops with them.
+    let report_failed =
+        matches!(&result, Err(error) if crate::report::ostream::ends_at_report_failure(error));
+    let ended = if native || report_failed {
         hook_lock(&strategy.0.held).requests.clear();
         Ok(())
     } else {

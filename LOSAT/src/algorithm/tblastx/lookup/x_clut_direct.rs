@@ -684,8 +684,8 @@ fn x_past_appends_fit(
 /// 2^`X_BUCKET_SHIFT` cells: `count(b, slots)` adds one to `slots[c]` per append to cell c of
 /// bucket b (`slots` zeroed, one entry per cell of a bucket); each cell's count n takes
 /// `x_overflow_cells_of(n)` cells.
-fn x_buckets_need(buckets: usize, mut count: impl FnMut(usize, &mut [u32])) -> usize {
-    let mut slots = vec![0u32; 1 << X_BUCKET_SHIFT];
+fn x_buckets_need(buckets: usize, mut count: impl FnMut(usize, &mut XCellSlots)) -> usize {
+    let mut slots = Box::new([0u32; X_BUCKET_CELLS]);
     let mut need = 0usize;
     for b in 0..buckets {
         slots.fill(0);
@@ -2074,6 +2074,34 @@ fn x_bpffill_on() -> bool {
 // size 5 (2^8 to 2^14 timed the same or slower, v4-BPF K2-2). Scheduling only.
 const X_BUCKET_SHIFT: u32 = 10;
 
+/// The cells of a bucket.
+const X_BUCKET_CELLS: usize = 1 << X_BUCKET_SHIFT;
+
+// No NCBI counterpart: scheduling only.
+/// A bucket's counts or cursors, one per cell: indexed by a cell's index in its bucket
+/// (`index & (X_BUCKET_CELLS - 1)`), which the type's length bounds, so the bucket fills' loops
+/// test no bound.
+type XCellSlots = [u32; X_BUCKET_CELLS];
+
+// No NCBI counterpart: the bucket fill's partition (`x_buckets_with`), scheduling only.
+/// Per bucket of `X_BUCKET_CELLS` cells: the first slot of its appends (`records`, cell indices in
+/// order) after those of the buckets before, and one entry more (all the appends); and the most
+/// appends of one bucket. Out of line, so that its loop keeps its registers.
+#[inline(never)]
+fn x_bucket_starts(records: &[u32], buckets: usize) -> (Vec<u32>, usize) {
+    let mut starts = vec![0u32; buckets + 1];
+    let counts = &mut starts[1..];
+    for &index in records {
+        counts[(index >> X_BUCKET_SHIFT) as usize] += 1;
+    }
+    let mut largest = 0usize;
+    for b in 0..buckets {
+        largest = largest.max(starts[b + 1] as usize);
+        starts[b + 1] += starts[b];
+    }
+    (starts, largest)
+}
+
 // No NCBI counterpart: memory only (the pages of the record of the appends returned as the
 // partition reads it, `x_buckets_with`); it changes no value NCBI computes.
 /// How many appends of the record the partition reads between two returns of its pages (16 MiB).
@@ -2480,15 +2508,7 @@ fn x_buckets_with<S: CompressedScores>(
     // `bucket_starts[b]..bucket_starts[b + 1]` of `hits`, the slots its cells' hits take.
     let buckets = backbone_size.div_ceil(1 << X_BUCKET_SHIFT);
     let mask = (1u32 << X_BUCKET_SHIFT) - 1;
-    let mut bucket_starts = vec![0u32; buckets + 1];
-    for &index in &targets {
-        bucket_starts[(index >> X_BUCKET_SHIFT) as usize + 1] += 1;
-    }
-    let mut largest = 0usize;
-    for b in 0..buckets {
-        largest = largest.max(bucket_starts[b + 1] as usize);
-        bucket_starts[b + 1] += bucket_starts[b];
-    }
+    let (bucket_starts, largest) = x_bucket_starts(&targets, buckets);
     let mut pv = x_zeroed_on(kept.pv, (backbone_size >> PV_ARRAY_BTS) + 1);
     let mut hits = x_sized_on::<S, _>(kept.hits, total, pooled);
     {
@@ -2545,21 +2565,22 @@ fn x_buckets_with<S: CompressedScores>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1197-1235
     // `pv_array_bts` is `PV_ARRAY_BTS` whatever `count` (the larger shift is the same, tested
     // above), so the bits are set as the counts are read.
-    let mut cell_slots = vec![0u32; 1 << X_BUCKET_SHIFT];
+    let mut cell_slots: Box<XCellSlots> = Box::new([0; X_BUCKET_CELLS]);
     let mut overflowed: Vec<u32> = Vec::new();
     let mut nonempty_count = 0usize;
     let mut longest_chain = 0i32;
     for b in 0..buckets {
         let first = b << X_BUCKET_SHIFT;
-        let cells = (backbone_size - first).min(1 << X_BUCKET_SHIFT);
+        let cells = (backbone_size - first).min(X_BUCKET_CELLS);
         let lo = bucket_starts[b] as usize;
         let hi = bucket_starts[b + 1] as usize;
         let part = &mut targets[..hi - lo];
         for (to, &from) in part.iter_mut().zip(&hits[lo..hi]) {
             *to = from as u32;
         }
-        // Each cell's count, then its cursor.
-        let slots = &mut cell_slots[..cells];
+        // Each cell's count, then its cursor (the bucket's `cells` cells; the slots past them,
+        // of the last bucket, are never indexed).
+        let slots = &mut *cell_slots;
         slots.fill(0);
         for &packed in part.iter() {
             slots[(packed & mask) as usize] += 1;
@@ -2568,7 +2589,7 @@ fn x_buckets_with<S: CompressedScores>(
         let mut slot = lo as u32;
         for (cell, (start, count)) in starts[first..first + cells]
             .iter_mut()
-            .zip(slots.iter_mut())
+            .zip(slots[..cells].iter_mut())
             .enumerate()
         {
             let n = *count;
@@ -3133,7 +3154,7 @@ where
     let statistics = x_bucket_items(
         parts,
         pieces,
-        || (vec![0u32; 1 << X_BUCKET_SHIFT], Vec::<u32>::new()),
+        || (Box::new([0u32; X_BUCKET_CELLS]), Vec::<u32>::new()),
         |(cell_slots, overflowed), piece| {
             let (piece_buckets, starts, hits, pv) = slices[piece]
                 .lock()
@@ -3146,9 +3167,10 @@ where
             let mut longest_chain = 0i32;
             for b in piece_buckets {
                 let first = (b << X_BUCKET_SHIFT) - first_cell;
-                let cells = (backbone_size - (b << X_BUCKET_SHIFT)).min(1 << X_BUCKET_SHIFT);
-                // Each cell's count, then its cursor (in the range's slots).
-                let slots = &mut cell_slots[..cells];
+                let cells = (backbone_size - (b << X_BUCKET_SHIFT)).min(X_BUCKET_CELLS);
+                // Each cell's count, then its cursor (in the range's slots; the bucket's `cells`
+                // cells, the slots past them, of the last bucket, are never indexed).
+                let slots: &mut XCellSlots = cell_slots;
                 slots.fill(0);
                 for run in &runs {
                     run.appends
@@ -3158,7 +3180,7 @@ where
                 let mut slot = bucket_starts[b];
                 for (cell, (start, count)) in starts[first..first + cells]
                     .iter_mut()
-                    .zip(slots.iter_mut())
+                    .zip(slots[..cells].iter_mut())
                     .enumerate()
                 {
                     let n = *count;

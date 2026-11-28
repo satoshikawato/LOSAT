@@ -948,12 +948,24 @@ impl<S: AsnSource> XmlReader<S> {
         i32::from(bytes[0])
     }
 
-    /// `ReadCDSection` of `str`: a CDATA section where character data meets `<`.
+    /// `ReadCDSection` of `str`: a CDATA section where character data meets `<` (`cd_section`),
+    /// or `false` there (the end of the character data: the test is made where the data ends,
+    /// the section's reading is not).
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1271-1295
+    #[inline]
     fn read_cd_section(&mut self, out: &mut Vec<u8>) -> Result<bool> {
         if self.peek(0)? != b'<' || self.peek(1)? != b'!' {
             return Ok(false);
         }
+        self.cd_section(out)?;
+        Ok(true)
+    }
+
+    /// The CDATA section from its `<!`: its bytes up to `]]>`, as they are. The bytes before the
+    /// next `]`, which cannot start the `]]>`, are taken as one run, and each `]` that does not
+    /// start it alone; the bytes read are not asked for again (`release_before`).
+    #[inline(never)]
+    fn cd_section(&mut self, out: &mut Vec<u8>) -> Result<()> {
         self.skip(2);
         for &c in b"[CDATA[" {
             if self.peek(0)? != c {
@@ -961,14 +973,23 @@ impl<S: AsnSource> XmlReader<S> {
             }
             self.skip(1);
         }
-        while self.peek(0)? != b']' || self.peek(1)? != b']' || self.peek(2)? != b'>' {
-            let c = self.peek(0)?;
-            out.push(c);
-            self.skip(1);
+        loop {
+            let rest = self.src.rest(self.pos);
+            let run = rest.iter().position(|&c| c == b']').unwrap_or(rest.len());
+            out.extend_from_slice(&rest[..run]);
+            self.pos += run;
             self.src.release_before(self.pos);
+            // The next byte: more of the input where none is kept (the end of the input fails).
+            if self.peek(0)? != b']' {
+                continue;
+            }
+            if self.peek(1)? == b']' && self.peek(2)? == b'>' {
+                self.skip(3);
+                return Ok(());
+            }
+            out.push(b']');
+            self.skip(1);
         }
-        self.skip(3);
-        Ok(true)
     }
 
     /// `ReadTagData` of `str` with `eStringTypeVisible`: the character data up to the next tag,

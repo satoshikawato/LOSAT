@@ -203,14 +203,22 @@ fn encoded_doc(encoding: Option<&str>, text: &[u8]) -> Vec<u8> {
     doc
 }
 
-/// The character data `text` (no `<`; the entities `&amp;` and `&#<decimal>;` only) as the
-/// reader takes it one character at a time: each character's UTF-8 bytes in the document's
-/// `encoding`, NULs dropped, and NCBI's line ends (`read_tag_data`).
+/// The character data `text` (no `<` but CDATA sections; the entities `&amp;` and
+/// `&#<decimal>;` only) as the reader takes it one character at a time: each character's UTF-8
+/// bytes in the document's `encoding`, NULs dropped, and NCBI's line ends (`read_tag_data`); the
+/// bytes of a CDATA section as they are, after which no `\r` is pending (`read_cd_section`).
 fn one_by_one(text: &[u8], encoding: Option<&str>) -> Vec<u8> {
     let mut out = Vec::new();
     let mut cr = false;
     let mut i = 0;
     while i < text.len() {
+        if let Some(section) = text[i..].strip_prefix(b"<![CDATA[") {
+            let end = section.windows(3).position(|w| w == b"]]>").unwrap();
+            out.extend_from_slice(&section[..end]);
+            i += 9 + end + 3;
+            cr = false;
+            continue;
+        }
         let (bytes, len) = if text[i] == b'&' {
             let end = i + text[i..].iter().position(|&c| c == b';').unwrap();
             let entity = std::str::from_utf8(&text[i + 1..end]).unwrap();
@@ -252,11 +260,12 @@ fn one_by_one(text: &[u8], encoding: Option<&str>) -> Vec<u8> {
 
 // ReadTagData (objistrxml.cpp:1297-1354, cited at `read_tag_data`): the runs of bytes that the
 // reader appends at once give what reading one character at a time gives (`one_by_one`), in
-// every encoding, for random texts of plain bytes, tabs, line ends, NULs, bytes from 0x80 and
-// entities, also from a stream that keeps one byte at a time (a run ends at every byte).
+// every encoding, for random texts of plain bytes, tabs, line ends, NULs, bytes from 0x80,
+// entities and CDATA sections (with `]` inside), also from a stream that keeps one byte at a
+// time (a run ends at every byte).
 #[test]
 fn character_data_in_runs_is_read_as_one_character_at_a_time() {
-    const PIECES: [&[u8]; 18] = [
+    const PIECES: [&[u8]; 21] = [
         b"a",
         b"Z",
         b" ",
@@ -275,6 +284,9 @@ fn character_data_in_runs_is_read_as_one_character_at_a_time() {
         b"&#13;",
         b"&#10;",
         b"&#8364;",
+        b"<![CDATA[]]>",
+        b"<![CDATA[x]y]]z]]]>",
+        b"<![CDATA[\r\0\xe9&amp;<a>\n]]>",
     ];
     let mut seed = 0x2545_f491_4f6c_dd1du64;
     let mut next = move |bound: u64| {

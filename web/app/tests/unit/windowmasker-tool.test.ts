@@ -25,6 +25,7 @@ import { OpfsCountsStore } from '../../src/infra/data/counts-store';
 import { FakeCountsDownloader } from '../../src/infra/fake/fake-counts';
 import type { CountsLocks } from '../../src/ports/counts';
 import { MemoryOpfs } from './support/memory-opfs';
+import { runEnd } from './support/run-end';
 import { ToolDraft } from '../../src/application/tool-draft';
 import {
   buildWindowMaskerArgv,
@@ -119,15 +120,6 @@ function makeCoordinator(
     ...(countsLocks === undefined ? {} : { countsLocks }),
   });
   return { coordinator, data, store, saved };
-}
-
-async function waitTerminal(coordinator: Coordinator, runId: string) {
-  for (let i = 0; i < 400; i++) {
-    const run = coordinator.state.get().runs.find((entry) => entry.snapshot.runId === runId);
-    if (run !== undefined && ['completed', 'cancelled', 'failed'].includes(run.status)) return run;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error(`run ${runId} did not finish`);
 }
 
 describe('windowmasker domain helpers', () => {
@@ -492,14 +484,14 @@ describe('Coordinator single queue and DataService tool storage', () => {
 
     // Release r1 -> r2 -> r4 sequentially.
     await nextGate(gates);
-    await waitTerminal(coordinator, r1);
+    await runEnd(coordinator, r1);
     await nextGate(gates);
-    const run2 = await waitTerminal(coordinator, r2);
+    const run2 = await runEnd(coordinator, r2);
     expect(isToolRun(run2) && run2.status === 'completed' && run2.record.exitStatus === 0).toBe(true);
     expect(coordinator.sessionMadeCounts()).toHaveLength(1);
 
     await nextGate(gates);
-    await waitTerminal(coordinator, r4);
+    await runEnd(coordinator, r4);
 
     expect(order).toEqual([
       `search:${r1}:start`,
@@ -539,7 +531,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
       directory: [],
     });
     const runId = failedQueued.runId!;
-    const finished = await waitTerminal(coordinator, runId);
+    const finished = await runEnd(coordinator, runId);
     expect(finished.status).toBe('failed');
     expect(isToolRun(finished) && finished.record.exitStatus).toBe(3);
 
@@ -558,7 +550,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
     const { runId } = await coordinator.enqueueTool(sampleMkCountsRequest());
     await sleep(20);
     coordinator.cancel(runId!);
-    const cancelled = await waitTerminal(coordinator, runId!);
+    const cancelled = await runEnd(coordinator, runId!);
     expect(cancelled.status).toBe('cancelled');
 
     let endWorker!: (err: Error) => void;
@@ -579,7 +571,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
     });
     await sleep(20);
     endWorker(new Error('Data worker stopped'));
-    const failed = await waitTerminal(second.coordinator, r2!);
+    const failed = await runEnd(second.coordinator, r2!);
     expect(failed.status).toBe('failed');
     expect(failed.record.error).toContain('Data worker stopped');
   });
@@ -631,8 +623,8 @@ describe('Coordinator single queue and DataService tool storage', () => {
     expect(coordinator.state.get().runs.find((r) => r.snapshot.runId === second.runId)?.status).toBe('queued');
 
     releaseFirst();
-    expect((await waitTerminal(coordinator, first.runId!)).status).toBe('completed');
-    expect((await waitTerminal(coordinator, second.runId!)).status).toBe('completed');
+    expect((await runEnd(coordinator, first.runId!)).status).toBe('completed');
+    expect((await runEnd(coordinator, second.runId!)).status).toBe('completed');
   });
 
   it('supports POSIX writeAt/truncate on tool output files and OPFS-backed session inflation', async () => {
@@ -701,7 +693,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
       verification: table,
     });
     const supportedId = (await serialCoord.enqueueTool(sampleMkCountsRequest())).runId!;
-    await waitTerminal(serialCoord, supportedId);
+    await runEnd(serialCoord, supportedId);
     await results.open(supportedId);
     await sleep(20);
     expect(results.state.get().toolBadge).toMatchObject({ level: 'certified', label: 'Supported' });
@@ -714,7 +706,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
         directory: [{ name: 'a.fa', file: new Blob(['>a\nACGT\n']), origin: { kind: 'picked' } }],
       })
     ).runId!;
-    await waitTerminal(serialCoord, outsideId);
+    await runEnd(serialCoord, outsideId);
     await results.open(outsideId);
     await sleep(20);
     expect(results.state.get().toolBadge).toMatchObject({ level: 'outside', label: 'Not yet supported' });
@@ -728,7 +720,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
         prints: 'help',
       })
     ).runId!;
-    await waitTerminal(serialCoord, helpId);
+    await runEnd(serialCoord, helpId);
     await results.open(helpId);
     await sleep(20);
     expect(results.state.get().toolBadge).toBeUndefined();
@@ -742,7 +734,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
       verification: table,
     });
     const fakeId = (await fakeCoord.enqueueTool(sampleMkCountsRequest())).runId!;
-    await waitTerminal(fakeCoord, fakeId);
+    await runEnd(fakeCoord, fakeId);
     await fakeResults.open(fakeId);
     await sleep(20);
     expect(fakeResults.state.get().toolBadge).toMatchObject({ level: 'development', label: 'Development build' });
@@ -812,10 +804,10 @@ describe('Coordinator single queue and DataService tool storage', () => {
 
     // Release run 1, then run 2 reads g1.fa and completes -> drops exactly once at completion.
     await nextGate(gates);
-    await waitTerminal(coordinator, blockerId);
+    await runEnd(coordinator, blockerId);
     expect(dropped).toEqual([]);
     await nextGate(gates);
-    const run2 = await waitTerminal(coordinator, run2Id);
+    const run2 = await runEnd(coordinator, run2Id);
     expect(run2.status).toBe('completed');
     expect(readContents).toContain('g1.fa:>g1\nACGT\n');
     expect(dropped).toEqual([token1]);
@@ -833,7 +825,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
     coordinator.cancel(q2);
     expect(dropped).toEqual([token1, token2]);
     await nextGate(gates);
-    await waitTerminal(coordinator, blocker2);
+    await runEnd(coordinator, blocker2);
 
     // Case 3: running cancel after removing from form drops exactly once when run ends.
     draft.addFastaFiles([new File([gzipSync('>g3\nCCCC\n')], 'g3.fa.gz')]);
@@ -846,7 +838,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
     expect(dropped).toEqual([token1, token2]);
     coordinator.cancel(r3);
     await nextGate(gates);
-    expect((await waitTerminal(coordinator, r3)).status).toBe('cancelled');
+    expect((await runEnd(coordinator, r3)).status).toBe('cancelled');
     expect(dropped).toEqual([token1, token2, token3]);
   });
 
@@ -910,7 +902,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
     coordinator.cancel(prepId);
     releaseOpen!();
     openGate = undefined;
-    const prepDone = await waitTerminal(coordinator, prepId);
+    const prepDone = await runEnd(coordinator, prepId);
     expect(prepDone.status).toBe('cancelled');
     await sleep(30);
     expect(baseStore.usage()).toBe(0);
@@ -935,7 +927,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
     expect(sealedWaiting).toBe(true);
     expect(coordinator.state.get().runs.find((r) => r.snapshot.runId === finId)?.status).toBe('finalizing');
     coordinator.cancel(finId);
-    const finDone = await waitTerminal(coordinator, finId);
+    const finDone = await runEnd(coordinator, finId);
     expect(finDone.status).toBe('cancelled');
     // Port stays open while commit finishes sealing so commit settles and its .then(deleteRun) cleans up.
     expect(deletedDuringFinalizing).toEqual([]);
@@ -1106,7 +1098,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
     expect(dropped.length).toBe(0);
 
     await nextGate(runGates);
-    const combineRun = await waitTerminal(coordinator, combineRes.runIds![0]!);
+    const combineRun = await runEnd(coordinator, combineRes.runIds![0]!);
     expect(combineRun.status).toBe('completed');
     expect(readTexts).toContain('combined_input.fa:>first\nACGT\n>second\nTGCA\n');
     expect(dropped).toEqual([firstTok]);
@@ -1157,7 +1149,7 @@ describe('Coordinator single queue and DataService tool storage', () => {
     expect(dropped.length).toBe(1);
 
     await nextGate(runGates);
-    const maskRun = await waitTerminal(coordinator, maskRes.runIds![0]!);
+    const maskRun = await runEnd(coordinator, maskRes.runIds![0]!);
     expect(maskRun.status).toBe('completed');
     expect(readTexts).toContain('mask.fa:>mask_in\nACGT\n');
     expect(dropped).toEqual([firstTok, maskTok]);
@@ -1196,14 +1188,14 @@ describe('tool runs that read saved counts (-ustat from a saved copy)', () => {
     expect(await held()).toBe(1);
     for (let i = 0; i < 100 && finishes.length === 0; i++) await sleep(1);
     finishes[0]!();
-    expect((await waitTerminal(coordinator, first)).status).toBe('completed');
+    expect((await runEnd(coordinator, first)).status).toBe('completed');
     expect(await held()).toBe(0);
     // A tool run that reads no saved copy holds nothing.
     const plain = (await coordinator.enqueueTool(sampleMkCountsRequest())).runId!;
     expect(await held()).toBe(0);
     for (let i = 0; i < 100 && finishes.length < 2; i++) await sleep(1);
     finishes[1]!();
-    await waitTerminal(coordinator, plain);
+    await runEnd(coordinator, plain);
   });
 
   const expectValid = (draft: ToolDraft) => expect(draft.state.get().validation).toEqual({ state: 'ok' });
@@ -1231,7 +1223,7 @@ describe('tool runs that read saved counts (-ustat from a saved copy)', () => {
     expect(res.ok).toBe(true);
     expectValid(draft);
     expect(draft.state.get().message).toBeUndefined();
-    const run = await waitTerminal(coordinator, res.runIds![0]!);
+    const run = await runEnd(coordinator, res.runIds![0]!);
     expect(run.status).toBe('completed');
     return run;
   };

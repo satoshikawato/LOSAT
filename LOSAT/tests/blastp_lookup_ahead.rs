@@ -18,8 +18,8 @@
 //! files to a directory of its own.
 //!
 //! The queries are records of `MeenMJNV.faa`, not all 101 (one run on all 101 queries costs 2-8
-//! CPU s, one on `four_queries` 0.05-0.45 s, one on `drop_queries` 0.4-0.7 s): `four_queries` for
-//! every path that needs blocks, `drop_queries` for the one rule that reads the tables' sizes (the
+//! CPU s, one on `four_queries` 0.05-0.45 s, one on `room_queries` 0.4-0.7 s): `four_queries` for
+//! every path that needs blocks, `room_queries` for the one rule that reads the tables' sizes (the
 //! room of a build ahead). The other rules depend on the letters only through counts that the four
 //! queries keep: a block search needs more than one block, and a split batch at least two chunks
 //! (`CHUNK_SIZE` 400).
@@ -88,9 +88,9 @@ fn records(dir: &Path, name: &str, first: &str, last: &str) -> PathBuf {
 /// The queries of most searches: four consecutive records, BDT62581.1 (698 letters, one subject),
 /// BDT62582.1 (268, another), BDT62583.1 (629, no hits) and BDT62584.1 (944, five subjects), each a
 /// batch of its own at `BATCH_SIZE` 250 (a batch takes records while it holds fewer letters): four
-/// blocks of one batch at `LOSAT_X_BPQBLOCK=1`, two of two batches at `TWO_BATCH_BLOCKS`. No build
-/// ahead lacks the room (the vectors made ready for it hold at least 2^18 entries, more than any of
-/// their tables needs).
+/// blocks of one batch at `LOSAT_X_BPQBLOCK=1`, two of two batches at `TWO_BATCH_BLOCKS`. No table
+/// passes the largest before it by more than a half (the vectors made ready hold at least 2^18
+/// entries, more than any of their tables needs).
 fn four_queries(dir: &Path) -> Queries {
     Queries {
         file: records(dir, "four.faa", "BDT62581.1", "BDT62584.1"),
@@ -103,15 +103,15 @@ fn four_queries(dir: &Path) -> Queries {
 /// (1,573), the second built ahead.
 const TWO_BATCH_BLOCKS: &str = "900";
 
-/// The queries where a build ahead lacks the room: BDT62535.1 to BDT62547.1, the fixture's third to
-/// fifth query batches at `BATCH_SIZE` 3000 (3,183, 9,157 and 3,131 letters), three blocks of one
-/// batch at `LOSAT_X_BPQBLOCK=1`. The second batch's table (it holds BDT62546.1, 6,458 letters) has
-/// more hits (exact blastp: overflow entries) than the vectors made ready for it during the first
-/// block hold (`x_lookup_ahead.rs` `x_make_room`: new ones of twice the largest table so far, at
-/// least 2^18 entries), so that block builds its table itself; the third takes the values built
-/// ahead on the vectors the second made ready. With all 101 queries in blocks of one batch the same
-/// batch (the fourth block) is the one dropped.
-fn drop_queries(dir: &Path) -> Queries {
+/// The queries whose second block's table passes the largest table so far by more than a half:
+/// BDT62535.1 to BDT62547.1, the fixture's third to fifth query batches at `BATCH_SIZE` 3000 (3,183,
+/// 9,157 and 3,131 letters), three blocks of one batch at `LOSAT_X_BPQBLOCK=1`. The second batch's
+/// table (it holds BDT62546.1, 6,458 letters) has more hits (exact blastp: overflow entries) than
+/// the room a rule on the tables before it would make ready for it (twice the first block's, at
+/// least 2^18 entries); the room is the most its block's words can add, as the block plan counted
+/// them (`x_lookup_ahead.rs` `x_room_of`, `x_query_blocks::x_block_appends`), so the second and the
+/// third block both take the values built ahead.
+fn room_queries(dir: &Path) -> Queries {
     Queries {
         file: records(dir, "drop.faa", "BDT62535.1", "BDT62547.1"),
         batch_size: "3000",
@@ -292,7 +292,7 @@ fn assert_built_ahead(counts: &HashMap<String, u64>, searches: u64, what: &str) 
 
 // The block search with blocks of one batch and of two: each block after the first takes the values
 // built ahead during the block before it where they fit (below). Both tasks: blastp-fast's flat
-// table and exact blastp's table. Blocks of one batch with `drop_queries`, whose second block's build ahead lacks the room; blocks of two batches with
+// table and exact blastp's table. Blocks of one batch with `room_queries`, whose second block's table passes the largest so far; blocks of two batches with
 // `four_queries` (blastp-fast's build ahead makes its table of the block's query batches). One
 // case per path: four threads (every gate is `threads() > 1`; two threads, where the build ahead
 // has the block's one helper: the `-db` test and the `/dev/full` test); the build beside the redo
@@ -302,10 +302,10 @@ fn block_search_reports_with_the_switch_are_the_reports_without_it() {
     let dir = test_dir("blocks");
     let subject = fixture("MejoMJNV.faa");
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
-    let (four, drop) = (four_queries(&dir), drop_queries(&dir));
+    let (four, room) = (four_queries(&dir), room_queries(&dir));
     for (task, acts) in TASKS {
         for (queries, letters, blocks, dropped) in
-            [(&drop, "1", 3, 1), (&four, TWO_BATCH_BLOCKS, 2, 0)]
+            [(&room, "1", 3, 0), (&four, TWO_BATCH_BLOCKS, 2, 0)]
         {
             let base = with(acts, &[("LOSAT_X_BPQBLOCK", letters)]);
             let (off, on) = same_runs(&dir, task, queries, &subject, 4, &base, &[]);
@@ -314,9 +314,8 @@ fn block_search_reports_with_the_switch_are_the_reports_without_it() {
             assert_eq!(off.searches(), blocks, "{what}");
             let counts = on.printed("BPLKPAHEAD");
             assert_built_ahead(&counts, off.searches(), &what);
-            // `drop_queries`: the second block, whose table's hits (exact blastp: overflow) do not
-            // fit the vectors made ready, builds its table itself (exact blastp: after its thread
-            // took the neighbour lists back); the third takes the values built ahead.
+            // `room_queries`: the second block's table, larger than the first's by more than a half,
+            // fits the room made ready for it (its block's words), as does the third's.
             assert_eq!(counts["dropped"], dropped, "{what}: {counts:?}");
         }
     }

@@ -20,8 +20,8 @@
 //! longest query, the diagonal table's window, the batches' split sizes and, for blastp-fast, their
 //! words, `x_word_blocks`, which also closes the blocks on them). Two rules of other default
 //! switches that read sizes are not
-//! reached by the four: a build ahead that lacks the room (`LOSAT_X_BPLKPAHEAD`:
-//! `blastp_lookup_ahead.rs`) and several redo windows that end inside queries
+//! reached by the four: a table built ahead that passes the largest before it by more than a half
+//! (`LOSAT_X_BPLKPAHEAD`: `blastp_lookup_ahead.rs`) and several redo windows that end inside queries
 //! (`LOSAT_X_BPREDOPAR`: the default test, `blastp_redo_par.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-287

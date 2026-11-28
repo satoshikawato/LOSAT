@@ -2165,10 +2165,11 @@ impl MadeMaps {
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_map.cpp:986-1117
 /// The sequence maps that the prefetch makes (`LoadSequencesToScope`, where it reads every
 /// Seq-align, `prefetch_reads`): a virtual delta of one interval per Seq-align
-/// (`s_ExtractSeqidsAndRanges`: the subject's id and `GetSeqRange` of its row, by id in
-/// `CompareOrdered` order, each id's in the order of the Seq-aligns; the range of a minus query
-/// row over a plus subject row taken back from the subject's length, `length - to_open` to
-/// `length - from + 1`), over which `CanResolveRange` makes the map of each subject that it
+/// (`s_ExtractSeqidsAndRanges`: the subject's id and `GetSeqRange` of its row, a Std-seg
+/// Seq-align's `std_range`, by id in `CompareOrdered` order, each id's in the order of the
+/// Seq-aligns; the range of a minus query row over a plus subject row (`GetSeqStrand`, a Std-seg
+/// Seq-align's of its first Std-seg, `std_strand`) taken back from the subject's length,
+/// `length - to_open` to `length - from + 1`), over which `CanResolveRange` makes the map of each subject that it
 /// reaches, interval by interval, and stops at the first throw (its catch, no warning): a map
 /// whose constructor throws, or an iteration of the interval that resolves a segment of
 /// 4294967295 letters (`SeqMap::plus_range_throws`). The maps change no length but of a Bioseq
@@ -2202,14 +2203,22 @@ fn prefetch_maps<'db, 'r>(
     for set in sets {
         for align in read_set(&alignments[set.clone()], false) {
             let id = seq_align_id(align.align, 1).map_err(super::archive::stop_error)?;
-            if align.variant() == "std" {
-                return Err(unread("a translated search's Std-seg Seq-align"));
-            }
-            let ds = align.dense_seg(false).map_err(read_stop)?;
-            let (from, to) = subject_range(&align, &ds).ok_or_else(|| {
-                unread("a Seq-align whose subject row's range is not one interval")
-            })?;
-            let flipped = ds.strands == [Strand::Minus, Strand::Plus];
+            let (from, to, flipped) = if align.variant() == "std" {
+                // `prefetch_reads` read this range without NCBI's exceptions.
+                let (from, to) = align.std_range(1).map_err(read_stop)?;
+                let strand = |row| align.std_strand(row).map_err(read_stop);
+                (
+                    from,
+                    to,
+                    strand(0)? == Strand::Minus && strand(1)? == Strand::Plus,
+                )
+            } else {
+                let ds = align.dense_seg(false).map_err(read_stop)?;
+                let (from, to) = subject_range(&align, &ds).ok_or_else(|| {
+                    unread("a Seq-align whose subject row's range is not one interval")
+                })?;
+                (from, to, ds.strands == [Strand::Minus, Strand::Plus])
+            };
             let s_idx = subjects.index_of(inputs, scope, id)?;
             entries.push((id, s_idx, from, to, flipped));
         }

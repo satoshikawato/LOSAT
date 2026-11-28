@@ -850,6 +850,37 @@ impl ReadAlign<'_> {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:294-314
+    // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:882-912
+    /// `GetSeqStrand` of `row` of a Std-seg Seq-align: `CSeq_loc::GetStrand` of the first
+    /// Std-seg's location of the row (an interval's or a point's strand, unknown where it has none
+    /// or the location is empty or null; `strand` reads values other than plus and minus as
+    /// neither). Other locations, which no BLAST search writes, are refused. The caller has read
+    /// `std_range` of a row at least as high (the location exists).
+    pub(crate) fn std_strand(&self, row: usize) -> Result<Strand, ReadStop> {
+        let segs = self.std_segs();
+        let Some(loc) = segs
+            .first()
+            .and_then(|seg| seg.field("loc").items().nth(row))
+        else {
+            return Err(ReadStop::Unsupported(
+                "a Std-seg without a location of the row",
+            ));
+        };
+        let (variant, value) = loc.choice();
+        Ok(match variant {
+            "int" | "pnt" => value
+                .get("strand")
+                .map_or(Strand::Unknown, |s| strand(s.int())),
+            "empty" | "null" => Strand::Unknown,
+            _ => {
+                return Err(ReadStop::Unsupported(
+                    "a Std-seg location other than an interval, a point or an empty location",
+                ))
+            }
+        })
+    }
+
     /// `GetSeqRange` of `row` of the Dense-seg or Dense-diag Seq-align whose Dense-seg is `ds`
     /// (`dense_seg` of this one): a Dense-seg's (`denseg_range`), or the combined ranges of its
     /// Dense-diags (each from its start to its start plus its length less 1,

@@ -4,32 +4,50 @@
 //!
 //! The first test reads the source. From each call of `write` it finds the function that runs
 //! (by its module's file and through `pub use .. as` and `use`), then the functions that function
-//! calls, and so on, and collects the variables they read from the environment (`var_os("..")`,
-//! `var("..")`). Each must be in `NAMES`, read through `xdiag`, or a switch of `utils/xswitch.rs`
-//! (on unless `0`, so no report can be written on a switch alone without being written in every
-//! run); every report must test a variable of `NAMES` or of `xdiag` on its way (a report with an
-//! empty body writes nothing); and every name of `NAMES` must be read by a report. A report under a
-//! new variable thus fails here until the variable joins `NAMES`. The finder knows a function by
-//! its name and the file stem of its module (`a/b.rs` or `a/b/mod.rs` holds module `b`), the
-//! nearest directory first where several files have that stem, as LOSAT's modules are laid out; a
-//! call it cannot place (a method, a closure, `std`) is not followed.
+//! calls, and so on (the report's functions), and fails:
+//! - where a report's functions quote a `LOSAT_*` name that is not in `NAMES`, in `xdiag::NAMES`
+//!   or a switch of `utils/xswitch.rs`, or read a variable through a name that is not quoted (a
+//!   constant, a computed name), unless the name is the function's own parameter (a reader such
+//!   as `xswitch::on`, whose callers quote it);
+//! - where a report tests no variable of `NAMES` or of `xdiag` on its way (a report with an empty
+//!   body writes nothing), or a name of `NAMES` is read by no report;
+//! - where a line is written (`eprintln!`, `println!`, `write!`, `fs::write`, ..) that no test of
+//!   such a variable guards: the condition of a block around it (`if`, `if let`, `match`, `for`,
+//!   `while`; not `else`) or an earlier block of its level whose condition tests and which
+//!   returns (`if !on() { return; }`) tests one, by quoting it or by calling a function that does,
+//!   or the function was called where a test guards the call. A counter or a switch alone is not
+//!   a test: a counter counts whatever its own code counts, and a switch is on unless `0`, so a
+//!   line under either alone would be written, or its report's code run, in every run;
+//! - where `cli/main_entry.rs` does not end the function that calls `write` with its `match` on
+//!   the command, then `crate::utils::xexit::write(); Ok(())`, or calls a report of `write`
+//!   elsewhere: a report called there, before or after `write`, would run in every run again.
+//!
+//! The finder knows a function by its name and the file stem of its module (`a/b.rs` or
+//! `a/b/mod.rs` holds module `b`), the nearest directory first where several files have that
+//! stem, as LOSAT's modules are laid out; a call it cannot place (a method, a closure, `std`) is
+//! not followed, and a test it reads must be in the text of a condition, not in a local
+//! variable (`let on = ..; if on`).
 //!
 //! The second test runs one search with no such variable and with each variable alone: without one
 //! no report line is written, and each variable still gives its report.
 //!
 //! No NCBI counterpart: LOSAT's own diagnostics.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::process::{Command, Output};
 
-use super::function_size_limit::{closers, fn_item, ident, mask, read_rust_files, word_before};
+use super::function_size_limit::{
+    closers, fn_item, ident, literal_end, mask, read_rust_files, word_before,
+};
 
-/// A file below `src` (not a `_tests.rs` file): its path, its text, the text with comments and
-/// literals blanked (`mask`), its functions (name, offset of `fn`, offset of the closing brace)
-/// and its `use` items (the name each binds, the path).
+/// A file below `src` (not a `_tests.rs` file): its path, its text with comments blanked
+/// (literals kept), the text with comments and literals blanked (`mask`), its functions (name,
+/// offset of `fn`, offset of the closing brace) and its `use` items (the name each binds, the
+/// path).
 struct Source {
     rel: String,
-    text: Vec<u8>,
+    code: Vec<u8>,
     masked: Vec<u8>,
     fns: Vec<(String, usize, usize)>,
     uses: Vec<(String, Vec<String>)>,
@@ -58,13 +76,32 @@ fn sources() -> Vec<Source> {
             let uses = uses(&masked);
             Source {
                 rel,
-                text,
+                code: strip_comments(&text),
                 masked,
                 fns,
                 uses,
             }
         })
         .collect()
+}
+
+/// `text` with its comments turned into spaces (newlines kept); its literals stay.
+fn strip_comments(text: &[u8]) -> Vec<u8> {
+    let (mut code, mut i) = (text.to_vec(), 0);
+    while i < text.len() {
+        let Some(end) = literal_end(text, i) else {
+            i += 1;
+            continue;
+        };
+        if text[i] == b'/' {
+            code[i..end]
+                .iter_mut()
+                .filter(|b| **b != b'\n')
+                .for_each(|b| *b = b' ');
+        }
+        i = end;
+    }
+    code
 }
 
 /// The `use` items of a masked file: (the name bound, the path), groups expanded.
@@ -221,8 +258,8 @@ fn named(src: &[Source], k: usize, name: &str, depth: usize) -> Vec<Found> {
     found
 }
 
-/// The paths called in `m[start..end]` (`a::b::f(`), outside method calls.
-fn calls(m: &[u8], start: usize, end: usize) -> Vec<Vec<String>> {
+/// The paths called in `m[start..end]` (`a::b::f(`), outside method calls, with their offsets.
+fn calls_at(m: &[u8], start: usize, end: usize) -> Vec<(usize, Vec<String>)> {
     let (mut out, mut i) = (Vec::new(), start);
     while i < end {
         let first = ident(m, i);
@@ -244,16 +281,17 @@ fn calls(m: &[u8], start: usize, end: usize) -> Vec<Vec<String>> {
         }
         let next = m[j..].iter().find(|b| !b.is_ascii_whitespace());
         if !method && next == Some(&b'(') {
-            out.push(path);
+            out.push((i, path));
         }
         i = j;
     }
     out
 }
 
-/// The variables that `text` reads from the environment by name: (through `xdiag`, the name).
-fn reads(text: &[u8]) -> Vec<(bool, String)> {
-    let squeezed: String = String::from_utf8_lossy(text).split_whitespace().collect();
+/// The variables that `code` reads from the environment by a quoted name: (through `xdiag`, the
+/// name).
+fn reads(code: &[u8]) -> Vec<(bool, String)> {
+    let squeezed: String = String::from_utf8_lossy(code).split_whitespace().collect();
     let mut out = Vec::new();
     for pattern in ["var_os(\"", "var(\""] {
         for (at, _) in squeezed.match_indices(pattern) {
@@ -275,6 +313,187 @@ fn reads(text: &[u8]) -> Vec<(bool, String)> {
     out
 }
 
+/// The arguments of the environment reads of `code` that are not a quoted name (`var_os(name)`).
+fn unquoted_reads(code: &[u8]) -> Vec<String> {
+    let squeezed: String = String::from_utf8_lossy(code).split_whitespace().collect();
+    let mut out = Vec::new();
+    for pattern in ["var_os(", "var("] {
+        for (at, _) in squeezed.match_indices(pattern) {
+            let before = squeezed[..at].chars().next_back();
+            if before.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.') {
+                continue;
+            }
+            let rest = &squeezed[at + pattern.len()..];
+            let arg = &rest[..rest.find([')', ',']).unwrap_or(0)];
+            if !arg.is_empty() && !arg.starts_with('"') {
+                out.push(arg.trim_start_matches('&').to_string());
+            }
+        }
+    }
+    out
+}
+
+/// Whether `arg` is a parameter of the function whose text is `code` (in its signature, or of a
+/// closure in it: `|name|`): a reader that gets the name from its caller, who quotes it.
+fn bound(code: &[u8], arg: &str) -> bool {
+    let squeezed: String = String::from_utf8_lossy(code).split_whitespace().collect();
+    let signature = &squeezed[..squeezed.find('{').unwrap_or(0)];
+    let word = |text: &str| {
+        text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .any(|w| w == arg)
+    };
+    word(signature)
+        || [format!("|{arg}|"), format!("|&{arg}|")]
+            .iter()
+            .any(|c| squeezed.contains(c))
+}
+
+/// The string literals of `code` that are a whole `LOSAT_*` name.
+fn name_literals(code: &[u8]) -> Vec<String> {
+    let (mut out, mut i) = (Vec::new(), 0);
+    while i < code.len() {
+        let Some(end) = literal_end(code, i) else {
+            i += 1;
+            continue;
+        };
+        let literal = &code[i..end];
+        if literal.len() > 2 && literal[0] == b'"' {
+            let name = &literal[1..literal.len() - 1];
+            if name.starts_with(b"LOSAT_")
+                && name
+                    .iter()
+                    .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || *b == b'_')
+            {
+                out.push(String::from_utf8_lossy(name).into_owned());
+            }
+        }
+        i = end;
+    }
+    out
+}
+
+/// The offsets in `m[start..end]` where a line is written: `eprintln!`, `eprint!`, `println!`,
+/// `print!`, `writeln!`, `write!`, `fs::write(`.
+fn writes(m: &[u8], start: usize, end: usize) -> Vec<usize> {
+    let tokens: [&[u8]; 7] = [
+        b"eprintln!",
+        b"eprint!",
+        b"println!",
+        b"print!",
+        b"writeln!",
+        b"write!",
+        b"fs::write(",
+    ];
+    (start..end)
+        .filter(|&i| !word_before(m, i) && tokens.iter().any(|t| m[i..].starts_with(t)))
+        .collect()
+}
+
+/// The offset of the `{` that the `}` at `close` closes (`m` masked).
+fn opener(m: &[u8], close: usize) -> usize {
+    let mut depth = 0;
+    for i in (0..=close).rev() {
+        match m[i] {
+            b'}' => depth += 1,
+            b'{' => {
+                depth -= 1;
+                if depth == 0 {
+                    return i;
+                }
+            }
+            _ => {}
+        }
+    }
+    0
+}
+
+/// Which functions test a variable of `NAMES` or of `xdiag` (in their own text or in a function
+/// they call), remembered per function, and where a test guards a function's lines.
+struct Tests<'a> {
+    src: &'a [Source],
+    names: &'a [String],
+    known: HashMap<(usize, usize), bool>,
+}
+
+impl Tests<'_> {
+    /// Whether the function at `s..=e` of `src[j]` tests a variable.
+    fn function(&mut self, j: usize, s: usize, e: usize) -> bool {
+        if let Some(&known) = self.known.get(&(j, s)) {
+            return known;
+        }
+        // A cycle reads as untested until its first function is known.
+        self.known.insert((j, s), false);
+        let tests = self.range(j, s, e + 1);
+        self.known.insert((j, s), tests);
+        tests
+    }
+
+    /// Whether `src[j]` tests a variable in `from..to`: quotes one in a read, or calls a function
+    /// that tests one.
+    fn range(&mut self, j: usize, from: usize, to: usize) -> bool {
+        let src = self.src;
+        if reads(&src[j].code[from..to])
+            .iter()
+            .any(|(xdiag, name)| *xdiag || self.names.contains(name))
+        {
+            return true;
+        }
+        for (_, path) in calls_at(&src[j].masked, from, to) {
+            for (a, b, c) in resolve(src, j, &path, 0) {
+                if self.function(a, b, c) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// For each offset of the function at `s..=e` of `src[j]`: whether a test guards it (see the
+    /// module doc); `entry`: the function is called where a test guards the call.
+    fn guards(&mut self, j: usize, s: usize, e: usize, entry: bool) -> Vec<bool> {
+        let src = self.src;
+        let m = &src[j].masked;
+        let open = opener(m, e);
+        let mut out = vec![entry; e + 1 - s];
+        // (guarded, its condition tests, its `{`) for each block around the offset.
+        let mut blocks = vec![(entry, false, open)];
+        let mut statement = open + 1;
+        for i in open + 1..e {
+            out[i - s] = blocks.last().map_or(entry, |b| b.0);
+            match m[i] {
+                b'{' => {
+                    let head: String = String::from_utf8_lossy(&m[statement..i])
+                        .split_whitespace()
+                        .collect();
+                    // An `else` block runs where its `if` did not test true.
+                    let plain_else = head.starts_with("else") && !head.starts_with("elseif");
+                    let tests = !plain_else && self.range(j, statement, i);
+                    let guarded = blocks.last().map_or(entry, |b| b.0) || tests;
+                    blocks.push((guarded, tests, i));
+                    statement = i + 1;
+                }
+                b'}' if blocks.len() > 1 => {
+                    let (_, tests, block) = blocks.pop().expect("a block");
+                    let returns =
+                        (block..i).any(|k| !word_before(m, k) && ident(m, k) == b"return");
+                    if tests && returns {
+                        blocks.last_mut().expect("the function's block").0 = true;
+                    }
+                    statement = i + 1;
+                }
+                b';' => statement = i + 1,
+                _ => {}
+            }
+        }
+        out
+    }
+}
+
+/// The line of offset `at` in `text`.
+fn line(text: &[u8], at: usize) -> usize {
+    1 + text[..at].iter().filter(|&&b| b == b'\n').count()
+}
+
 /// The quoted names after `anchor` up to the next `]` in `text`.
 fn quoted_after(text: &str, anchor: &str) -> Vec<String> {
     let start = text
@@ -294,7 +513,7 @@ fn quoted_after(text: &str, anchor: &str) -> Vec<String> {
 fn switches(src: &[Source]) -> Vec<String> {
     let mut names = Vec::new();
     for file in src {
-        let squeezed: String = String::from_utf8_lossy(&file.text)
+        let squeezed: String = String::from_utf8_lossy(&file.code)
             .split_whitespace()
             .collect();
         for pattern in ["xswitch::on(\"", "xswitch::value(\""] {
@@ -307,17 +526,68 @@ fn switches(src: &[Source]) -> Vec<String> {
     names
 }
 
+/// `cli/main_entry.rs`: the function that calls `xexit::write` ends with its `match` on the
+/// command, then `crate::utils::xexit::write(); Ok(())`, and calls no report of `write` (`reports`)
+/// elsewhere.
+fn entry_ends_with_write(src: &[Source], reports: &[Vec<String>]) -> Vec<String> {
+    let entry = src
+        .iter()
+        .find(|f| f.rel == "cli/main_entry.rs")
+        .expect("cli/main_entry.rs");
+    let text = String::from_utf8_lossy(&entry.masked);
+    let rule = "cli/main_entry.rs: the function that calls crate::utils::xexit::write() must end \
+                with its `match` on the command, then `crate::utils::xexit::write(); Ok(())`: a \
+                report of the run's end belongs in xexit::write, where it runs only when asked for";
+    let calls: Vec<usize> = text
+        .match_indices("crate::utils::xexit::write()")
+        .map(|(at, _)| at)
+        .collect();
+    let mut failures: Vec<String> = reports
+        .iter()
+        .map(|report| report.join("::"))
+        .filter(|report| text.contains(report.as_str()))
+        .map(|report| format!("cli/main_entry.rs calls {report} outside xexit::write"))
+        .collect();
+    let [at] = calls[..] else {
+        failures.push(format!("{rule} ({} calls of it)", calls.len()));
+        return failures;
+    };
+    let ends = entry
+        .fns
+        .iter()
+        .filter(|f| f.1 < at && at < f.2)
+        .max_by_key(|f| f.1)
+        .is_some_and(|f| {
+            let tail: String = text[at..=f.2].split_whitespace().collect();
+            let before = text[..at].trim_end();
+            before.ends_with('}') && tail == "crate::utils::xexit::write();Ok(())}" && {
+                let open = opener(&entry.masked, before.len() - 1);
+                let statement = text[..open].rfind([';', '{', '}']).map_or(0, |b| b + 1);
+                text[statement..open].trim_start().starts_with("match ")
+            }
+        });
+    if !ends {
+        failures.push(rule.to_string());
+    }
+    failures
+}
+
 #[test]
 fn every_report_of_the_runs_end_tests_a_listed_variable() {
     let src = sources();
-    let k = src
-        .iter()
-        .position(|f| f.rel == "utils/xexit.rs")
-        .expect("src/utils/xexit.rs");
-    let names = quoted_after(
-        &String::from_utf8_lossy(&src[k].text),
-        "const NAMES: &[&str] = &[",
-    );
+    let file = |rel: &str| {
+        src.iter()
+            .position(|f| f.rel == rel)
+            .unwrap_or_else(|| panic!("src/{rel}"))
+    };
+    let (k, x) = (file("utils/xexit.rs"), file("utils/xdiag.rs"));
+    let list = |j: usize| {
+        quoted_after(
+            &String::from_utf8_lossy(&src[j].code),
+            "const NAMES: &[&str] = &[",
+        )
+    };
+    let (names, xdiag_names) = (list(k), list(x));
     assert!(
         names.windows(2).all(|w| w[0] < w[1]),
         "NAMES is not sorted: {names:?}"
@@ -328,56 +598,84 @@ fn every_report_of_the_runs_end_tests_a_listed_variable() {
         .iter()
         .find(|f| f.0 == "write")
         .expect("xexit::write");
-    let reports: Vec<Vec<String>> = calls(&src[k].masked, write.1, write.2)
+    let reports: Vec<Vec<String>> = calls_at(&src[k].masked, write.1, write.2)
         .into_iter()
+        .map(|(_, path)| path)
         .filter(|path| path[0] == "crate")
         .collect();
     assert!(reports.len() > 30, "the calls of xexit::write: {reports:?}");
+    let mut tests = Tests {
+        src: &src,
+        names: &names,
+        known: HashMap::new(),
+    };
     let (mut failures, mut used) = (Vec::new(), vec![false; names.len()]);
     for report in &reports {
         let shown = report.join("::");
-        let mut queue = resolve(&src, k, report, 0);
-        if queue.is_empty() {
+        let found = resolve(&src, k, report, 0);
+        if found.is_empty() {
             failures.push(format!(
                 "{shown}: its function was not found (see the module doc)"
             ));
             continue;
         }
-        let empty = queue.iter().all(|&(j, s, e)| {
-            let body = &src[j].masked[s..=e];
-            let open = body.iter().position(|&b| b == b'{').unwrap_or(0);
-            body[open + 1..body.len() - 1]
-                .iter()
-                .all(u8::is_ascii_whitespace)
+        let empty = found.iter().all(|&(j, _, e)| {
+            let body = &src[j].masked[opener(&src[j].masked, e)..=e];
+            body[1..body.len() - 1].iter().all(u8::is_ascii_whitespace)
         });
-        let (mut seen, mut tests) = (Vec::new(), false);
-        while let Some((j, s, e)) = queue.pop() {
-            if seen.contains(&(j, s)) {
-                continue;
-            }
-            seen.push((j, s));
-            for (through_xdiag, name) in reads(&src[j].text[s..=e]) {
-                let listed = names.iter().position(|n| *n == name);
-                if let Some(index) = listed {
-                    used[index] = true;
-                }
-                tests |= through_xdiag || listed.is_some();
-                if !through_xdiag && listed.is_none() && !switches.contains(&name) {
-                    failures.push(format!(
-                        "{shown}: src/{} reads {name}, which is not in xexit::NAMES (a report \
-                         written under it must be asked for there)",
-                        src[j].rel
-                    ));
-                }
-            }
-            for path in calls(&src[j].masked, s, e) {
-                queue.extend(resolve(&src, j, &path, 0));
-            }
-        }
-        if !tests && !empty {
+        if !empty && !found.iter().any(|&(j, s, e)| tests.function(j, s, e)) {
             failures.push(format!(
                 "{shown}: no variable of xexit::NAMES (or of xdiag) is tested on its way to writing"
             ));
+        }
+        let mut queue: Vec<(usize, usize, usize, bool)> =
+            found.iter().map(|&(j, s, e)| (j, s, e, false)).collect();
+        let mut seen = Vec::new();
+        while let Some((j, s, e, entry)) = queue.pop() {
+            if seen.contains(&(j, s, entry)) {
+                continue;
+            }
+            seen.push((j, s, entry));
+            let (rel, code) = (&src[j].rel, &src[j].code[s..=e]);
+            for (_, name) in reads(code) {
+                if let Some(index) = names.iter().position(|n| *n == name) {
+                    used[index] = true;
+                }
+            }
+            for name in name_literals(code) {
+                if !names.contains(&name)
+                    && !xdiag_names.contains(&name)
+                    && !switches.contains(&name)
+                {
+                    failures.push(format!(
+                        "{shown}: src/{rel} names {name}, which is not in xexit::NAMES (a report \
+                         written under it must be asked for there)"
+                    ));
+                }
+            }
+            for arg in unquoted_reads(code) {
+                if !bound(code, &arg) {
+                    failures.push(format!(
+                        "{shown}: src/{rel} reads a variable through `{arg}`, not a quoted name, \
+                         so which one is not known here (quote the name in the call)"
+                    ));
+                }
+            }
+            let guards = tests.guards(j, s, e, entry);
+            for at in writes(&src[j].masked, s, e) {
+                if !guards[at - s] {
+                    failures.push(format!(
+                        "{shown}: src/{rel}:{} writes a line that no test of a variable of \
+                         xexit::NAMES (or of xdiag) guards; a counter or a switch alone is not one",
+                        line(&src[j].code, at)
+                    ));
+                }
+            }
+            for (at, path) in calls_at(&src[j].masked, s, e) {
+                for (a, b, c) in resolve(&src, j, &path, 0) {
+                    queue.push((a, b, c, guards[at - s]));
+                }
+            }
         }
     }
     for (name, used) in names.iter().zip(&used) {
@@ -385,23 +683,7 @@ fn every_report_of_the_runs_end_tests_a_listed_variable() {
             failures.push(format!("{name} is in xexit::NAMES but no report reads it"));
         }
     }
-    let entry = src
-        .iter()
-        .find(|f| f.rel == "cli/main_entry.rs")
-        .expect("cli/main_entry.rs");
-    let entry_text = String::from_utf8_lossy(&entry.masked);
-    assert!(
-        entry_text.contains("crate::utils::xexit::write()"),
-        "main_entry does not call xexit::write"
-    );
-    for report in &reports {
-        if entry_text.contains(&report.join("::")) {
-            failures.push(format!(
-                "cli/main_entry.rs calls {} outside xexit::write",
-                report.join("::")
-            ));
-        }
-    }
+    failures.extend(entry_ends_with_write(&src, &reports));
     failures.dedup();
     assert!(failures.is_empty(), "{failures:#?}");
 }

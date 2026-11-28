@@ -15,7 +15,7 @@
 //! non-ASCII name or with a brace in its signature (`-> [u8; { N }]`) is not measured, and a test
 //! attribute on a macro call with a path (`crate::m! { .. }`) covers the code up to the next `;`.
 //! `exit_reports.rs` reads the source with the same helpers (`read_rust_files`, `mask`, `closers`,
-//! `fn_item`, `ident`, `word_before`).
+//! `fn_item`, `ident`, `literal_end`, `word_before`).
 //!
 //! No NCBI counterpart: the test reads LOSAT's own source; NCBI BLAST+ has no such check.
 
@@ -346,7 +346,7 @@ pub(super) fn mask(src: &[u8]) -> Vec<u8> {
 /// The end of the comment or literal that starts at `i`, tried in this order: line comment, block
 /// comment (nested), raw string (`r`, `br`, `cr`, any number of `#`), string (plain, `b`, `c`),
 /// character or byte literal. A literal's prefix must not end an identifier.
-fn literal_end(s: &[u8], i: usize) -> Option<usize> {
+pub(super) fn literal_end(s: &[u8], i: usize) -> Option<usize> {
     let (rest, n) = (&s[i..], s.len());
     let prefix_ok = i == 0 || !(s[i - 1].is_ascii_alphanumeric() || s[i - 1] == b'_');
     if rest.starts_with(b"//") {

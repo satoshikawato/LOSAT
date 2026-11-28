@@ -1186,8 +1186,10 @@ def makeblastdb() -> list[dict]:
     `-max_file_sz`, `-mask_data` (dust, seg and windowmasker masks, binary and text, `-mask_id`, `-mask_desc`,
     `-gi_mask`, `-gi_mask_name`, and the refusal of two GI masks in one file under two spellings), `-taxid` and
     `-taxid_map`, the inputs `blastdb`, `asn1_txt`, `asn1_bin` and a gzipped FASTA file, an `-out` with folders, a
-    database that replaces an older one of its name, `-logfile` (new, and appended to), the errors, and the help and
-    version words. The engine writes its database into the run's folder as the command line writes into its own
+    database that replaces an older one of its name, `-logfile` (new, and appended to; the device model of
+    docs/web/abi_v2.md §4: the null device, `/dev/stdout`, `/dev/stderr`, `/dev/full`, a file outside the run's folder,
+    which comes on stream 12 (`<id>`: a name of the harness's run), a name in a missing folder and a folder; line NP
+    WW4b1 R2, findings 1 and 2, 2026-11-28), the errors, and the help and version words. The engine writes its database into the run's folder as the command line writes into its own
     (`"tz"`: the run's `TZ`; `"threaded"`: the row also runs on the threaded module's `losat_web2_tool`); `"expect"` is
     `"failure"` for a run whose exit status is not 0, `"late_failure"` for an argv that `validate` accepts though the run
     fails after it starts reading, and `"names"` for a run whose bytes depend on the time (`-randomize`), of which the
@@ -1209,6 +1211,8 @@ def makeblastdb() -> list[dict]:
                          for extension in "ndb nhr nin njs nog nos not nsq ntf nto".split()}}
     (directory / "old.log").write_text("an earlier run\n")
     with_log = {**files, "mk.log": str(directory / "old.log")}
+    # A folder of the run's folder, `sub`, which a `-logfile sub` names.
+    with_folder = {**files, "sub/ns.fna": str(tests / "dropin_corpus/ns.fna")}
     rows: list[dict] = []
 
     def add(case_id: str, words: str, expect: str | None = None, kind: str = "run", published: dict | None = None,
@@ -1263,6 +1267,26 @@ def makeblastdb() -> list[dict]:
     add("replace", "-in ns.fna -dbtype nucl -out db", published=older)
     add("logfile", "-in pq.faa -dbtype prot -out db -logfile mk.log")
     add("logfile.append", "-in pq.faa -dbtype prot -out db -logfile mk.log", published=with_log)
+    # The device model of `-logfile` (abi_v2.md §4): devices, a file outside the run's folder, names that do not open.
+    for case_id, name in (("dev_null", "/dev/null"), ("dev_stdout", "/dev/stdout"), ("dev_stderr", "/dev/stderr"),
+                          ("dev_full", "/dev/full"), ("outside", "/tmp/<id>.log")):
+        add(f"logfile.{case_id}", f"-in pq.faa -dbtype prot -out db -logfile {name}")
+    add("logfile.outside.threaded", "-in pq.faa -dbtype prot -out db -logfile /tmp/<id>.log", threaded=True)
+    add("logfile.nodir", "-in pq.faa -dbtype prot -out db -logfile nodir/mk.log", "failure")
+    add("logfile.folder", "-in pq.faa -dbtype prot -out db -logfile sub", "failure", published=with_folder)
+    # The other names outside the run's folder, in a folder that neither machine has: the CLI's answer there (§3, §4;
+    # a missing mask file is ignored with a message, and the GI-mask and metadata files that do not open are not
+    # written, exit status 0, as on the command line).
+    missing = "/losat-v-abi-missing"
+    for case_id, words, expect in (
+            ("in", f"-in {missing}/x.fna -dbtype nucl -out db", "failure"),
+            ("out", f"-in pq.faa -dbtype prot -out {missing}/db", "failure"),
+            ("mask_data", f"-in mask/nucl.fna -dbtype nucl -mask_data {missing}/d.asnb -out db", None),
+            ("taxid_map", f"-in ns.fna -dbtype nucl -parse_seqids -taxid_map {missing}/t.txt -out db", "failure"),
+            ("gi_mask_name", f"-in gi/nucl.fa -dbtype nucl -parse_seqids -title t -mask_data gi/dust.asnb -gi_mask "
+                             f"-gi_mask_name {missing}/m -out db", None),
+            ("metadata_output_prefix", f"-in pq.faa -dbtype prot -out db -metadata_output_prefix {missing}/", None)):
+        add(f"outside_missing.{case_id}", words, expect)
     # Errors: NCBI's reader (no -dbtype, a bad value, an unknown option), the options (a missing input, mask data that
     # is none, a numeric -mask_id, -randomize of FASTA), with -logfile too.
     add("error.no_dbtype", "-in ns.fna -out db", "failure")
@@ -1286,8 +1310,15 @@ def makeblastdb() -> list[dict]:
             ("dbtype", "-in ns.fna -dbtype nope", "failure"),
             ("unknown_option", "-in ns.fna -dbtype nucl -nosuchoption", "failure"),
             ("in_missing", "-in none.fna -dbtype nucl -out db", "late_failure"),
-            ("mask_data", "-in mask/nucl.fna -dbtype nucl -mask_data bad.asnb -out db", "late_failure")):
+            ("mask_data", "-in mask/nucl.fna -dbtype nucl -mask_data bad.asnb -out db", "late_failure"),
+            ("logfile.dev_stdout", "-in pq.faa -dbtype prot -out db -logfile /dev/stdout", None),
+            ("logfile.outside", "-in pq.faa -dbtype prot -out db -logfile /tmp/<id>.log", None),
+            ("no_dbtype.logfile.dev_stderr", "-in ns.fna -out db -logfile /dev/stderr", "failure"),
+            ("no_dbtype.logfile.nodir", "-in ns.fna -out db -logfile nodir/mk.log", "failure")):
         add(f"validate.{case_id}", words, expect, kind="validate")
+    # A `-logfile` that names a folder of the run's folder (finding 2): its messages stay on the standard error.
+    add("validate.no_dbtype.logfile.folder", "-in ns.fna -out db -logfile sub", "failure", kind="validate",
+        published=with_folder)
     return rows
 
 

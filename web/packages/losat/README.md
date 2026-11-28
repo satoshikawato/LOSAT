@@ -367,7 +367,13 @@ input is empty (`-in -` reads no sequence, as the command line with `< /dev/null
 
 The dates that the database holds (the index files' "Nov 27, 2026  12:23 AM", an alias file's "Alias file created", the
 mask column's and the report's dates) are the user's local time, as on the user's machine: the host gives the engine the
-browser's time zone (`Intl`) as a POSIX `TZ` rule of the current year, with its summer time.
+browser's time zone (`Intl`) as a POSIX `TZ` rule of the current year, with its summer time, made at the start of each
+run, so a zone that the user changed since an earlier run is the new run's.
+
+`-logfile` writes where the command line writes it: a file of `directory` (made or appended to, then a file of the run),
+`/dev/stdout` and `/dev/stderr` among the run's standard output and error, `/dev/null` nowhere, and a file outside
+`directory` (`/tmp/mk.log`) as a file of the run under that path; a name that does not open (a missing folder, a folder)
+leaves the messages on the standard error, as on the command line.
 
 ```ts
 import { WasmEngine } from 'losat';

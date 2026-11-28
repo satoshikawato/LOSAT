@@ -84,7 +84,8 @@
 // folder of the row's files, with the row's `TZ` in the module's environment (the host's, §3), and the CLI runs with
 // the same `TZ` in another folder of the same files: the exit status, the standard output and error and every file and
 // folder of the two folders afterwards are compared (`checkMakeblastdb`). The threaded module's `losat_web2_tool` runs
-// the rows marked `"threaded"`.
+// the rows marked `"threaded"`. A `-logfile` outside the run's folder (`/tmp/<id>.log`, `<id>` a name of the harness's
+// run) is the file of stream 12 that the CLI writes there (abi_v2.md §4; line NP WW4b1 R2, 2026-11-28).
 //
 // Usage: node v_abi.js --native losat --serial losat-web-serial.wasm
 //          --threads losat-web-threads.wasm --cases CASES.json [--engines serial,threads]
@@ -101,7 +102,7 @@ const { WASI } = require("node:wasi");
 
 const ROOT = path.resolve(__dirname, "../../..");
 const { createThreadHost } = require(path.join(ROOT, "LOSAT/tests/wasi_thread_host"));
-const { unsignedWasiImports } = require(path.join(ROOT, "LOSAT/tests/wasi_artifact"));
+const { unsignedWasiImports, environImports } = require(path.join(ROOT, "LOSAT/tests/wasi_artifact"));
 const { directoryReads } = require(path.join(ROOT, "LOSAT/tests/wasi_files"));
 
 const FORMATS = { blastp: [0, 6, 7], psiblast: [0, 6, 7], tblastn: [0, 6, 7], blastn: [0, 6, 7], tblastx: [0, 6, 7], blastx: [0, 6, 7] };
@@ -203,8 +204,11 @@ function storedZipEntries(archive) {
     const data = local + 30 + archive.readUInt16LE(local + 26) + archive.readUInt16LE(local + 28);
     const bytes = archive.subarray(data, data + size);
     assert.equal(crc32(bytes), crc, `${name}: the CRC-32 of its bytes`);
-    entries.push([name, bytes]);
-    at += 46 + nameLength + extraLength;
+    // The comment: the option whose file the entry is, in the engine's archive of a run's files (stream 8).
+    const commentLength = archive.readUInt16LE(at + 32);
+    const comment = archive.subarray(at + 46 + nameLength + extraLength, at + 46 + nameLength + extraLength + commentLength).toString("utf8");
+    entries.push([name, bytes, comment]);
+    at += 46 + nameLength + extraLength + commentLength;
   }
   return entries;
 }
@@ -399,15 +403,20 @@ function registerTaxidCounts(reactor, counts, search) {
 }
 
 // The serial reactor; `directory`, the run's working directory that it preopens as `/work` (a search of -db, a tool's
-// run); `env`, its environment (LOSAT Web's host gives `TZ` alone: abi_v2.md §3; none here unless a row needs it).
-async function openSerial(wasmPath, directory, env = {}) {
+// run); `env`, its environment (LOSAT Web's host gives `TZ` alone: abi_v2.md §3; none here unless a row needs it), or
+// `environment`, a function that gives it each time the module reads it (`environImports`: a host whose `TZ` changes
+// between runs).
+async function openSerial(wasmPath, directory, env = {}, environment = undefined) {
   const wasi = new WASI({ version: "preview1", returnOnExit: true, args: [], env, ...(directory === undefined ? {} : { preopens: { "/work": directory } }) });
   let reactor, memory;
   // A folder of the run's directory opened for reading fails its reads with EISDIR, as on Linux and in the browser
   // host (directoryReads, LOSAT/tests/wasi_files.js).
   const guestMemory = { get buffer() { return memory.buffer; }, grow: (pages) => memory.grow(pages) };
   const imports = {
-    wasi_snapshot_preview1: directoryReads(unsignedWasiImports(wasi.wasiImport), guestMemory, directory ?? "/"),
+    wasi_snapshot_preview1: {
+      ...directoryReads(unsignedWasiImports(wasi.wasiImport), guestMemory, directory ?? "/"),
+      ...(environment === undefined ? {} : environImports(environment, () => memory)),
+    },
     losat_host: { emit: (stream, ptr, len) => reactor.emit(stream, ptr, len) },
   };
   const { instance } = await WebAssembly.instantiate(fs.readFileSync(wasmPath), imports);
@@ -417,11 +426,12 @@ async function openSerial(wasmPath, directory, env = {}) {
   return { reactor, close: async () => {} };
 }
 
-// The threaded reactor; `directory` as openSerial's.
-async function openThreads(wasmPath, directory) {
+// The threaded reactor; `directory` and `environment` as openSerial's.
+async function openThreads(wasmPath, directory, environment = undefined) {
   let reactor;
   const host = await createThreadHost(wasmPath, "threaded-reactor", [], {
     directory,
+    environment,
     imports: { losat_host: { emit: (stream, ptr, len) => reactor.emit(stream, ptr, len) } },
   });
   reactor = new Reactor(host.instance.exports, () => host.memory);
@@ -778,6 +788,10 @@ function checkSurface(reactor, native) {
   assert.equal(normalizedLog.status, 0, normalizedLog.error);
   assert.equal(JSON.parse(normalizedLog.streams.get(2).toString()).log_file, "logs/");
   assert.equal(JSON.parse(normalizedLog.streams.get(2).toString()).log_file_name, "logs");
+  // The strategy file's name is the command line's file, as a run names it on stream 8 (line RG item F1w-r2).
+  const normalizedStrategy = reactor.call("losat_web2_start", argvOf(["blastp", "-query", "q", "-subject", "s", "-export_search_strategy", "./out/../s.asn"]));
+  assert.equal(normalizedStrategy.status, 0, normalizedStrategy.error);
+  assert.equal(JSON.parse(normalizedStrategy.streams.get(2).toString()).strategy_file, "s.asn");
   const parsed = reactor.call("losat_web2_start", argvOf(["blastn", "-query", "q", "-subject", "s", "-parse_deflines"]));
   assert.equal(JSON.parse(parsed.streams.get(2).toString()).register_inputs, true, "-parse_deflines reads the inputs together");
   const conffile = argvOf(["blastp", "-query", "q", "-subject", "s", "-conffile", "e1w3a.ini", "-outfmt", "x", "-dryrun"]);
@@ -1040,7 +1054,8 @@ async function checkPrints(engine, reactor, native) {
   const logged = prints(["tblastx", ...inputs, "-version", "-logfile", "v.log", "-num_threads", "1"], "version");
   assert.equal(logged.json.log_file, "v.log");
   const made = fs.readFileSync(path.join(dir, "v.log"));
-  assert.deepEqual(storedZipEntries(logged.run.streams.get(8)).map(([name, bytes]) => [name, sha256(bytes)]), [["v.log", sha256(made)]],
+  assert.deepEqual(storedZipEntries(logged.run.streams.get(8)).map(([name, bytes, option]) => [name, sha256(bytes), option]),
+                   [["v.log", sha256(made), "logfile"]],
                    "the file of -logfile (stream 8) is the CLI's");
   fs.rmSync(path.join(dir, "v.log"));
   // A -logfile name with a directory: the CLI opens the file of -logfile before it prints its help and its version;
@@ -1372,9 +1387,10 @@ async function checkLogfileNames(engine, native, scratch) {
 // -export_search_strategy (line RG item F1w, review 1 S3): the file of a run of two or more query batches at NCBI's
 // default batch sizes (the browser gives no BATCH_SIZE), for each program, on each engine and its thread counts (the
 // threaded engine's parallel search, -num_threads 4 too), against the CLI's file of the same argv: stream 8 holds the
-// CLI's file under the name, and the argv's output (outfmt 6, and outfmt 11's archive, whose options handle the
-// strategy shares) is the CLI's. The queries and subjects are seeded letters, written once into `scratch`; each
-// subject is pieces of the queries, so that the searches find hits.
+// CLI's file under the CLI's name of it (`./s.asn` is `s.asn`, `/var/run/../tmp/<id>.asn` is `/tmp/<id>.asn`, as the
+// *start* names it; line RG item F1w-r2), and the argv's output (outfmt 6, and outfmt 11's archive, whose options
+// handle the strategy shares) is the CLI's. The queries and subjects are seeded letters, written once into `scratch`;
+// each subject is pieces of the queries, so that the searches find hits.
 function seededFasta(seed, records, length, letters, prefix) {
   let state = seed >>> 0;
   const next = () => {
@@ -1436,26 +1452,46 @@ async function checkStrategyFiles(reactor, native, scratch, engine, waitForWorke
       return registered.status;
     });
     for (const format of program === "blastp" || program === "blastx" ? [6, 11] : [6]) {
-      const argv = [program, "-query", "q.fa", "-subject", "s.fa", ...words, "-outfmt", String(format), "-export_search_strategy", "s.asn"];
-      const cli = nativeOnPipes(native, [...argv, "-num_threads", "1", "-out", "o.out"], directory);
-      const label = `${engine.name} ${program} outfmt ${format}`;
-      assert.equal(cli.status, 0, `${label}: native: ${cli.stderr}`);
-      const file = fs.readFileSync(path.join(directory, "s.asn")), out = fs.readFileSync(path.join(directory, "o.out"));
-      const requests = file.toString().split("Blast4-request ::=").length - 1;
-      assert.ok(requests >= 2, `${label}: the CLI wrote ${requests} request(s), not a run of two or more batches`);
-      for (const threads of engine.threads) {
-        const run = reactor.call("losat_web2_run", argvOf([...argv, "-num_threads", String(threads)]), ...handles);
-        if (waitForWorkers) await waitForWorkers();
-        assert.equal(run.status, 0, `${label} threads ${threads}: ${run.error}`);
-        const sent = run.streams.has(8) ? storedZipEntries(run.streams.get(8)) : [];
-        assert.deepEqual(sent.map(([name, bytes]) => [name, sha256(bytes)]), [["s.asn", sha256(file)]],
-                         `${label} threads ${threads}: the file of the run (stream 8) is the CLI's (${requests} requests)`);
-        const stream = format === 6 ? 6 : CUSTOM_STREAM;
-        assert.equal(sha256(run.streams.get(stream) || Buffer.alloc(0)), sha256(out), `${label} threads ${threads}: outfmt ${format}`);
-        rows++;
+      // [the name typed, the CLI's file, the Web's name of it, more words]. A `..` after a link (`/var/run` is `/run` on
+      // the host that checkLogfileNames requires): the CLI makes `/tmp/<id>.asn`, not the name read lexically
+      // (`/var/tmp/<id>.asn`), and the Web names that file (line RG item F1w-r2's second fix round, 2026-11-28). A
+      // `-logfile` name whose folder as written is missing (`sub/..`) and that is the strategy file's: the run makes
+      // only the strategy file, and the engine labels its entry so (the third fix round's S1).
+      const id = `losat-v-abi-${process.pid}-${engine.name}-strategy`;
+      const names = [[index % 2 === 0 ? "s.asn" : "./s.asn", path.join(directory, "s.asn"), "s.asn", []]];
+      if (index === 0 && format === 6) {
+        names.push([`/var/run/../tmp/${id}.asn`, `/tmp/${id}.asn`, `/tmp/${id}.asn`, []]);
+        names.push(["x.asn", path.join(directory, "x.asn"), "x.asn", ["-logfile", "sub/../x.asn"]]);
       }
-      fs.rmSync(path.join(directory, "s.asn"));
-      fs.rmSync(path.join(directory, "o.out"));
+      for (const [typed, madePath, named, more] of names) {
+        const argv = [program, "-query", "q.fa", "-subject", "s.fa", ...words, "-outfmt", String(format), "-export_search_strategy", typed, ...more];
+        const cli = nativeOnPipes(native, [...argv, "-num_threads", "1", "-out", "o.out"], directory);
+        const label = `${engine.name} ${program} outfmt ${format} ${typed}${more.length > 0 ? ` ${more.join(" ")}` : ""}`;
+        const lexical = typed.startsWith("/") ? path.posix.normalize(typed) : undefined;
+        const lexicalMade = lexical !== undefined && lexical !== madePath && fs.existsSync(lexical);
+        if (lexicalMade) fs.rmSync(lexical);
+        assert.ok(!lexicalMade, `${label}: the CLI made ${lexical}`);
+        const started = reactor.call("losat_web2_start", argvOf(argv));
+        assert.equal(started.status, 0, `${label}: start: ${started.error}`);
+        assert.equal(JSON.parse(started.streams.get(2).toString()).strategy_file, named, `${label}: the start names the CLI's file`);
+        assert.equal(cli.status, 0, `${label}: native: ${cli.stderr}`);
+        const file = fs.readFileSync(madePath), out = fs.readFileSync(path.join(directory, "o.out"));
+        fs.rmSync(madePath);
+        fs.rmSync(path.join(directory, "o.out"));
+        const requests = file.toString().split("Blast4-request ::=").length - 1;
+        assert.ok(requests >= 2, `${label}: the CLI wrote ${requests} request(s), not a run of two or more batches`);
+        for (const threads of engine.threads) {
+          const run = reactor.call("losat_web2_run", argvOf([...argv, "-num_threads", String(threads)]), ...handles);
+          if (waitForWorkers) await waitForWorkers();
+          assert.equal(run.status, 0, `${label} threads ${threads}: ${run.error}`);
+          const sent = run.streams.has(8) ? storedZipEntries(run.streams.get(8)) : [];
+          assert.deepEqual(sent.map(([name, bytes, option]) => [name, sha256(bytes), option]), [[named, sha256(file), "export_search_strategy"]],
+                           `${label} threads ${threads}: the file of the run (stream 8) is the CLI's (${requests} requests)`);
+          const stream = format === 6 ? 6 : CUSTOM_STREAM;
+          assert.equal(sha256(run.streams.get(stream) || Buffer.alloc(0)), sha256(out), `${label} threads ${threads}: outfmt ${format}`);
+          rows++;
+        }
+      }
     }
     for (const handle of handles) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
     fs.rmSync(directory, { recursive: true, force: true });
@@ -1846,9 +1882,12 @@ function withoutSeconds(bytes) {
 // sizes. `validate` (`losat_web2_validate`) gives the CLI's verdict and writes nothing to the folder. Returns the row.
 async function checkMakeblastdb(engine, search, options, scratch) {
   const label = `${engine.name} ${search.cases.join(",")}`;
-  const words = ["makeblastdb", ...search.argv];
   const env = { TZ: search.tz };
   for (let attempt = 1; ; attempt++) {
+    // A file outside the run's folder: a name of this attempt, which the CLI writes and the engine gives on stream 12.
+    const id = `losat-v-abi-mk-${process.pid}-${engine.name}-${search.cases[0]}-${attempt}`;
+    const words = ["makeblastdb", ...search.argv.map((word) => word.replace("<id>", id))];
+    const outside = words.find((word) => word.includes(id));
     const cliFolder = fs.mkdtempSync(path.join(scratch, "makeblastdb.cli."));
     const engineFolder = fs.mkdtempSync(path.join(scratch, "makeblastdb.engine."));
     writeToolFiles(cliFolder, search.files);
@@ -1860,7 +1899,9 @@ async function checkMakeblastdb(engine, search, options, scratch) {
       const place = (bytes) => Buffer.from(bytes.toString("latin1").split(cliFolder).join("/work"), "latin1");
       if (search.tool === "validate") {
         const validated = reactor.call("losat_web2_validate", words.join("\0"));
+        assert.ok(outside === undefined || !fs.existsSync(outside), `${label}: validate writes no file outside`);
         const cli = nativeOnPipes(options.native, words, cliFolder, env);
+        if (outside !== undefined) fs.rmSync(outside, { force: true });
         assert.equal(validated.streams.size, 0, `${label}: validate emits nothing`);
         assert.deepEqual(treeOf(engineFolder), before, `${label}: validate writes nothing to the run's folder`);
         if (search.expect === "failure") {
@@ -1880,19 +1921,27 @@ async function checkMakeblastdb(engine, search, options, scratch) {
                  tool: "validate", status: validated.status };
       }
       const run = reactor.call("losat_web2_tool", words.join("\0"));
+      const frames = (reactor.chunks.get(12) || []).map((chunk) => Buffer.from(chunk));
       if (instance.waitForWorkers) await instance.waitForWorkers();
+      assert.ok(outside === undefined || !fs.existsSync(outside), `${label}: the engine writes no file outside`);
       const cli = nativeOnPipes(options.native, words, cliFolder, env);
+      const cliOutside = outside !== undefined && fs.existsSync(outside) ? fs.readFileSync(outside) : undefined;
+      if (outside !== undefined) fs.rmSync(outside, { force: true });
       assert.equal(run.status, 0, `${label}: ${run.error}`);
       const status = JSON.parse(run.streams.get(2).toString()).status;
       assert.equal(status, cli.status, `${label}: the exit status (${run.streams.get(3) || ""} / ${cli.stderr})`);
       assert.equal(status !== 0, search.expect === "failure", `${label}: the run ${status !== 0 ? "fails" : "completes"} (exit ${status})`);
-      for (const stream of [0, 1, 4, 5, 6, 7, 8, 9, 10, 12]) assert.ok(!run.streams.has(stream), `${label}: no stream ${stream}`);
+      for (const stream of [0, 1, 4, 5, 6, 7, 8, 9, 10]) assert.ok(!run.streams.has(stream), `${label}: no stream ${stream}`);
+      // Stream 12: the file outside the run's folder alone, with the bytes that the CLI wrote there.
+      const given = toolFiles(frames);
+      assert.deepEqual(given.map((file) => file.name), cliOutside === undefined ? [] : [outside], `${label}: the files of stream 12`);
       const engineTree = treeOf(engineFolder);
       const cliTree = treeOf(cliFolder).map(([name, bytes]) => [name, bytes === null ? null : place(bytes)]);
       assert.deepEqual(engineTree.map(([name, bytes]) => [name, bytes === null]), cliTree.map(([name, bytes]) => [name, bytes === null]),
                        `${label}: the files and folders of the run's folder`);
       const compared = (bytes) => (bytes === null ? "folder" : search.expect === "names" ? bytes.length : sha256(withoutSeconds(bytes)));
       const differing = [
+        ...given.filter((file) => !withoutSeconds(file.bytes).equals(withoutSeconds(place(cliOutside)))).map((file) => file.name),
         ...(sha256(withoutSeconds(run.streams.get(11) || Buffer.alloc(0))) === sha256(withoutSeconds(place(cli.stdout))) || search.expect === "names" ? [] : ["standard output"]),
         ...(withoutSeconds(run.streams.get(3) || Buffer.alloc(0)).equals(withoutSeconds(place(cli.stderr))) ? [] : ["standard error"]),
         ...engineTree.filter(([name, bytes], i) => compared(bytes) !== compared(cliTree[i][1])).map(([name]) => name),
@@ -1911,6 +1960,62 @@ async function checkMakeblastdb(engine, search, options, scratch) {
       fs.rmSync(engineFolder, { recursive: true, force: true });
     }
   }
+}
+
+// One instance of the module whose host changes `TZ` between two makeblastdb runs (line NP WW4b1 R2, finding 5,
+// 2026-11-28; abi_v2.md §3: the host may change `TZ` between runs, and the engine reads it at each run's start): each
+// run's report and database are the CLI's with the `TZ` of that run, on the serial module and on the threaded one.
+// A run that crossed a minute is made again once. Returns the number of runs.
+async function checkTimeZoneChange(engine, options, scratch) {
+  const tests = path.join(ROOT, "LOSAT/tests");
+  const files = { "ns.fna": path.join(tests, "dropin_corpus/ns.fna") };
+  const zones = ["<+09>-9", "<-07>7", "<+0530>-5:30"];
+  let zone = zones[0];
+  const engineFolder = fs.mkdtempSync(path.join(scratch, "tz.engine."));
+  writeToolFiles(engineFolder, files);
+  const instance = await engine.open(engineFolder, {}, () => [`TZ=${zone}`]);
+  let runs = 0;
+  try {
+    for (const [index, given] of zones.entries()) {
+      zone = given;
+      const words = ["makeblastdb", "-in", "ns.fna", "-dbtype", "nucl", "-out", `db${index}`];
+      const label = `${engine.name} TZ ${given} (run ${index + 1} of one instance)`;
+      for (let attempt = 1; ; attempt++) {
+        const cliFolder = fs.mkdtempSync(path.join(scratch, "tz.cli."));
+        try {
+          writeToolFiles(cliFolder, files);
+          const run = instance.reactor.call("losat_web2_tool", words.join("\0"));
+          if (instance.waitForWorkers) await instance.waitForWorkers();
+          const cli = nativeOnPipes(options.native, words, cliFolder, { TZ: given });
+          assert.equal(run.status, 0, `${label}: ${run.error}`);
+          assert.equal(JSON.parse(run.streams.get(2).toString()).status, 0, `${label}: ${run.streams.get(3) || ""}`);
+          const place = (bytes) => Buffer.from(bytes.toString("latin1").split(cliFolder).join("/work"), "latin1");
+          const made = (folder) => treeOf(folder).filter(([name]) => name.startsWith(`db${index}.`));
+          const differing = [
+            ...(withoutSeconds(run.streams.get(11) || Buffer.alloc(0)).equals(withoutSeconds(place(cli.stdout))) ? [] : ["standard output"]),
+            ...made(engineFolder).filter(([name, bytes]) => {
+              const theirs = made(cliFolder).find(([known]) => known === name);
+              return theirs === undefined || !withoutSeconds(bytes).equals(withoutSeconds(place(theirs[1])));
+            }).map(([name]) => name),
+          ];
+          if (differing.length > 0 && attempt === 1) {
+            console.log(`again ${label}: ${differing.join(", ")} (a minute may have passed between the runs)`);
+            for (const [name] of made(engineFolder)) fs.rmSync(path.join(engineFolder, name));
+            continue;
+          }
+          assert.deepEqual(differing, [], `${label}: as the CLI's with TZ=${given}`);
+          runs += 1;
+          break;
+        } finally {
+          fs.rmSync(cliFolder, { recursive: true, force: true });
+        }
+      }
+    }
+  } finally {
+    await instance.close();
+    fs.rmSync(engineFolder, { recursive: true, force: true });
+  }
+  return runs;
 }
 
 // PSW1: psiblast (-subject, -db, -query, -in_msa, -in_pssm, -num_iterations, -out_pssm,
@@ -2061,6 +2166,12 @@ async function checkPsiblastAndTblastnPssm(engine, native, scratch) {
         assert.equal(sha256(run.streams.get(3) || Buffer.alloc(0)), sha256(cliStderr), `${label}: diagnostics`);
         const sentFiles = run.streams.has(8) ? storedZipEntries(run.streams.get(8)).sort((a, b) => a[0].localeCompare(b[0])) : [];
         assert.deepEqual(sentFiles.map(([n]) => n), cliPssmFiles.map(([n]) => n), `${label}: stream 8 PSSM files`);
+        // Each file's option, the comment of its entry: the option whose name the file has (`F` or `F.<round>`).
+        const optionOf = (name) => ["-out_ascii_pssm", "-out_pssm"].find((flag) => {
+          const at = c.extra.indexOf(flag);
+          return at >= 0 && (name === c.extra[at + 1] || name.startsWith(`${c.extra[at + 1]}.`));
+        })?.slice(1);
+        assert.deepEqual(sentFiles.map(([, , option]) => option), sentFiles.map(([n]) => optionOf(n)), `${label}: stream 8 PSSM files' options`);
         for (let i = 0; i < sentFiles.length; i++) {
           assert.equal(sha256(sentFiles[i][1]), sha256(cliPssmFiles[i][1]), `${label}: PSSM file ${sentFiles[i][0]}`);
         }
@@ -2086,10 +2197,11 @@ async function main() {
   const results = [];
   const selected = (options.engines || "serial,threads").split(",");
   const engines = [
-    { name: "serial", open: (directory, env) => openSerial(options.serial, directory, env), threads: [1] },
-    // The threaded host gives its threads this process's environment (LOSAT/tests/wasi_thread_worker.js), which the
-    // module reads once, at its start: `env` is set for the start.
-    { name: "threads", open: (directory, env) => withEnvironment(env, () => openThreads(options.threads, directory)), threads: [1, 2, 4] },
+    { name: "serial", open: (directory, env, environment) => openSerial(options.serial, directory, env, environment), threads: [1] },
+    // The threaded host gives its threads this process's environment at the instance's start
+    // (LOSAT/tests/wasi_thread_worker.js), which the module reads at each run's start: `env` is set for the start.
+    { name: "threads", open: (directory, env, environment) => withEnvironment(env, () => openThreads(options.threads, directory, environment)),
+      threads: [1, 2, 4] },
   ].filter((engine) => selected.includes(engine.name));
   const all = JSON.parse(fs.readFileSync(options.cases, "utf8"));
   for (const engine of engines) {
@@ -2099,6 +2211,7 @@ async function main() {
     console.log(`ok ${engine.name} describe, validate, register, scan`);
     const psw1Rows = await checkPsiblastAndTblastnPssm(engine, options.native, scratch);
     console.log(`ok ${engine.name} psiblast and tblastn -in_pssm: ${psw1Rows} runs + PSSM files as the CLI's`);
+    console.log(`ok ${engine.name} TZ changed between runs of one instance: ${await checkTimeZoneChange(engine, options, scratch)} runs as the CLI's`);
     const logRows = await checkLogfileNames(engine, options.native, scratch);
     console.log(`ok ${engine.name} -logfile names: ${logRows} runs as the CLI's`);
     const runFileLogRows = await checkLogfileRunFiles(engine, options.native, scratch);

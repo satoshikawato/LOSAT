@@ -11,11 +11,12 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { DirectoryFile } from '../src/domain/run-files.ts';
 import type { ToolFrame } from '../src/domain/tool-frames.ts';
 import { ROLE_SUBJECT, type ReactorAbi } from '../src/infra/reactor/abi.ts';
 import { compileReactor } from '../src/infra/reactor/instance.ts';
+import { RunDirectory } from '../src/infra/reactor/run-directory.ts';
 import type { MainLinks } from '../src/infra/engine-worker/link.ts';
 import type { WorkerTool, WorkerToolValidate } from '../src/infra/engine-worker/protocol.ts';
 import { InstanceUse } from '../src/infra/engine-worker/instance-use.ts';
@@ -238,16 +239,103 @@ describe.skipIf(REACTORS === undefined)('the Engine worker runtime and tools, on
     expect(Buffer.from((older[4]!.file as MemoryBlob).data).equals(Buffer.from(corpus('ndbp.nog')))).toBe(true);
   });
 
-  it("checks makeblastdb's words before its run: the argument reader's errors, and a valid argv whose input is missing", async () => {
+  it("writes makeblastdb's -logfile where the command line writes it: a file outside the directory comes first, by its path, and /dev/stdout is the standard output", async () => {
+    // Line NP WW4b1 R2, finding 1, 2026-11-28 (abi_v2.md §4): the file outside is a file of stream 12, numbered before
+    // the files that the run left in its directory.
     const worker = runtime();
-    expect(await worker.validateTool(validateOf(['makeblastdb', '-in', 'x.fna', '-dbtype', 'nucl']))).toEqual({ ok: true });
-    const refused = await worker.validateTool(validateOf(['makeblastdb', '-in', 'x.fna']));
-    expect(refused.ok).toBe(false);
-    expect(!refused.ok && refused.message).toContain('dbtype');
-    // The check wrote nothing: a run of the same words in an empty directory leaves no file.
-    const run = posts();
-    expect((await worker.tool(toolOf(['makeblastdb', '-in', 'x.fna', '-dbtype', 'nucl', '-logfile', 'v.log']), run)).status).not.toBe(0);
-    expect(filesOf(run.frames).map((file) => file.name)).toEqual(['v.log']);
+    const outside = posts();
+    expect((await worker.tool(toolOf(['makeblastdb', '-in', 'ns.fna', '-dbtype', 'nucl', '-out', 'db', '-logfile', '/tmp/mk.log'], [memoryFile('ns.fna', corpus('ns.fna'))]), outside)).status).toBe(0);
+    const files = filesOf(outside.frames);
+    expect(files[0]!.name).toBe('/tmp/mk.log');
+    expect(files[0]!.inOrder).toBe(true);
+    expect(files[0]!.bytes.toString()).toContain('Adding sequences from FASTA; added 6 sequences');
+    expect(files.slice(1).map((file) => file.name)).toEqual(['db.ndb', 'db.nhr', 'db.nin', 'db.njs', 'db.not', 'db.nsq', 'db.ntf', 'db.nto']);
+    expect(joined(outside.stdout).length).toBe(0);
+    const stdout = posts();
+    expect((await worker.tool(toolOf(['makeblastdb', '-in', 'ns.fna', '-dbtype', 'nucl', '-out', 'db', '-logfile', '/dev/stdout'], [memoryFile('ns.fna', corpus('ns.fna'))]), stdout)).status).toBe(0);
+    expect(joined(stdout.stdout).toString()).toContain('Adding sequences from FASTA; added 6 sequences');
+    expect(filesOf(stdout.frames).map((file) => file.name)).toEqual(['db.ndb', 'db.nhr', 'db.nin', 'db.njs', 'db.not', 'db.nsq', 'db.ntf', 'db.nto']);
+  });
+
+  it("checks makeblastdb's words before its run without writing: the argument reader's errors, and a valid argv whose input is missing", async () => {
+    // Every call of the instance's directory that makes, changes or removes a name (line NP WW4b1 R2, finding 3,
+    // 2026-11-28): an open that makes, empties or writes a file, and the calls that make, rename or remove names.
+    const writes: string[] = [];
+    let watching = false;
+    const imports = RunDirectory.prototype.imports;
+    const spy = vi.spyOn(RunDirectory.prototype, 'imports').mockImplementation(function (this: RunDirectory, base, memory) {
+      const own = imports.call(this, base, memory) as Record<string, (...args: Array<number | bigint>) => unknown>;
+      const path = (pointer: number | bigint, length: number | bigint) =>
+        new TextDecoder().decode(new Uint8Array(memory().buffer, Number(pointer) >>> 0, Number(length) >>> 0).slice());
+      const open = own['path_open']!;
+      own['path_open'] = (...args) => {
+        const [, , pointer, length, oflags, rights, , fdflags] = args;
+        // O_CREAT (1), O_TRUNC (8); the right to write (fd_write, bit 6); O_APPEND (1).
+        const writing = (Number(oflags) & 9) !== 0 || (BigInt(rights!) & (1n << 6n)) !== 0n || (Number(fdflags) & 1) !== 0;
+        if (watching && writing) writes.push(`path_open ${path(pointer!, length!)}`);
+        return open(...args);
+      };
+      for (const name of ['path_create_directory', 'path_unlink_file', 'path_remove_directory', 'path_rename', 'path_link', 'path_symlink']) {
+        const call = own[name];
+        if (call === undefined) continue;
+        own[name] = (...args) => {
+          if (watching) writes.push(name);
+          return call(...args);
+        };
+      }
+      return own as WebAssembly.ModuleImports;
+    });
+    try {
+      const worker = runtime();
+      watching = true;
+      expect(await worker.validateTool(validateOf(['makeblastdb', '-in', 'x.fna', '-dbtype', 'nucl', '-logfile', 'v.log']))).toEqual({ ok: true });
+      const refused = await worker.validateTool(validateOf(['makeblastdb', '-in', 'x.fna', '-logfile', 'v.log']));
+      expect(refused.ok).toBe(false);
+      expect(!refused.ok && refused.message).toContain('dbtype');
+      watching = false;
+      expect(writes).toEqual([]);
+      // The spy sees what a run writes: the same words run make v.log, the one file left in the empty directory.
+      const run = posts();
+      watching = true;
+      expect((await worker.tool(toolOf(['makeblastdb', '-in', 'x.fna', '-dbtype', 'nucl', '-logfile', 'v.log']), run)).status).not.toBe(0);
+      watching = false;
+      expect(writes).toContain('path_open v.log');
+      expect(filesOf(run.frames).map((file) => file.name)).toEqual(['v.log']);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("reads the host's time zone at each run's start: a zone changed between two runs of one instance is the second run's", async () => {
+    // The engine reads its environment, `TZ`, at the start of each run, and the host makes `TZ` then (wasi.ts; line NP
+    // WW4b1 R2, finding 5, 2026-11-28): the user's zone changed between two runs (here Node's, through `process.env.TZ`)
+    // gives the second run's dates in the new zone, on the same instance.
+    const worker = runtime();
+    const saved = process.env['TZ'];
+    /** The offset from UTC, in seconds, of the time that makeblastdb's report gives for its start. */
+    const offsetOf = async (zone: string, runs: number) => {
+      process.env['TZ'] = zone;
+      const run = posts();
+      const started = Date.now();
+      const done = await worker.tool(toolOf(['makeblastdb', '-in', 'ns.fna', '-dbtype', 'nucl', '-out', 'db'], [memoryFile('ns.fna', corpus('ns.fna'))]), run);
+      expect(done.status).toBe(0);
+      expect(done.memory.instanceRuns).toBe(runs);
+      const report = joined(run.stdout).toString();
+      const time = /Building a new DB, current time: (\d\d)\/(\d\d)\/(\d{4}) (\d\d):(\d\d):(\d\d)/.exec(report);
+      expect(time, report).not.toBeNull();
+      const [month, day, year, hour, minute, second] = time!.slice(1).map(Number) as [number, number, number, number, number, number];
+      const local = Date.UTC(year, month - 1, day, hour, minute, second);
+      // To the quarter hour: the run takes seconds.
+      return Math.round((local - started) / 900_000) * 900;
+    };
+    try {
+      expect(await offsetOf('Asia/Tokyo', 1)).toBe(9 * 3600);
+      expect(await offsetOf('America/Phoenix', 2)).toBe(-7 * 3600);
+      expect(await offsetOf('Asia/Kolkata', 3)).toBe(5.5 * 3600);
+    } finally {
+      if (saved === undefined) delete process.env['TZ'];
+      else process.env['TZ'] = saved;
+    }
   });
 });
 

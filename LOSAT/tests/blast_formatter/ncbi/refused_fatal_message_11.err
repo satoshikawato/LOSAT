@@ -1,0 +1,16 @@
+T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/blast/api/remote_blast.cpp", line 1687: Note[F]: BLAST::ncbi::blast::CRemoteBlast::LoadFromArchive() - Warning: [blastn] Examining 5 or more matches is recommended
+     Stack trace:
+      /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blast_formatter ???:0 ncbi::SDiagMessage::x_OldWrite(std::ostream&, int) const offset=0x335 addr=0x19810c5
+      /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blast_formatter ???:0 ncbi::CStreamDiagHandler::Post(ncbi::SDiagMessage const&) offset=0x93 addr=0x19825a3
+      /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blast_formatter ???:0 ncbi::CDiagBuffer::DiagHandler(ncbi::SDiagMessage&) offset=0x39C addr=0x1975c3c
+      /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blast_formatter ???:0 ncbi::CDiagBuffer::Flush() offset=0x240 addr=0x196d230
+      /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blast_formatter ???:0 /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blast_formatter() [0xf6ee36] offset=0x0 addr=0xf6ee36
+      /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blast_formatter ???:0 ncbi::blast::CRemoteBlast::LoadFromArchive() offset=0x1F8 addr=0xf7db78
+      /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blast_formatter ???:0 CBlastFormatterApp::Run() offset=0xF5 addr=0xc062c5
+      /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blast_formatter ???:0 ncbi::CNcbiApplicationAPI::x_TryMain(ncbi::EAppDiagStream, char const*, int*, bool*) offset=0x233 addr=0x1937f23
+      /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blast_formatter ???:0 ncbi::CNcbiApplicationAPI::AppMain(int, char const* const*, char const* const*, ncbi::EAppDiagStream, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) offset=0x4CB addr=0x193a61b
+      /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blast_formatter ???:0 main offset=0x4F addr=0xbdf45f
+      /lib/x86_64-linux-gnu/libc.so.6 ???:0  offset=0x2A1CA addr=0x7fe332a751ca
+      /lib/x86_64-linux-gnu/libc.so.6 ???:0 __libc_start_main offset=0x8B addr=0x7fe332a7528b
+      /home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blast_formatter ???:0 _start offset=0x2E addr=0xbff87e
+

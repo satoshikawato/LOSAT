@@ -1,0 +1,12 @@
+Warning: [psiblast] Error pre-fetching sequence data
+Error: [psiblast] Error: Offset error at end of taxdb file.
+Error: [psiblast] Error: Offset error at end of taxdb file.
+Warning: [psiblast] Failed to retrieve sequence gnl|BL_ORD_ID|x002
+Warning: [psiblast] Error pre-fetching sequence data
+Warning: [psiblast] Query_1 qa part of the se.. : Composition-based score adjustment conditioned on sequence properties and unconditional composition-based score adjustment is not supported with PSSMs, resetting to default value of standard composition-based statistics Frequency ratios for PSSM are all zeros, frequency ratios for BLOSUM62 will be used during traceback in composition based statistics 
+Error: [psiblast] Error: Offset error at end of taxdb file.
+Warning: [psiblast] Error pre-fetching sequence data
+Error: [psiblast] Error: Offset error at end of taxdb file.
+Warning: [psiblast] Error pre-fetching sequence data
+Warning: [psiblast] Query_2 qb part of the ot.. : Composition-based score adjustment conditioned on sequence properties and unconditional composition-based score adjustment is not supported with PSSMs, resetting to default value of standard composition-based statistics Frequency ratios for PSSM are all zeros, frequency ratios for BLOSUM62 will be used during traceback in composition based statistics 
+Error: [psiblast] Error: Offset error at end of taxdb file.

@@ -1037,8 +1037,6 @@ fn taken(folder: &std::path::Path) -> std::collections::BTreeMap<String, Vec<u8>
     files
 }
 
-/// The minute of makeblastdb's report (`Building a new DB, current time: 11/27/2026 13:55:02`),
-/// which its dates (the index's, the metadata's) are in.
 /// The report of a makeblastdb run without what changes from one run to the next: the seconds of
 /// its time ("Building a new DB, current time: ...") and the time it took ("added N sequences in
 /// T seconds.").
@@ -1063,6 +1061,8 @@ fn report_masked(report: &[u8]) -> String {
     masked
 }
 
+/// The minute of makeblastdb's report (`Building a new DB, current time: 11/27/2026 13:55:02`),
+/// which its dates (the index's, the metadata's) are in.
 fn report_minute(report: &[u8]) -> Vec<u8> {
     let text = String::from_utf8_lossy(report);
     text.lines()
@@ -1309,6 +1309,141 @@ fn a_makeblastdb_argv_is_checked_as_the_command_line_checks_it() {
     }
     assert!(emitted().is_empty());
     std::fs::remove_dir_all(&folder).unwrap();
+}
+
+/// The `-logfile` of a makeblastdb tool run follows the device model of docs/web/abi_v2.md §4
+/// (line NP WW4b1 R2, finding 1, 2026-11-28), as the command line writes the log of the library's
+/// run on the disk (`mk.log`): `/dev/stdout` puts it on stream 11 and `/dev/stderr` on stream 3,
+/// each line as it is written; the null device loses it; `/dev/full` fails its writes as the
+/// system's (the library's run of `-logfile /dev/full`); a file outside the working directory is a
+/// file of stream 12 under its name, with the log's bytes, and nothing is written there.
+#[test]
+fn a_makeblastdb_log_goes_where_the_command_line_writes_it() {
+    emitted();
+    let folder = folder("makeblastdb-log");
+    let out = folder.join("db");
+    let out = out.to_str().unwrap();
+    let file = folder.join("mk.log");
+    let prot = fixture("seqdb/prot.faa");
+    let words = |log: &str| -> Vec<String> {
+        [
+            "-in", &prot, "-dbtype", "prot", "-out", out, "-logfile", log,
+        ]
+        .iter()
+        .map(|word| word.to_string())
+        .collect()
+    };
+    let library = |log: &str| {
+        let words = words(log);
+        let words: Vec<&str> = words.iter().map(String::as_str).collect();
+        let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+        let result =
+            losat::api::run_makeblastdb(&words, &mut io::empty(), &mut stdout, &mut stderr);
+        (result.is_ok(), stdout, stderr)
+    };
+    let tool = |log: &str| {
+        let words = words(log);
+        let words: Vec<&str> = words.iter().map(String::as_str).collect();
+        run(&[&["makeblastdb"][..], &words].concat()).unwrap();
+        emitted()
+    };
+    let (ok, stdout, stderr) = library(file.to_str().unwrap());
+    assert!(ok);
+    let log = taken(&folder).remove("mk.log").unwrap();
+    assert!(String::from_utf8_lossy(&log).contains("Adding sequences from FASTA"));
+    let status = |calls: &[(u32, Vec<u8>)]| calls.last().unwrap().clone();
+    let succeeded = (STREAM_RESPONSE, b"{\"status\":0}".to_vec());
+    let outside = format!("/tmp/ww4b1-r2-adapter-{}.log", std::process::id());
+    for (name, printed, diagnostics) in [
+        (
+            "/dev/stdout",
+            report_masked(&[&stdout[..], &log].concat()),
+            report_masked(&stderr),
+        ),
+        (
+            "/dev/stderr",
+            report_masked(&stdout),
+            report_masked(&[&stderr[..], &log].concat()),
+        ),
+        ("/dev/null", report_masked(&stdout), report_masked(&stderr)),
+        (&outside, report_masked(&stdout), report_masked(&stderr)),
+    ] {
+        let calls = tool(name);
+        assert_eq!(status(&calls), succeeded, "{name}");
+        assert_eq!(
+            report_masked(&joined(&calls, STREAM_PRINTED)),
+            printed,
+            "{name}: stream 11"
+        );
+        assert_eq!(
+            report_masked(&joined(&calls, STREAM_DIAGNOSTICS)),
+            diagnostics,
+            "{name}: stream 3"
+        );
+        let files = files(&frames(&calls));
+        if name == outside {
+            assert_eq!(files.len(), 1, "{name}");
+            assert_eq!(files[0].0, name.as_bytes());
+            assert_eq!(
+                report_masked(&files[0].1),
+                report_masked(&log),
+                "{name}: stream 12"
+            );
+            assert!(
+                !std::path::Path::new(name).exists(),
+                "{name}: not on the disk"
+            );
+        } else {
+            assert!(files.is_empty(), "{name}: no frame of stream 12");
+        }
+        assert!(!taken(&folder).contains_key("mk.log"));
+    }
+    let (ok, stdout, stderr) = library("/dev/full");
+    let calls = tool("/dev/full");
+    assert_eq!(
+        status(&calls),
+        (
+            STREAM_RESPONSE,
+            format!("{{\"status\":{}}}", if ok { 0 } else { 1 }).into_bytes()
+        ),
+        "/dev/full"
+    );
+    assert_eq!(
+        joined(&calls, STREAM_PRINTED),
+        stdout,
+        "/dev/full: stream 11"
+    );
+    assert_eq!(
+        joined(&calls, STREAM_DIAGNOSTICS),
+        stderr,
+        "/dev/full: stream 3"
+    );
+    assert!(frames(&calls).is_empty());
+    std::fs::remove_dir_all(&folder).unwrap();
+}
+
+/// A check of makeblastdb's words whose `-logfile` does not open (a name in a folder that the
+/// working directory does not have, a folder: `src` of the adapter's directory, the tests'
+/// working directory) refuses them with what the library's run writes, where the messages stay on
+/// the standard error (line NP WW4b1 R2, finding 2, 2026-11-28; the check chose a file in memory
+/// before, whose text differed), and makes nothing.
+#[test]
+fn a_makeblastdb_check_leaves_an_unopened_log_s_messages_on_the_standard_error() {
+    emitted();
+    let prot = fixture("seqdb/prot.faa");
+    for log in ["ww4b1-r2-nodir/mk.log", "src", "src/"] {
+        let refused = ["-in", &prot, "-logfile", log];
+        let error = validate(&[&["makeblastdb"][..], &refused].concat()).unwrap_err();
+        let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+        let failed =
+            losat::api::run_makeblastdb(&refused, &mut io::empty(), &mut stdout, &mut stderr);
+        assert!(failed.is_err(), "{log}");
+        assert!(stdout.is_empty(), "{log}");
+        assert_eq!(format!("{error}\n").as_bytes(), stderr, "{log}");
+    }
+    assert!(!std::path::Path::new("ww4b1-r2-nodir").exists());
+    assert!(std::path::Path::new("src").is_dir());
+    assert!(emitted().is_empty());
 }
 
 #[test]

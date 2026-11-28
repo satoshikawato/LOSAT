@@ -4512,8 +4512,8 @@ impl<'d> ShownHolders<'d> {
     // (cited at `DeflineSet::bioseq_defline`: a load of the holder's blob for the Seq-align id
     // reads its Bioseq with that id as the target, and stops where no line holds it)
     /// Why LOSAT does not write the record of `holder`, loaded by its line `line`, for the subject
-    /// `key` of `loads` whose Seq-align id is `target`: a load of its blob for that id (any but
-    /// the scope's weak match, `ShownBy::Weak`, where a line holds an id of the id's handle) where
+    /// `key` of `loads` whose Seq-align id is `target`: a load of its blob for that id by the
+    /// loader (`HitLoads::loaded_for_id`; not the scope's weak match, `ShownBy::Weak`) where
     /// none of its lines holds it (`DeflineSet::bioseq_defline`: NCBI stops there; row
     /// `db.id.blastp.look.held.pdb.6.reject`, `pdb|1abc|A` for `pdb|1ABC|A`), and a line that
     /// holds it only as an id of
@@ -4540,25 +4540,10 @@ impl<'d> ShownHolders<'d> {
                 ..
             })
         );
-        // Only a line of the target's own handle lets the loader's `m_Ids` give the holder for it
-        // (a load of its blob for the id, step 3); a holder that the scope's index matches by
-        // another id (another type, review 4's `zq` family: `ref|` for `emb|`) is not loaded
-        // for the id, and NCBI writes it.
-        let handle = crate::seqid::mask_handle::mask_handle_key(target)
-            .ok()
-            .flatten();
-        let by_handle = handle.is_some()
-            && set
-                .deflines
-                .iter()
-                .flat_map(|defline| &defline.ids)
-                .any(|id| {
-                    crate::seqid::mask_handle::mask_handle_key(id)
-                        .ok()
-                        .flatten()
-                        .is_some_and(|key| Some(key) == handle)
-                });
-        if !weak && by_handle && set.bioseq_defline(target).is_none() {
+        // Only a holder whose blob the loader loaded by the id is read with it as the target; one
+        // that the scope's places held before (review 4's `zq` family: a `ref|` line for an
+        // `emb|` id; review 3's `plZ`: `pdb|1ABC|A` for `pdb|1abc|A`) is not, and NCBI writes it.
+        if !weak && loads.loaded_for_id(key) && set.bioseq_defline(target).is_none() {
             return Ok(Some(
                 "where its definition lines do not hold the Seq-align id (NCBI BLAST+ 2.17.0 stops where it loads that sequence for the id: oid headers do not contain target gi/seq_id)",
             ));

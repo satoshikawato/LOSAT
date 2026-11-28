@@ -15,6 +15,8 @@ Usage:
 Not counted: families with a registry of their own in the tree (DW-n and TD-n in
 docs/losat_web_gui_plan.md, REQ-nn in docs/web/requirements_trace.tsv, PD-* in docs/product_decisions/,
 LIB-n in docs/losat_library_surface_plan.md).
+A sub-line of a line ("line PS-SW", "line `LIB-O`") is its own ID where LINE_IDS.md has its row, and its
+parent line's otherwise.
 """
 from __future__ import annotations
 
@@ -130,6 +132,18 @@ def registered() -> set[str]:
     return set(re.findall(r"^\| `([^`]+)` \|", REGISTRY.read_text(encoding="utf-8"), re.M))
 
 
+def fold_sub_lines(found: dict[str, list[str]], rows: set[str]) -> dict[str, list[str]]:
+    """A sub-line ("line PS-SW") without a row of its own is cited as its parent line ("PS"), as
+    before sub-lines were read: the parent's row covers it (`LIB-O`, `LIB-S`)."""
+    out: dict[str, list[str]] = {}
+    for cid, where in found.items():
+        parent = cid.split("-")[0]
+        if cid not in rows and re.fullmatch(r"[A-Z]+-[A-Z][A-Z0-9]*", cid) and parent in LINES:
+            cid = parent
+        out.setdefault(cid, []).extend(where)
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="mode", required=True)
@@ -137,13 +151,14 @@ def main() -> int:
     sub.add_parser("check").add_argument("--strict", action="store_true")
     args = parser.parse_args()
     if args.mode == "list":
-        found = cited(files(args.all))
+        found = fold_sub_lines(cited(files(args.all)), registered())
         for cid in sorted(found):
             print(f"{cid}\t{len(found[cid])}\t{found[cid][0]}")
         print(f"{len(found)} IDs", file=sys.stderr)
         return 0
-    found = cited(files(False))
-    missing = sorted(set(found) - registered())
+    rows = registered()
+    found = fold_sub_lines(cited(files(False)), rows)
+    missing = sorted(set(found) - rows)
     for cid in missing:
         path, line = found[cid][0].rsplit(":", 1)
         print(f"::warning file={path},line={line}::{cid} has no row in docs/decisions/LINE_IDS.md")

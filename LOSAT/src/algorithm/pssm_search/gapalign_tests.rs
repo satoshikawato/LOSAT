@@ -211,7 +211,7 @@ fn score_only_reference<R: PssmRows>(
         return (0, 0, 0);
     }
     let mut dp = vec![
-        GapDp {
+        BlastGapDp {
             best: MININT,
             best_gap: MININT,
         };

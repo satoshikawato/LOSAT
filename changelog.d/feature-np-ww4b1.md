@@ -13,7 +13,6 @@
   line writes: `/dev/stdout` and `/dev/stderr` among the run's output, `/dev/null` nowhere, a file
   outside the run's folder (`/tmp/mk.log`) as a file of the run, and a name that does not open (a
   missing folder, a folder) leaves the messages on the standard error, in the check of the words too.
-  LOSAT Web's form does not offer makeblastdb yet.
 - `makeblastdb` on WASI (the Web engine): two `-gi_mask_name` values that name one GI-mask file
   (`m` and `./m`, or a folder through a symbolic link) are refused as on the command line, instead of
   writing both masks into one file; names are resolved through symbolic links as `realpath(3)` does

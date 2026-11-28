@@ -6219,16 +6219,17 @@ fn psiblast_check_subject_letters(subjects: &[FastaRecord]) -> Result<()> {
 }
 
 /// psiblast `-in_pssm`: what stops the run at its one query batch before the PSSM's search, after
-/// the outfmt 0 prolog, with NCBI's error (`PsiSearch::stop_before_search`, the rule tblastn's
-/// `-in_pssm` shares): with `-export_search_strategy` and `-subject` (no database, `database`) the
-/// search strategy's "Remote PSI-BL2SEQ is not supported" (the options error, exit status 1; without
-/// the strategy NCBI runs the search), else a PSSM that NCBI's `CPsiBlastValidate::Pssm` refuses
-/// (the engine error; the PSSM is checked before the query's Karlin-Altschul parameters,
-/// `psiblast_stop_at_invalid_query`), else the PSSM engine's error for the scores of a PSSM of
-/// frequency ratios only. The first two write no request (`QueryBatches::stop_batch` cleared); the
-/// last stops after the request (`stop_batch`: the PSSM query's batch), as NCBI's
-/// `SaveSearchStrategy` comes before `CPsiBlast` (psiblast_app.cpp:340; the local rounds make
-/// `CPsiBlast` later, psiblast_app.cpp:239).
+/// the outfmt 0 prolog, with NCBI's error or LOSAT's refusal (`PsiSearch::stop_before_search`, the
+/// rule tblastn's `-in_pssm` shares): with `-export_search_strategy` and `-subject` (no database,
+/// `database`) the search strategy's "Remote PSI-BL2SEQ is not supported" (the options error, exit
+/// status 1; without the strategy NCBI runs the search), else a PSSM that NCBI's
+/// `CPsiBlastValidate::Pssm` refuses (the engine error; the PSSM is checked before the query's
+/// Karlin-Altschul parameters, `psiblast_stop_at_invalid_query`), else LOSAT's refusal of a request
+/// whose write NCBI stops in with its exception (`PssmQueryStop::RequestRefused`, exit status 1),
+/// else the PSSM engine's error for the scores of a PSSM of frequency ratios only. The first three
+/// write no request (`QueryBatches::stop_batch` cleared); the last stops after the request
+/// (`stop_batch`: the PSSM query's batch), as NCBI's `SaveSearchStrategy` comes before `CPsiBlast`
+/// (psiblast_app.cpp:340; the local rounds make `CPsiBlast` later, psiblast_app.cpp:239).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_impl.cpp:58-67 (cited at
 /// `PsiSearch::stop_before_search`)

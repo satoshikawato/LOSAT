@@ -309,7 +309,7 @@ impl BatchCount {
 
 /// The ids of the query records of one scope (`QueryScopes`): the keys of each id
 /// (`seqid::defline_set::scope_keys`, and the own kind of `id_scope::version_keys` and
-/// `id_scope::name_keys`) and their forms (`forms`).
+/// `id_scope::name_keys`; for generated ids also `spelling_key`) and their forms (`forms`).
 #[derive(Clone, Debug, Default)]
 pub(crate) struct QueryScope {
     keys: std::collections::HashSet<u64>,
@@ -322,10 +322,16 @@ pub(crate) struct QueryScope {
     /// The forms of the scope's ids (`id_scope::match_form`), by which an earlier id may be one of
     /// a record's in another form (`add_version_form`).
     forms: u8,
-    /// The generated local ids of the scope's queries as their records spell them
-    /// (`of_generated_ids`): the scope finds such an id in any case, and NCBI's reports show the
-    /// found query's own spelling (`spells`).
-    spellings: std::collections::HashSet<Box<[u8]>>,
+}
+
+/// No NCBI counterpart: the key of a generated local id as a query record spells it, which
+/// `QueryScope::of_generated_ids` keeps among the scope's keys beside those by which the scope
+/// finds the id in any case (`spells`; tagged apart from `seqid::defline_set::match_keys`' keys).
+fn spelling_key(text: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::hash::DefaultHasher::new();
+    [b"spelling".as_slice(), text].hash(&mut hasher);
+    hasher.finish()
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
@@ -465,7 +471,7 @@ impl QueryScope {
     /// The scope of query records read without `-parse_deflines`, by their generated local ids
     /// `local_ids` (`Query_N`, without `lcl|`; `believed::generated_ids`): the keys that `add_ids_of`
     /// keeps of such an id (`scope_keys`: a local string id in any case, as NCBI's scope finds
-    /// one).
+    /// one), and the key of its spelling (`spelling_key`, which `spells` asks).
     pub(crate) fn of_generated_ids<'r>(local_ids: impl IntoIterator<Item = &'r str>) -> Self {
         let mut scope = Self::default();
         let mut keys = Vec::new();
@@ -475,7 +481,7 @@ impl QueryScope {
                 crate::seqid::defline_set::scope_keys(&id, &mut keys);
                 scope.keys.extend(keys.iter().copied());
             }
-            scope.spellings.insert(local_id.as_bytes().into());
+            scope.keys.insert(spelling_key(local_id.as_bytes()));
         }
         scope
     }
@@ -485,11 +491,11 @@ impl QueryScope {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:828-840, 522-530 (the
     // subject's ids are those of the Bioseq that the scope finds by the Seq-align id)
     /// Whether a generated local id of the scope (`of_generated_ids`) is the local string id
-    /// `text` byte for byte: the reports of a sequence that the scope finds by it show the found
+    /// `text` byte for byte (by its `spelling_key`): the reports of a sequence that the scope finds by it show the found
     /// query's id, which is then the sequence's own (review 2 of line RG item X7-1, B1: a
     /// sequence `lcl|query_1` shows as `Query_1`).
     pub(crate) fn spells(&self, text: &[u8]) -> bool {
-        self.spellings.contains(text)
+        self.keys.contains(&spelling_key(text))
     }
 
     /// Whether a query of the scope has an id with one of the keys `keys`.
@@ -590,7 +596,6 @@ impl QueryScope {
     pub(crate) fn extend(&mut self, other: &QueryScope) {
         self.keys.extend(other.keys.iter().copied());
         self.forms |= other.forms;
-        self.spellings.extend(other.spellings.iter().cloned());
     }
 }
 
